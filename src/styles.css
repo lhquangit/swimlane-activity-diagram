@@ -1,0 +1,215 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  color: #111827;
+  background: #f9fafb;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 220px 1fr;
+  grid-template-areas:
+    'header header'
+    'sidebar canvas';
+  height: 100vh;
+}
+
+.app-header {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #1f2937;
+  color: #f9fafb;
+  border-bottom: 1px solid #111827;
+}
+
+.app-header h1 {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.toolbar-btn {
+  background: #374151;
+  color: #f9fafb;
+  border: 1px solid #4b5563;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.toolbar-btn:hover {
+  background: #4b5563;
+}
+
+.toolbar-btn.primary {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.toolbar-btn.primary:hover {
+  background: #1d4ed8;
+}
+
+.toolbar-status {
+  font-size: 12px;
+  color: #9ca3af;
+  padding-left: 8px;
+}
+
+.app-sidebar {
+  grid-area: sidebar;
+  background: #ffffff;
+  border-right: 1px solid #e5e7eb;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.sidebar-section h3 {
+  margin: 16px 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+}
+
+.sidebar-section h3:first-child {
+  margin-top: 0;
+}
+
+.dnd-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  cursor: grab;
+  user-select: none;
+  font-size: 13px;
+}
+
+.dnd-item:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.dnd-item:active {
+  cursor: grabbing;
+}
+
+.dnd-item .swatch {
+  width: 28px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.dnd-item .swatch svg {
+  width: 100%;
+  height: 100%;
+}
+
+.app-canvas {
+  grid-area: canvas;
+  position: relative;
+  overflow: hidden;
+  background: #f9fafb;
+}
+
+.canvas-host {
+  position: absolute;
+  inset: 0;
+}
+
+/* Lane background overlay (purely visual, behind LogicFlow svg) */
+.lane-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.lane-bg .lane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-right: 1px solid #d1d5db;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.lane-bg .lane:first-child {
+  border-left: 1px solid #d1d5db;
+}
+
+.lane-bg .lane-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #f3f4f6;
+  border-bottom: 1px solid #d1d5db;
+  padding: 8px 12px;
+  font-weight: 600;
+  font-size: 13px;
+  color: #111827;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* LogicFlow canvas sits above lane backgrounds */
+.lf-container {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: transparent !important;
+}
+
+/* override LogicFlow default background to make our lanes visible */
+.lf-container .lf-background {
+  background: transparent !important;
+}
+
+/* Status / log */
+.app-log {
+  position: absolute;
+  bottom: 8px;
+  left: 12px;
+  right: 12px;
+  max-height: 80px;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #6b7280;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 4px 8px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.app-log.show {
+  pointer-events: auto;
+}
