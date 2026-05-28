@@ -18,6 +18,7 @@ dist-ssr
 build
 out
 .vite
+tsconfig.tsbuildinfo
 
 # Misc
 *.local

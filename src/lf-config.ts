@@ -1,21 +1,21 @@
 import LogicFlow, { GraphConfigData } from '@logicflow/core';
-import { LANES, LANE_Y, LANE_HEIGHT } from './nodes';
+import { LANES, LaneConfig, LANE_Y, LANE_HEIGHT } from './nodes';
 
-/** Build the initial diagram data — 4 lanes + a tiny sample flow. */
+/** Build node data entries for the given lanes. */
+export function buildLaneNodes(lanes: LaneConfig[]) {
+  return lanes.map((lane) => ({
+    id: lane.id,
+    type: 'lane',
+    x: lane.x,
+    y: LANE_Y,
+    properties: { width: lane.width, height: LANE_HEIGHT },
+    text: { value: lane.title, x: lane.x, y: LANE_Y - LANE_HEIGHT / 2 + 18 },
+  }));
+}
+
+/** Build the initial diagram data — default lanes + a tiny sample flow. */
 export function buildInitialData(): GraphConfigData {
-  const nodes: any[] = [];
-
-  // 1) Lane backgrounds
-  LANES.forEach((lane) => {
-    nodes.push({
-      id: lane.id,
-      type: 'lane',
-      x: lane.x,
-      y: LANE_Y,
-      properties: { width: lane.width, height: LANE_HEIGHT },
-      text: { value: lane.title, x: lane.x, y: LANE_Y - LANE_HEIGHT / 2 + 18 },
-    });
-  });
+  const nodes: any[] = [...buildLaneNodes(LANES)];
 
   // 2) A tiny sample so the canvas isn't empty (user can delete and restart)
   nodes.push(
@@ -193,11 +193,12 @@ export function buildInitialData(): GraphConfigData {
   return { nodes, edges };
 }
 
-/** Snap a dropped node's x to the nearest lane center. */
-export function snapToLane(x: number): number {
-  let best = LANES[0];
+/** Snap an x coordinate to the nearest lane center. */
+export function snapToLane(x: number, lanes: LaneConfig[]): number {
+  if (lanes.length === 0) return x;
+  let best = lanes[0];
   let bestDist = Math.abs(x - best.x);
-  for (const lane of LANES) {
+  for (const lane of lanes) {
     const d = Math.abs(x - lane.x);
     if (d < bestDist) {
       best = lane;

@@ -270,16 +270,34 @@ export function registerNodes(lf: LogicFlow) {
 export interface LaneConfig {
   id: string;
   title: string;
-  x: number; // center x
+  x: number; // center x — computed from cumulative widths via withPositions()
   width: number;
 }
 
-export const LANES: LaneConfig[] = [
-  { id: 'lane-1', title: 'Nguồn phát hiện đầu tiên', x: 200, width: 320 },
-  { id: 'lane-2', title: 'Nhân sự vận hành liên lạc (VOC)', x: 560, width: 360 },
-  { id: 'lane-3', title: 'Trưởng điều phối khán giả (VOC)', x: 920, width: 360 },
-  { id: 'lane-4', title: 'Nhân viên hiện trường', x: 1300, width: 400 },
+/** Initial seed for lane state. Edit this to change the default lanes. */
+export const DEFAULT_LANES: Omit<LaneConfig, 'x'>[] = [
+  { id: 'lane-1', title: 'Nguồn phát hiện đầu tiên', width: 320 },
+  { id: 'lane-2', title: 'Nhân sự vận hành liên lạc (VOC)', width: 360 },
+  { id: 'lane-3', title: 'Trưởng điều phối khán giả (VOC)', width: 360 },
+  { id: 'lane-4', title: 'Nhân viên hiện trường', width: 400 },
 ];
 
+export const LANE_LEFT_PADDING = 40;
 export const LANE_Y = 580;
 export const LANE_HEIGHT = 1100;
+
+/** Compute center-x for each lane from cumulative widths (left to right). */
+export function withPositions(
+  lanes: Omit<LaneConfig, 'x'>[],
+  leftPadding = LANE_LEFT_PADDING,
+): LaneConfig[] {
+  let cursor = leftPadding;
+  return lanes.map((lane) => {
+    const x = cursor + lane.width / 2;
+    cursor += lane.width;
+    return { ...lane, x };
+  });
+}
+
+/** Backwards-compat export so legacy imports don't break. */
+export const LANES: LaneConfig[] = withPositions(DEFAULT_LANES);

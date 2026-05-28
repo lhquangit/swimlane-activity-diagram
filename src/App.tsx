@@ -4,8 +4,13 @@ import '@logicflow/core/dist/style/index.css';
 import { Snapshot, SelectionSelect } from '@logicflow/extension';
 import '@logicflow/extension/lib/style/index.css';
 
-import { registerNodes, LANES } from './nodes';
-import { buildInitialData, getLogicFlowOptions, snapToLane } from './lf-config';
+import { registerNodes, DEFAULT_LANES, LaneConfig, withPositions } from './nodes';
+import {
+  buildInitialData,
+  buildLaneNodes,
+  getLogicFlowOptions,
+  snapToLane,
+} from './lf-config';
 import DndPanel, { DndPaletteItem } from './DndPanel';
 
 LogicFlow.use(Snapshot);
@@ -92,10 +97,30 @@ function downloadBlob(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
+const INITIAL_LANES = withPositions(DEFAULT_LANES);
+
 export default function App() {
   const containerRef = useRef<HTMLDivElement>(null);
   const lfRef = useRef<LogicFlow | null>(null);
+  const [lanes, setLanes] = useState<LaneConfig[]>(INITIAL_LANES);
+  const lanesRef = useRef<LaneConfig[]>(INITIAL_LANES);
   const [status, setStatus] = useState('Đang khởi tạo…');
+
+  // Keep ref in sync so event handlers (registered once) always see current value
+  useEffect(() => {
+    lanesRef.current = lanes;
+  }, [lanes]);
+
+  /** Replace all lane-type nodes in LogicFlow with the given lane configs. */
+  const syncLanesToLF = (nextLanes: LaneConfig[]) => {
+    const lf = lfRef.current;
+    if (!lf) return;
+    const data = lf.getGraphData() as { nodes?: Array<{ id: string; type: string }> };
+    (data.nodes ?? [])
+      .filter((n) => n.type === 'lane')
+      .forEach((n) => lf.deleteNode(n.id));
+    buildLaneNodes(nextLanes).forEach((node) => lf.addNode(node));
+  };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -110,21 +135,20 @@ export default function App() {
     lf.on('node:dnd-add', ({ data }) => {
       if (!data || !data.type) return;
       if (data.type === 'lane') return;
-      // sync-bar usually stretches across multiple lanes — keep its x
       if (data.type === 'sync-bar') return;
-      const snappedX = snapToLane(data.x);
+      const snappedX = snapToLane(data.x, lanesRef.current);
       lf.graphModel.getNodeModelById(data.id)?.moveTo(snappedX, data.y);
     });
 
-    // Also snap when moving an existing node (light touch — only on drag end)
+    // Snap when moving an existing node (drag-end)
     lf.on('node:drop', ({ data }) => {
       if (!data || !data.type) return;
       if (data.type === 'lane' || data.type === 'sync-bar') return;
-      const snappedX = snapToLane(data.x);
+      const snappedX = snapToLane(data.x, lanesRef.current);
       lf.graphModel.getNodeModelById(data.id)?.moveTo(snappedX, data.y);
     });
 
-    // Prevent lane deletion via DELETE key
+    // Prevent lane deletion via DELETE key — re-add immediately
     lf.on('node:delete', ({ data }) => {
       if (data?.type === 'lane') {
         lf.addNode({
@@ -138,13 +162,54 @@ export default function App() {
       }
     });
 
+    // Double-click on lane → rename
+    lf.on('node:dbl-click', ({ data }) => {
+      if (data?.type !== 'lane') return;
+      const current = lanesRef.current.find((l) => l.id === data.id);
+      if (!current) return;
+      const next = window.prompt('Đổi tên lane:', current.title);
+      if (next === null) return;
+      const trimmed = next.trim();
+      if (!trimmed || trimmed === current.title) return;
+      const updated = lanesRef.current.map((l) =>
+        l.id === data.id ? { ...l, title: trimmed } : l,
+      );
+      setLanes(updated);
+      lanesRef.current = updated;
+      syncLanesToLF(updated);
+      setStatus(`Đã đổi tên lane → "${trimmed}"`);
+    });
+
+    // Right-click on lane → confirm delete
+    lf.on('node:contextmenu', ({ data, e }) => {
+      if (data?.type !== 'lane') return;
+      e?.preventDefault?.();
+      const current = lanesRef.current.find((l) => l.id === data.id);
+      if (!current) return;
+      if (lanesRef.current.length <= 1) {
+        setStatus('Không thể xoá: cần ít nhất 1 lane');
+        return;
+      }
+      const ok = window.confirm(
+        `Xoá lane "${current.title}"?\n\nNode bên trong sẽ không bị xoá; bạn có thể kéo chúng sang lane khác sau.`,
+      );
+      if (!ok) return;
+      const updated = withPositions(
+        lanesRef.current.filter((l) => l.id !== data.id),
+      );
+      setLanes(updated);
+      lanesRef.current = updated;
+      syncLanesToLF(updated);
+      setStatus(`Đã xoá lane "${current.title}"`);
+    });
+
     lfRef.current = lf;
-    setStatus(`Sẵn sàng — ${LANES.length} lane đã được tạo`);
+    setStatus(`Sẵn sàng — ${INITIAL_LANES.length} lane đã được tạo`);
 
     return () => {
-      // LogicFlow does not expose explicit dispose; we rely on container teardown
       lfRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleStartDrag = (item: DndPaletteItem) => {
@@ -155,6 +220,23 @@ export default function App() {
       properties: item.properties ?? {},
       text: item.text ?? '',
     });
+  };
+
+  const handleAddLane = () => {
+    const name = window.prompt('Tên lane mới (actor):', 'Actor mới');
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const newLane = {
+      id: `lane-${Date.now()}`,
+      title: trimmed,
+      width: 320,
+    };
+    const updated = withPositions([...lanesRef.current, newLane]);
+    setLanes(updated);
+    lanesRef.current = updated;
+    syncLanesToLF(updated);
+    setStatus(`Đã thêm lane "${trimmed}"`);
   };
 
   const handleExportPNG = async () => {
@@ -171,16 +253,13 @@ export default function App() {
     const lf = lfRef.current;
     if (!lf) return;
     setStatus('Đang export SVG…');
-    // Grab the lf-canvas SVG element and serialize it.
     const svgEl = (containerRef.current?.querySelector('svg.lf-canvas-overlay') ||
       containerRef.current?.querySelector('svg')) as SVGSVGElement | null;
     if (!svgEl) {
       setStatus('Không tìm thấy SVG canvas.');
       return;
     }
-    // Clone so we can normalize size & strip transforms if needed.
     const clone = svgEl.cloneNode(true) as SVGSVGElement;
-    // Ensure xmlns
     clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
     const serializer = new XMLSerializer();
     const xml = serializer.serializeToString(clone);
@@ -206,8 +285,31 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const data = JSON.parse(String(reader.result));
+        const data = JSON.parse(String(reader.result)) as {
+          nodes?: Array<{
+            id: string;
+            type: string;
+            x: number;
+            y: number;
+            properties?: { width?: number; height?: number };
+            text?: { value: string };
+          }>;
+        };
         lfRef.current?.render(data);
+        // Rebuild lane state from imported lanes (if any)
+        const importedLanes: LaneConfig[] = (data.nodes ?? [])
+          .filter((n) => n.type === 'lane')
+          .map((n) => ({
+            id: n.id,
+            title: n.text?.value ?? n.id,
+            x: n.x,
+            width: n.properties?.width ?? 320,
+          }))
+          .sort((a, b) => a.x - b.x);
+        if (importedLanes.length > 0) {
+          setLanes(importedLanes);
+          lanesRef.current = importedLanes;
+        }
         setStatus(`Đã load: ${file.name}`);
       } catch (e) {
         setStatus(`Lỗi parse JSON: ${(e as Error).message}`);
@@ -218,6 +320,9 @@ export default function App() {
   };
 
   const handleResetSample = () => {
+    const seeded = withPositions(DEFAULT_LANES);
+    setLanes(seeded);
+    lanesRef.current = seeded;
     lfRef.current?.render(buildInitialData());
     lfRef.current?.fitView(20, 20);
     setStatus('Đã reset về diagram mẫu');
@@ -226,16 +331,8 @@ export default function App() {
   const handleClear = () => {
     if (!lfRef.current) return;
     lfRef.current.clearData();
-    // Re-render lanes only
     lfRef.current.render({
-      nodes: LANES.map((lane) => ({
-        id: lane.id,
-        type: 'lane',
-        x: lane.x,
-        y: 580,
-        properties: { width: lane.width, height: 1100 },
-        text: { value: lane.title, x: lane.x, y: 60 },
-      })),
+      nodes: buildLaneNodes(lanesRef.current),
       edges: [],
     });
     setStatus('Đã xoá nội dung (giữ lại lane)');
@@ -267,6 +364,14 @@ export default function App() {
           Fit
         </button>
         <span style={{ width: 8 }} />
+        <button
+          className="toolbar-btn primary"
+          onClick={handleAddLane}
+          title="Thêm 1 lane (actor) mới vào bên phải"
+        >
+          + Lane
+        </button>
+        <span style={{ width: 8 }} />
         <button className="toolbar-btn" onClick={handleResetSample}>
           Reset mẫu
         </button>
@@ -291,7 +396,9 @@ export default function App() {
         <button className="toolbar-btn primary" onClick={handleExportPNG}>
           Export PNG
         </button>
-        <span className="toolbar-status">{status}</span>
+        <span className="toolbar-status">
+          {lanes.length} lane · {status}
+        </span>
       </header>
 
       <DndPanel items={PALETTE} onStartDrag={handleStartDrag} />
