@@ -18,10 +18,14 @@ class LaneModel extends RectNodeModel {
     super.initNodeData(data);
     this.width = data.properties?.width ?? 320;
     this.height = data.properties?.height ?? 1100;
-    this.zIndex = -10;
+    // Lanes sit underneath every other node. We pick a very low zIndex so
+    // even nodes that LogicFlow brings to the front (selection / autoToFront)
+    // never end up beneath a lane in the SVG stacking order.
+    this.zIndex = -1000;
     // Disable all interactions
     this.draggable = false;
     this.selectable = false;
+    this.isShowAnchor = false;
     this.text.editable = false;
     this.text.draggable = false;
   }

@@ -8,6 +8,7 @@ export function buildLaneNodes(lanes: LaneConfig[]) {
     type: 'lane',
     x: lane.x,
     y: LANE_Y,
+    zIndex: -1000,
     properties: { width: lane.width, height: LANE_HEIGHT },
     text: { value: lane.title, x: lane.x, y: LANE_Y - LANE_HEIGHT / 2 + 18 },
   }));

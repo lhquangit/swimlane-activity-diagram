@@ -131,13 +131,22 @@ export default function App() {
     lf.render(buildInitialData());
     lf.fitView(20, 20);
 
-    // Snap newly-dropped (via dnd) nodes to nearest lane center
+    // Snap newly-dropped (via dnd) nodes to nearest lane center.
+    // We also force the new node to the top of the stack so its DOM element
+    // is appended AFTER the lane elements in the SVG canvas. Lanes render a
+    // full-size white-fill rect, so any node that ends up below them in the
+    // DOM tree gets covered and looks invisible until the next render pass.
     lf.on('node:dnd-add', ({ data }) => {
       if (!data || !data.type) return;
       if (data.type === 'lane') return;
-      if (data.type === 'sync-bar') return;
-      const snappedX = snapToLane(data.x, lanesRef.current);
-      lf.graphModel.getNodeModelById(data.id)?.moveTo(snappedX, data.y);
+      const model = lf.graphModel.getNodeModelById(data.id);
+      if (!model) return;
+      if (data.type !== 'sync-bar') {
+        const snappedX = snapToLane(data.x, lanesRef.current);
+        model.moveTo(snappedX, data.y);
+      }
+      // Bring new node above any lane in the stacking order.
+      lf.graphModel.setElementZIndex(data.id, 'top');
     });
 
     // Snap when moving an existing node (drag-end)
