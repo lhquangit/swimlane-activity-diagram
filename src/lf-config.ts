@@ -1,15 +1,17 @@
 import LogicFlow, { GraphConfigData } from '@logicflow/core';
-import { LANES, LaneConfig, LANE_Y, LANE_HEIGHT } from './nodes';
+import { LANES, LaneConfig, LANE_HEIGHT, LANE_TOP } from './nodes';
 
 /** Build node data entries for the given lanes. */
-export function buildLaneNodes(lanes: LaneConfig[]) {
+export function buildLaneNodes(lanes: LaneConfig[], laneHeight = LANE_HEIGHT) {
+  const y = LANE_TOP + laneHeight / 2;
   return lanes.map((lane) => ({
     id: lane.id,
     type: 'lane',
     x: lane.x,
-    y: LANE_Y,
-    properties: { width: lane.width, height: LANE_HEIGHT },
-    text: { value: lane.title, x: lane.x, y: LANE_Y - LANE_HEIGHT / 2 + 18 },
+    y,
+    zIndex: -1000,
+    properties: { width: lane.width, height: laneHeight },
+    text: { value: lane.title, x: lane.x, y: LANE_TOP + 18 },
   }));
 }
 

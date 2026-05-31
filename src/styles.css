@@ -141,6 +141,86 @@ body,
   inset: 0;
 }
 
+.lane-toolbar {
+  position: absolute;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transform: translate(-50%, 0);
+  padding: 6px 8px;
+  background: rgba(17, 24, 39, 0.92);
+  color: #f9fafb;
+  border: 1px solid rgba(17, 24, 39, 0.92);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+}
+
+.lane-toolbar__label {
+  max-width: 180px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lane-toolbar__meta {
+  font-size: 11px;
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+
+.lane-toolbar__btn {
+  border: 1px solid #4b5563;
+  background: #374151;
+  color: #f9fafb;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.lane-toolbar__btn:hover:not(:disabled) {
+  background: #4b5563;
+}
+
+.lane-toolbar__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lane-toolbar__btn.danger {
+  border-color: #b91c1c;
+  background: #991b1b;
+}
+
+.lane-resize-handle {
+  position: absolute;
+  z-index: 30;
+  border: 1px solid #1d4ed8;
+  background: rgba(37, 99, 235, 0.18);
+  border-radius: 4px;
+  cursor: nwse-resize;
+}
+
+.lane-resize-handle:hover {
+  background: rgba(37, 99, 235, 0.28);
+}
+
+.shape-resize-handle {
+  position: absolute;
+  z-index: 31;
+  border: 1px solid #9c2a47;
+  background: rgba(156, 42, 71, 0.18);
+  border-radius: 4px;
+  cursor: nwse-resize;
+}
+
+.shape-resize-handle:hover {
+  background: rgba(156, 42, 71, 0.28);
+}
+
 /* Lane background overlay (purely visual, behind LogicFlow svg) */
 .lane-bg {
   position: absolute;
