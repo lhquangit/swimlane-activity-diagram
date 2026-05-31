@@ -71,12 +71,13 @@ Repo hiện theo nguyên tắc `VN-first UI` ở [docs/roadmap/README.md](../roa
 
 Decision đã chốt:
 
-- frontend **không gọi trực tiếp** OpenAI/provider API
+- frontend **không gọi trực tiếp** OpenRouter/provider API
 - mọi AI generation đi qua **FastAPI backend**
 
 Lý do:
 
 - tránh lộ API key,
+- gom quản lý key/quota/usage về một lớp gateway tập trung,
 - dễ áp policy privacy/logging/rate limit,
 - phù hợp cho validate, retry, eval, caching, và provider abstraction về sau.
 
@@ -194,13 +195,19 @@ FastAPI chịu trách nhiệm:
 
 ### 7.3. Provider strategy
 
-Phase 1 chọn provider chính là OpenAI, nhưng backend phải có lớp abstraction:
+Phase 1 chọn **OpenRouter** làm gateway/provider layer chính:
+
+- backend chỉ giữ **OpenRouter API key**
+- model được route qua OpenRouter bằng model slug dạng `openai/gpt-5.5`
+- việc quản lý usage/quota/key rotation nên tập trung ở OpenRouter workspace / organization
+
+Tuy vậy backend vẫn phải có lớp abstraction:
 
 - `LLMProvider`
 - `GenerationService`
 - `ValidationService`
 
-để sau này có thể đổi sang provider khác hoặc self-hosted model mà không sửa contract frontend.
+để sau này có thể đổi gateway/provider hoặc self-hosted model mà không sửa contract frontend.
 
 ## 8. Pipeline xử lý chuẩn
 
@@ -250,7 +257,7 @@ Model chỉ được sinh theo schema cố định.
 
 ### Step 6. Render BRD draft
 
-Render từ structured spec sang markdown theo template đã chọn.
+Render từ structured spec sang markdown theo template đã chọn bằng code/template deterministic.
 
 ### Step 7. Post-check
 
@@ -399,6 +406,13 @@ Phase 1 render markdown theo template ngắn gọn, dễ review:
 9. Exceptions / warnings
 10. Assumptions / open questions
 
+Quy tắc map nội dung cho Phase 1:
+
+- `loops[]` -> render trong `Exceptions / warnings`
+- `annotations[]` -> render trong `Assumptions / open questions`
+
+Phase 1 không tạo section riêng tên `Loops` hoặc `Annotations`.
+
 ### 11.2. Full template cho Phase 2
 
 Phase 2 bổ sung template đầy đủ hơn cho enterprise:
@@ -432,29 +446,30 @@ Template ngắn và template đầy đủ chỉ là **hai cách render khác nha
 
 Phase 1 khuyến nghị:
 
-- **Primary synthesis**: `gpt-5.5`
-- **Operational / lower-cost tasks**: `gpt-5.4-mini`
+- **Primary synthesis**: `openai/gpt-5.5`
+- **Operational / lower-cost tasks**: `openai/gpt-5.4-mini`
 
 ### 12.2. Cách dùng
 
-- `gpt-5.5`:
+- `openai/gpt-5.5`:
   - generate canonical structured spec
-  - render BRD draft chất lượng cao
-- `gpt-5.4-mini`:
-  - rewrite section nhỏ
-  - regenerate partial section
-  - hỗ trợ task chi phí thấp hơn nếu cần batch lớn
+- `openai/gpt-5.4-mini`:
+  - hỗ trợ các task AI phụ trợ ở Phase 2 như regenerate section hoặc rewrite có kiểm soát
 
 ### 12.3. Integration policy
 
 - gọi model qua backend FastAPI
-- dùng structured output / JSON schema strict nếu provider hỗ trợ
+- backend gọi model qua OpenRouter thay vì giữ từng upstream provider key riêng
+- dùng structured output / JSON schema strict nếu model/provider route hỗ trợ
 - pin model snapshot ở implementation phase để tránh drift
 - không hard-code frontend vào tên model cụ thể
+- ở Phase 1, model chỉ sinh **canonical structured spec**
+- BRD markdown được render deterministically từ structured spec bằng code/template, không gọi model thêm lần 2
+- Phase 1 ưu tiên quản lý key/quota thủ công trong OpenRouter workspace; automation bằng Management API là option cho Phase 2 nếu cần provisioning/rotation theo môi trường
 
 ### 12.4. Không khuyến nghị
 
-- không generate prose trực tiếp từ raw diagram JSON trong một pass
+- tránh generate prose trực tiếp từ raw diagram JSON trong một pass
 - không dùng model nhỏ duy nhất cho toàn bộ pipeline nếu mục tiêu là BRD chất lượng cao
 
 ## 13. API contract đề xuất
@@ -621,6 +636,10 @@ Xây bộ golden set nhỏ:
 
 ## 21. References
 
+- [OpenRouter quickstart](https://openrouter.ai/docs/quickstart)
+- [OpenRouter authentication](https://openrouter.ai/docs/api/reference/authentication)
+- [OpenRouter structured outputs](https://openrouter.ai/docs/guides/features/structured-outputs)
+- [OpenRouter enterprise quickstart](https://openrouter.ai/docs/cookbook/get-started/enterprise-quickstart)
 - [OpenAI models overview](https://developers.openai.com/api/docs/models)
 - [GPT-5.5](https://developers.openai.com/api/docs/models/gpt-5.5/)
 - [GPT-5.4 mini](https://developers.openai.com/api/docs/models/gpt-5.4-mini)

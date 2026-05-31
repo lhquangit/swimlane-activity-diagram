@@ -175,3 +175,60 @@
   - Các bug user report hiện tại sẽ fail test nếu regress.
 - Dependencies: TASK-001 đến TASK-006
 - Verification: Chạy suite local và quan sát từng case pass ổn định.
+
+## AI BRD Docs Alignment
+
+### Now
+
+#### TASK-008 - Đồng bộ Phase 1 BRD template với UC-06 cho loops và annotations
+- Priority: P1
+- Status: Done (2026-05-31)
+- Module: ai-brd-docs
+- Problem: `UC-06` đang yêu cầu section `Loops` và `Annotations`, nhưng template Phase 1 trong feature doc chưa định nghĩa hai section này.
+- Why it matters: Nếu không chốt ngay, backend renderer và QA sẽ không có cùng kỳ vọng về output Phase 1.
+- Implementation steps:
+  1. Chọn một contract duy nhất cho Phase 1:
+     - thêm `Loops` và `Annotations` thành section riêng, hoặc
+     - map chúng vào `Exceptions / warnings` và `Assumptions / open questions`.
+  2. Cập nhật `docs/product/ai-brd-description-feature.md`.
+  3. Cập nhật `docs/use-cases/UC-06-sinh-brd-tu-diagram.md` cho khớp wording và expected output.
+- Acceptance criteria:
+  - Feature doc và UC-06 mô tả cùng một Phase 1 template.
+  - Không còn section nào được UC yêu cầu nhưng template không định nghĩa.
+- Dependencies: None
+- Verification: Review chéo Section 11 của feature doc với phần `Kết quả mong đợi` và các alternate flows trong UC-06.
+
+#### TASK-009 - Chốt contract Step 6: deterministic render hay LLM render
+- Priority: P1
+- Status: Done (2026-05-31)
+- Module: ai-brd-docs
+- Problem: Product spec, backend architecture, và UC-06 chưa thống nhất việc BRD markdown có được render deterministically từ structured spec hay gọi model thêm một lần nữa.
+- Why it matters: Quyết định này ảnh hưởng trực tiếp đến traceability, chi phí, post-check scope, và thiết kế service backend.
+- Implementation steps:
+  1. Chọn contract cho Phase 1.
+  2. Nếu chọn deterministic render, sửa product spec và backend architecture để Step 6 không còn được mô tả như model generation.
+  3. Nếu chọn LLM render, bổ sung guardrails, cost impact, và post-check scope tương ứng.
+  4. Sync lại UC-06 để mô tả đúng flow backend.
+- Acceptance criteria:
+  - Ba doc dùng cùng một mô tả cho Step 5 và Step 6.
+  - Không còn module/service nào ngụ ý một đường đi khác.
+- Dependencies: None
+- Verification: Review chéo pipeline ở feature doc, module map ở backend architecture, và Step 9 trong UC-06.
+
+#### TASK-010 - Siết chặt contract vận hành của backend architecture doc
+- Priority: P2
+- Status: Done (2026-05-31)
+- Module: ai-brd-docs
+- Problem: `architecture-brd-backend.md` đang mô tả deployment như đã chốt nhưng vẫn để hosting/domain mở, đồng thời thiếu env var `BRD_PROVIDER` dù local workflow dùng nó.
+- Why it matters: Điều này gây drift giữa tài liệu vận hành và bootstrap backend thực tế.
+- Implementation steps:
+  1. Hoặc chốt một lựa chọn deploy Phase 1, hoặc đổi wording để nói rõ đây là option memo với decision còn mở.
+  2. Thêm `BRD_PROVIDER` vào bảng env vars và mô tả precedence rules.
+  3. Nếu giữ nhiều deployment option, thêm tiêu chí chọn giữa Fly.io và VPS.
+  4. Cập nhật review v2 hoặc thêm addendum để chỉ rõ `UC-06` và `architecture-brd-backend.md` đã tồn tại.
+- Acceptance criteria:
+  - Backend architecture doc không còn tự mâu thuẫn giữa phần mở đầu và phần open questions.
+  - Env-var table bao phủ toàn bộ biến được local workflow sử dụng.
+  - Review v2 không còn khiến người đọc nghĩ hai doc này chưa được tạo.
+- Dependencies: None
+- Verification: Review chéo Section 1/7/12 của backend architecture doc và phần disposition cuối của review v2.
