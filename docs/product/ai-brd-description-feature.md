@@ -276,6 +276,8 @@ type DiagramSemanticRequest = {
     id: string;
     title: string;
     order: number;
+    width?: number;   // UI hint, backend có thể bỏ qua
+    height?: number;  // UI hint, backend có thể bỏ qua
   }>;
   nodes: Array<{
     id: string;
@@ -284,6 +286,12 @@ type DiagramSemanticRequest = {
     text?: string;
     x: number;
     y: number;
+    width?: number;   // có ý nghĩa cho sync-bar và shape đã manual resize
+    height?: number;  // có ý nghĩa cho shape đã manual resize
+    sync_bar_span?: {
+      from_lane_id: string;
+      to_lane_id: string;
+    };  // bắt buộc khi type === 'sync-bar' (sau TASK-002)
     metadata?: Record<string, unknown>;
   }>;
   edges: Array<{
@@ -294,6 +302,13 @@ type DiagramSemanticRequest = {
   }>;
 };
 ```
+
+**Quy ước transport:**
+
+- `x`, `y`, `width`, `height` của node thường: backend chỉ dùng để derive sticky note anchor và detect shape tràn lane; không quyết định semantic flow.
+- `sync_bar_span`: backend dùng làm nguồn chính cho `parallel_blocks[]` interpretation; nếu thiếu, backend treat sync-bar đó là ambiguous và đưa vào `warnings[]`.
+- `note.anchor` không có trong request — backend tự derive bằng heuristic (nearest node cùng lane trong ngưỡng khoảng cách) và ghi vào structured spec.
+- `lane.width` / `lane.height` chỉ là UI hint; semantic không dùng tới.
 
 ### 9.2. Quy tắc semantic quan trọng
 
@@ -424,7 +439,7 @@ Phase 2 bổ sung template đầy đủ hơn cho enterprise:
 
 Structured spec là canonical data model duy nhất.
 
-Template ngắn và template đầy đủ chỉ là **hai cách render khác nhau** từ cùng một nguồn dữ liệu. Cách này tốt hơn việc duy trì hai data model song song.
+Template ngắn và template đầy đủ chỉ là **hai cách render khác nhau** từ cùng một nguồn dữ liệu. Cách này tốt hơn duy trì hai data model song song.
 
 ## 12. Model strategy đề xuất
 
@@ -452,10 +467,10 @@ Phase 1 khuyến nghị:
 - pin model snapshot ở implementation phase để tránh drift
 - không hard-code frontend vào tên model cụ thể
 
-### 12.4. Không khuyến nghị
+### 12.4. Tránh
 
-- không generate prose trực tiếp từ raw diagram JSON trong một pass
-- không dùng model nhỏ duy nhất cho toàn bộ pipeline nếu mục tiêu là BRD chất lượng cao
+- generate prose trực tiếp từ raw diagram JSON trong một pass (bỏ qua canonical structured spec)
+- dùng model nhỏ duy nhất cho toàn bộ pipeline nếu mục tiêu là BRD chất lượng cao
 
 ## 13. API contract đề xuất
 
@@ -488,6 +503,46 @@ Output:
 Phase 2:
 
 - regenerate một section cụ thể từ structured spec hiện tại
+
+### 13.4. HTTP status & error response
+
+| Status | Khi nào | Body |
+|---|---|---|
+| `200 OK` | Generate thành công, có thể vẫn có warning không blocking | `DiagramBRDSpec` + `brd_markdown` + `warnings[]` |
+| `400 Bad Request` | Request schema sai (thiếu field bắt buộc, type sai) | `ErrorResponse` |
+| `422 Unprocessable Entity` | Validate semantic fail (no start, no end, sync-bar không hợp lệ) — blocking | `ErrorResponse` + `warnings[]` |
+| `429 Too Many Requests` | Vượt rate limit hoặc quota | `ErrorResponse` với `retry_after_seconds` |
+| `500 Internal Server Error` | Backend exception ngoài provider | `ErrorResponse` |
+| `502 Bad Gateway` | Provider model fail / timeout / invalid JSON sau khi đã retry nội bộ | `ErrorResponse` với `retryable: true` |
+
+Error response shape:
+
+```ts
+type ErrorResponse = {
+  code: string;            // 'validation_failed' | 'model_timeout' | 'quota_exceeded' | ...
+  message: string;         // human-readable, có thể hiển thị cho user
+  related_node_ids?: string[];
+  retryable?: boolean;
+  retry_after_seconds?: number;
+};
+```
+
+### 13.5. Streaming policy
+
+Phase 1 dùng **single response** với panel UX hiển thị step status tuần tự (`validating` -> `interpreting` -> `generating spec` -> `rendering BRD`) ở client side dựa trên timer/heartbeat, không cần SSE.
+
+Phase 2 có thể nâng lên SSE (`text/event-stream`) hoặc WebSocket nếu user feedback cho thấy single response quá nặng UX với diagram lớn:
+
+- `event: progress` — backend publish step transitions
+- `event: warning` — warning xuất hiện sớm trước khi BRD render xong
+- `event: result` — final payload
+- `event: error` — terminal error
+
+### 13.6. Idempotency
+
+- `POST /api/brd/generate` chấp nhận optional header `Idempotency-Key: <uuid>` để chống double-charge khi user retry trong browser.
+- Backend cache `(idempotency_key, diagram_hash) -> response` trong cửa sổ ngắn (vd 10 phút).
+- Nếu user gọi lại với cùng `Idempotency-Key` nhưng diagram đã đổi (`diagram_hash` khác) → trả `409 Conflict`.
 
 ## 14. Privacy, security, compliance
 
@@ -580,6 +635,8 @@ Xây bộ golden set nhỏ:
 
 ### Phase 1 Definition of Done
 
+**Functional:**
+
 - generate thành công cho diagram hợp lệ
 - output tiếng Việt
 - có structured spec + BRD markdown
@@ -587,6 +644,20 @@ Xây bộ golden set nhỏ:
 - có warning list
 - mọi step trong BRD trace được về node id
 - không dùng browser-side provider key
+
+**Quality bar:**
+
+- 100% actor trong BRD map được về `lane_id`
+- 100% main flow step có `node_id` reference (xem Section 17 Quality bar)
+- 0 step được generate hoàn toàn không trace được về graph
+- Decision không có label luôn xuất hiện trong `open_questions[]`, không bị tự bịa `Có/Không`
+
+**Performance / cost target** (đo trên diagram ≤ 30 node, align với `docs/roadmap/phase-1-mvp.md`):
+
+- `POST /api/brd/validate` p95 < 2s
+- `POST /api/brd/generate` p50 < 30s, p95 < 90s
+- Cost ước lượng per generation: < $0.30 với cấu hình mặc định `gpt-5.5` (sẽ hiệu chỉnh sau lần đo cost thực tế)
+- Validate-only call không tốn token provider (chạy hoàn toàn deterministic)
 
 ### Phase 2
 
@@ -603,23 +674,38 @@ Xây bộ golden set nhỏ:
 - eval feedback loop
 - provider abstraction mở rộng / self-hosted option nếu cần
 
-## 19. Dependencies với roadmap hiện tại
+## 19. Rủi ro & mitigation
 
-- Feature này **có thể bắt đầu ở Phase 1 mở rộng** dù repo hiện chưa có backend, vì backend mới sẽ được thêm bằng Python + FastAPI riêng cho feature này.
-- Tuy nhiên các năng lực sau sẽ hưởng lợi mạnh từ roadmap Phase 2:
-  - persistence
+| # | Rủi ro | Mức | Mitigation |
+|---|---|---|---|
+| R-1 | Model drift theo phiên bản provider khi alias `gpt-5.5` tự cập nhật | M | Pin model snapshot ID trong implementation (xem Section 12.3) + golden eval set định kỳ (Section 17) |
+| R-2 | Hallucinate khi diagram mơ hồ (decision chưa label, sync-bar thiếu span, note free-form) | H | Validate blocking (Step 3) + post-check rule-based (Step 7) + bắt buộc đưa ambiguity vào `open_questions[]` thay vì bịa |
+| R-3 | Cost / quota vượt budget khi user generate liên tục | M | 2-model strategy + per-user quota + idempotency (Section 13.6) + cap per generation (Section 18) |
+| R-4 | Privacy leak khi gửi SOP nội bộ lên provider | M | Backend không log prompt body mặc định (Section 14.3) + provider abstraction (Section 7.3) sẵn sàng swap sang self-hosted Phase 3 |
+| R-5 | Provider outage / invalid JSON output | M | Retry có kiểm soát (Section 15) + graceful degrade (báo `502` với `retryable: true`) + provider fallback có thể thêm Phase 2 |
+| R-6 | Schema drift giữa frontend graph data và backend semantic schema | M | Versioning request schema (`X-Schema-Version` header) + integration test với sample data từ `src/lf-config.ts` |
+| R-7 | Prompt injection qua sticky note hoặc node text độc hại | L-M | Tách rõ system/user content (Section 14.2) + sanitize special tokens + test case với malicious input trong eval set |
+
+## 20. Dependencies với roadmap hiện tại
+
+- Feature này tạo **sub-track AI BRD trong Phase 1**, chạy song song với MVP editor (không thay thế các hạng mục trong `docs/roadmap/phase-1-mvp.md`). Backend FastAPI mới được thêm riêng cho feature này, không phụ thuộc backend collaboration của Phase 2.
+- Tuy nhiên các năng lực sau sẽ hưởng lợi mạnh từ roadmap Phase 2 (`docs/roadmap/phase-2-collaboration.md`):
+  - persistence của BRD artifact
   - version history
   - artifact storage
   - section regeneration có trạng thái
+- Architecture chi tiết cho backend: xem `docs/scope/architecture-brd-backend.md`.
 
-## 20. Tài liệu liên quan
+## 21. Tài liệu liên quan
 
 - Tổng quan dự án: [../scope/overview.md](../scope/overview.md)
 - Tính năng hiện có: [../scope/features.md](../scope/features.md)
 - Roadmap: [../roadmap/README.md](../roadmap/README.md)
 - Feature backlog entry: [../scope/features.md](../scope/features.md#9-ai-assistance)
+- Use case end-to-end: [../use-cases/UC-06-sinh-brd-tu-diagram.md](../use-cases/UC-06-sinh-brd-tu-diagram.md)
+- Backend architecture: [../scope/architecture-brd-backend.md](../scope/architecture-brd-backend.md)
 
-## 21. References
+## 22. References
 
 - [OpenAI models overview](https://developers.openai.com/api/docs/models)
 - [GPT-5.5](https://developers.openai.com/api/docs/models/gpt-5.5/)
