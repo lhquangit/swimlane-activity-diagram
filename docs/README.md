@@ -18,6 +18,12 @@ docs/
 │   ├── UC-03-quan-ly-lane.md
 │   ├── UC-04-noi-edge-va-label.md
 │   └── UC-05-import-export.md
+├── review-task-list.md      ← Code review + task list để triển khai
+├── reviews/                 ← Archive các lần code review theo ngày/scope
+│   └── README.md            ← Quy ước lưu review snapshot
+├── activity-log/            ← Nhật ký nhẹ cho mọi request theo tháng
+│   ├── README.md            ← Quy tắc phân loại và routing log
+│   └── YYYY-MM.md           ← Log request theo tháng
 ├── roadmap/                 ← Kế hoạch phát triển theo giai đoạn
 │   ├── README.md            ← Tóm tắt roadmap
 │   ├── phase-1-mvp.md       ← Giai đoạn hiện tại
@@ -42,6 +48,9 @@ docs/
 - [Tổng quan dự án](scope/overview.md)
 - [Kiến trúc kỹ thuật](scope/architecture.md)
 - [Danh sách tính năng](scope/features.md)
+- [Code review task list](review-task-list.md)
+- [Code review archive](reviews/README.md)
+- [Activity log rules](activity-log/README.md)
 - [Roadmap](roadmap/README.md)
 - [Tiến độ hiện tại](progress/README.md)
 - [Known issues](progress/known-issues.md)

@@ -8,7 +8,7 @@
 | Ngôn ngữ | **TypeScript 5** | Type safety cho model node & event payload. |
 | UI framework | **React 18** | Quản lý state UI (lanes, status), DnD palette. |
 | Diagram engine | **@logicflow/core 1.2.x** | Engine vẽ flow chart open source, custom node/edge dễ. |
-| Extensions | **@logicflow/extension** | Snapshot (PNG export), SelectionSelect (multi-select). |
+| Extensions | **@logicflow/extension** | Snapshot (PNG export), SelectionSelect (multi-select), NodeResize base classes cho model resize. |
 | Style | CSS thuần (`src/styles.css`) | Tránh phụ thuộc CSS framework cho PoC. |
 
 ## 2. Sơ đồ thành phần
@@ -36,8 +36,9 @@
 │  │ │     - node:dnd-add    → snap X + zIndex top      │   │    │
 │  │ │     - node:drop       → snap X khi drag node cũ  │   │    │
 │  │ │     - node:delete     → chặn xoá lane            │   │    │
-│  │ │     - node:dbl-click  → đổi tên lane             │   │    │
-│  │ │     - node:contextmenu→ xoá lane (right-click)   │   │    │
+│  │ │     - node:dbclick    → đổi tên lane             │   │    │
+│  │ │     - lane toolbar    → rename/delete/reorder    │   │    │
+│  │ │     - custom handles  → resize lane / shape      │   │    │
 │  │ └──────────────────────────────────────────────────┘   │    │
 │  └─────────────────────────────────────────────────────────┘    │
 └────────────────────────────────────────────────────────────────┘
@@ -62,7 +63,10 @@
 |---|---|---|
 | `lanes` | `LaneConfig[]` | Cấu hình lane đang hiển thị. Đổi tên / thêm / xoá lane đều cập nhật state này. |
 | `status` | `string` | Status bar text (thông báo cho user). |
+| `activeLaneId` | `string \| null` | Lane đang được chọn để hiện toolbar/resize handle. |
+| `activeNodeId` | `string \| null` | Shape đang được chọn để hiện resize handle. |
 | `lanesRef` | `useRef<LaneConfig[]>` | Mirror của `lanes`, dùng trong các LF event handler (đăng ký 1 lần với `useEffect([])`). |
+| `laneHeightRef` | `useRef<number>` | Chiều cao swimlane hiện tại, kết hợp auto-grow và manual resize. |
 | `lfRef` | `useRef<LogicFlow>` | Instance LogicFlow, dùng cho mọi thao tác imperative. |
 | `containerRef` | `useRef<HTMLDivElement>` | DOM container nơi LF mount canvas. |
 
@@ -92,9 +96,9 @@ lf.register({ type: 'activity', view: RectNode, model: ActivityModel });
 ```
 
 Quy ước:
-- **Model** kế thừa từ `RectNodeModel` / `EllipseNodeModel` / `PolygonNodeModel`.
-- **Width / Height** lấy từ `data.properties` nếu có, fallback default.
-- **Lane** đặc biệt: zIndex = -1000 (luôn nằm dưới), `selectable=false`, `draggable=false`, `isShowAnchor=false`.
+- **Model** kế thừa từ `RectResize.model` / `DiamondResize.model` / `EllipseNodeModel` tùy loại node.
+- **Width / Height** lấy từ `data.properties` hoặc `properties.nodeSize` nếu có, fallback default.
+- **Lane** đặc biệt: zIndex = -1000 (luôn nằm dưới), `draggable=false`, `isShowAnchor=false`, được app chọn qua hit-test riêng để hiện toolbar.
 
 ## 6. Snap-to-lane logic
 
@@ -115,7 +119,7 @@ Loại trừ: `lane` (không snap chính nó), `sync-bar` (kéo ngang xuyên qua
 
 LogicFlow render SVG theo thứ tự DOM của children trong `<g>`. Element nào append sau sẽ hiển thị trên element trước đó.
 
-Để đảm bảo Lane luôn nằm dưới (background) và node mới luôn nằm trên:
+Để đảm bảo lane luôn nằm dưới (background), còn node/lane action overlay vẫn dễ thao tác:
 
 1. `LaneModel.zIndex = -1000` (model-level).
 2. `buildLaneNodes()` set `zIndex: -1000` trong data init (data-level).

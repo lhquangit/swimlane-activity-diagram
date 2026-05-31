@@ -13,13 +13,15 @@ Trạng thái:
 |---|---|---|---|
 | F-101 | Khởi tạo 4 lane mặc định (cấu hình ở `DEFAULT_LANES`) | ✅ | `src/nodes.ts` |
 | F-102 | Thêm lane mới (+ Lane) | ✅ | Auto chỉnh layout |
-| F-103 | Đổi tên lane (double-click) | ✅ | `window.prompt()` |
-| F-104 | Xoá lane (right-click + confirm) | ✅ | Bảo vệ: tối thiểu 1 lane |
+| F-103 | Đổi tên lane (toolbar hoặc double-click) | ✅ | Toolbar là affordance chính, `window.prompt()` |
+| F-104 | Xoá lane (toolbar hoặc right-click + confirm) | ✅ | Bảo vệ: tối thiểu 1 lane |
 | F-105 | Snap-to-lane khi kéo node | ✅ | `snapToLane()` trong `lf-config.ts` |
 | F-106 | Grid & dotted background | ✅ | `grid.type = 'dot'` |
 | F-107 | Drag-pan canvas | ✅ | LF default |
 | F-108 | Zoom +/− & Fit view | ✅ | Toolbar |
 | F-109 | Pinch-zoom / wheel-zoom | ✅ | LF default |
+| F-110 | Resize lane bằng handle | ✅ | Width lane + height toàn swimlane |
+| F-111 | Đổi thứ tự lane trái / phải | ✅ | Nút `←` / `→` trên lane toolbar |
 
 ## 2. Palette & node types
 
@@ -52,7 +54,7 @@ Trạng thái:
 | F-402 | Sửa text edge (double-click) | ✅ |
 | F-403 | Undo / Redo (Ctrl+Z / Ctrl+Y + toolbar) | ✅ |
 | F-404 | Xoá node/edge (DEL key) | ✅ — chặn xoá lane |
-| F-405 | Resize node (drag corner) | 📋 backlog |
+| F-405 | Resize node (drag corner handle) | ✅ | `activity`, `decision`, `note` |
 | F-406 | Copy / paste / duplicate | 📋 backlog |
 
 ## 5. Import / Export

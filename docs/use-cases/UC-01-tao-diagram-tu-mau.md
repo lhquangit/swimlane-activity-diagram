@@ -1,12 +1,14 @@
 # UC-01 — Tạo diagram từ mẫu mặc định
 
-| Field | Value |
-|---|---|
-| **Mã** | UC-01 |
-| **Tên** | Tạo diagram từ mẫu mặc định |
-| **Actor** | BA / Operation Lead / Bất kỳ user nào lần đầu mở app |
+
+| Field        | Value                                                                   |
+| ------------ | ----------------------------------------------------------------------- |
+| **Mã**       | UC-01                                                                   |
+| **Tên**      | Tạo diagram từ mẫu mặc định                                             |
+| **Actor**    | BA / Operation Lead / Bất kỳ user nào lần đầu mở app                    |
 | **Mục tiêu** | Có một diagram khởi điểm với 4 lane + sample flow để bắt đầu chỉnh sửa. |
-| **Trigger** | User mở `index.html` (hoặc `http://localhost:5173`). |
+| **Trigger**  | User mở `index.html` (hoặc `http://localhost:5173`).                    |
+
 
 ## Tiền điều kiện
 
@@ -18,9 +20,9 @@
 1. User mở URL của ứng dụng.
 2. React bootstrap → `App.tsx` chạy `useEffect` mount lần đầu.
 3. `lf.render(buildInitialData())` được gọi — diagram mẫu hiện ra ngay:
-   - 4 lane: *Nguồn phát hiện đầu tiên*, *Nhân sự vận hành liên lạc (VOC)*, *Trưởng điều phối khán giả (VOC)*, *Nhân viên hiện trường*.
-   - ~17 node mẫu mô phỏng quy trình xử lý sự cố.
-   - Edge nối các node theo thứ tự.
+  - 4 lane: *Nguồn phát hiện đầu tiên*, *Nhân sự vận hành liên lạc (VOC)*, *Trưởng điều phối khán giả (VOC)*, *Nhân viên hiện trường*.
+  - ~17 node mẫu mô phỏng quy trình xử lý sự cố.
+  - Edge nối các node theo thứ tự.
 4. `lf.fitView(20, 20)` căn diagram vào khung hình.
 5. Status bar hiển thị: `4 lane · Sẵn sàng — 4 lane đã được tạo`.
 
@@ -50,3 +52,4 @@
 
 - `src/lf-config.ts` — hàm `buildInitialData()`.
 - `src/App.tsx` — `useEffect` khởi tạo (line ~120 trở đi).
+

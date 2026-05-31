@@ -9,6 +9,9 @@
 
 ### Fixed
 - **Shape biến mất khi thả vào lane**: node mới được DnD vào lane đôi khi bị che bởi lane background, chỉ hiện khi click sang lane khác. Sửa bằng cách (1) hạ `zIndex` của lane xuống `-1000`, (2) gọi `setElementZIndex(id, 'top')` cho node mới sau `node:dnd-add`, (3) tắt `isShowAnchor` cho lane để tránh anchor giả khi hover lane. Xem `src/App.tsx`, `src/nodes.ts`, `src/lf-config.ts`.
+- **Lane rename và auto-size**: sửa lỗi double-click lane không đổi tên do dùng sai event `node:dbl-click` và lane sync bị handler `node:delete` re-add dữ liệu cũ. Đồng thời thêm auto-size cho lane theo nội dung phía dưới và auto-size/wrap text cho Activity, Decision, Note để nội dung dài không tràn khỏi shape. Xem `src/App.tsx`, `src/nodes.ts`, `src/lf-config.ts`.
+- **Lane management và manual resize controls**: thêm lane toolbar hiển thị khi click lane để rename, xoá, đổi thứ tự trái/phải; thêm resize handle cho lane để user tự đổi width lane và chiều cao toàn bộ swimlane; thêm resize handle cho `activity`, `decision`, `note` để user tự đổi kích thước shape mà vẫn giữ auto-size theo text làm ngưỡng tối thiểu. Xem `src/App.tsx`, `src/nodes.ts`, `src/DndPanel.tsx`, `src/styles.css`.
+- **Lane containment, edge coherence, và `sync-bar` resize/layout**: chuẩn hóa lane binding sang `relativeX` có clamp theo bề ngang thực của node; chặn lane co nhỏ hơn shape rộng nhất bên trong; đưa `sync-bar` vào lane layout commit với metadata span + chuẩn hóa span theo các lane của node đang nối vào nó; đồng bộ lại edge endpoints sau lane move/resize và mở `width-only` resize cho `sync-bar`. Xem `src/App.tsx`, `src/nodes.ts`, `src/DndPanel.tsx`, `src/styles.css`.
 
 ---
 
