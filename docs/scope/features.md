@@ -98,6 +98,12 @@ Trạng thái:
 | F-802 | Bắt buộc ≥1 Start, ≥1 End | 📋 backlog |
 | F-803 | Cảnh báo edge không có nguồn / đích | 📋 backlog |
 
+## 9. AI assistance
+
+| # | Tính năng | Trạng thái | Ghi chú |
+|---|---|---|---|
+| F-901 | Sinh mô tả BRD draft từ diagram | 📋 backlog | Xem `docs/product/ai-brd-description-feature.md` |
+
 ## Lịch sử cập nhật danh sách
 
 - 2026-05-29 — Khởi tạo danh sách. Mọi feature ✅ đều đã chạy trong PR #1 + PR fix bug drop.
