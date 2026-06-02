@@ -20,6 +20,19 @@ import {
   snapToLane,
 } from './lf-config';
 import DndPanel, { DndPaletteItem } from './DndPanel';
+import BrdPanel from './brd/BrdPanel';
+import { generateBrd, validateDiagram } from './brd/client';
+import { buildGenerateRequest, buildRequestFingerprint, buildSemanticRequest } from './brd/normalize';
+import { runLocalPreValidation } from './brd/prevalidate';
+import {
+  BrdPanelPhase,
+  BrdSpec,
+  BrdTabId,
+  ErrorObject,
+  GenerateResult,
+  ResponseMetadata,
+  WarningItem,
+} from './brd/types';
 
 LogicFlow.use(Snapshot);
 LogicFlow.use(SelectionSelect);
@@ -104,6 +117,17 @@ function downloadBlob(blob: Blob, filename: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+
+function downloadTextFile(contents: string, filename: string, contentType = 'text/plain;charset=utf-8') {
+  downloadBlob(new Blob([contents], { type: contentType }), filename);
+}
+
+function makeIdempotencyKey() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `brd-${crypto.randomUUID()}`;
+  }
+  return `brd-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 const INITIAL_LANES = withPositions(DEFAULT_LANES);
@@ -651,6 +675,30 @@ export default function App() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [viewportTick, setViewportTick] = useState(0);
   const [status, setStatus] = useState('Đang khởi tạo…');
+  const [diagramRevision, setDiagramRevision] = useState(0);
+  const [lastGeneratedRevision, setLastGeneratedRevision] = useState<number | null>(null);
+  const [brdPanelOpen, setBrdPanelOpen] = useState(false);
+  const [brdPhase, setBrdPhase] = useState<BrdPanelPhase>('idle');
+  const [brdTab, setBrdTab] = useState<BrdTabId>('warnings');
+  const [brdWarnings, setBrdWarnings] = useState<WarningItem[]>([]);
+  const [brdBlockingIssues, setBrdBlockingIssues] = useState<WarningItem[]>([]);
+  const [brdSpec, setBrdSpec] = useState<BrdSpec | null>(null);
+  const [brdDraft, setBrdDraft] = useState('');
+  const [brdError, setBrdError] = useState<ErrorObject | null>(null);
+  const [brdMetadata, setBrdMetadata] = useState<ResponseMetadata | null>(null);
+  const [brdRequestId, setBrdRequestId] = useState<string | null>(null);
+  const [brdRuntimeStatus, setBrdRuntimeStatus] = useState<string | null>(null);
+  const [lastGenerateFingerprint, setLastGenerateFingerprint] = useState<string | null>(null);
+  const [lastIdempotencyKey, setLastIdempotencyKey] = useState<string | null>(null);
+
+  const markDiagramChanged = () => {
+    setDiagramRevision((revision) => revision + 1);
+  };
+
+  const isBrdOutdated =
+    lastGeneratedRevision !== null &&
+    diagramRevision !== lastGeneratedRevision &&
+    Boolean(brdDraft);
 
   // Keep ref in sync so event handlers (registered once) always see current value
   useEffect(() => {
@@ -819,6 +867,7 @@ export default function App() {
       refreshLaneHeight();
       setActiveLaneId(null);
       setActiveNodeId(isUserResizableNode(data.type) ? data.id : null);
+      markDiagramChanged();
       bumpViewportTick();
     });
 
@@ -845,6 +894,7 @@ export default function App() {
       refreshLaneHeight();
       setActiveLaneId(null);
       setActiveNodeId(isUserResizableNode(data.type) ? data.id : null);
+      markDiagramChanged();
       bumpViewportTick();
     });
 
@@ -855,6 +905,7 @@ export default function App() {
       if (!model || model.type === 'lane') return;
       resizeNodeToText(model, text);
       refreshLaneHeight();
+      markDiagramChanged();
       bumpViewportTick();
     });
 
@@ -905,6 +956,7 @@ export default function App() {
       }
       syncConnectedEdges(lf, model);
       refreshLaneHeight();
+      markDiagramChanged();
       bumpViewportTick();
     });
 
@@ -962,6 +1014,7 @@ export default function App() {
       );
       commitLaneLayout(updated, { status: `Đã đổi tên lane → "${trimmed}"` });
       setActiveLaneId(data.id);
+      markDiagramChanged();
     });
 
     // Right-click on lane → confirm delete
@@ -983,6 +1036,7 @@ export default function App() {
       );
       commitLaneLayout(updated, { status: `Đã xoá lane "${current.title}"` });
       setActiveLaneId(updated[0]?.id ?? null);
+      markDiagramChanged();
     });
 
     lfRef.current = lf;
@@ -1019,6 +1073,7 @@ export default function App() {
     commitLaneLayout(updated, { status: `Đã thêm lane "${trimmed}"` });
     setActiveLaneId(newLane.id);
     setActiveNodeId(null);
+    markDiagramChanged();
   };
 
   const handleRenameLane = (laneId: string) => {
@@ -1033,6 +1088,7 @@ export default function App() {
     );
     commitLaneLayout(updated, { status: `Đã đổi tên lane → "${trimmed}"` });
     setActiveLaneId(laneId);
+    markDiagramChanged();
   };
 
   const handleDeleteLane = (laneId: string) => {
@@ -1049,6 +1105,7 @@ export default function App() {
     const updated = withPositions(toLaneDrafts(lanesRef.current.filter((lane) => lane.id !== laneId)));
     commitLaneLayout(updated, { status: `Đã xoá lane "${current.title}"` });
     setActiveLaneId(updated[0]?.id ?? null);
+    markDiagramChanged();
   };
 
   const handleMoveLane = (laneId: string, direction: -1 | 1) => {
@@ -1062,6 +1119,7 @@ export default function App() {
     const updated = withPositions(drafts);
     commitLaneLayout(updated, { status: `Đã đổi vị trí lane "${lane.title}"` });
     setActiveLaneId(laneId);
+    markDiagramChanged();
   };
 
   const handleExportPNG = async () => {
@@ -1102,6 +1160,135 @@ export default function App() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     downloadBlob(blob, 'swimlane.json');
     setStatus('Đã tải swimlane.json');
+  };
+
+  const handleCopyBrdDraft = async () => {
+    if (!brdDraft) return;
+    await navigator.clipboard.writeText(brdDraft);
+    setStatus('Đã copy BRD draft vào clipboard');
+  };
+
+  const handleExportBrdDraft = () => {
+    if (!brdDraft) return;
+    downloadTextFile(brdDraft, 'diagram-brd-draft.md', 'text/markdown;charset=utf-8');
+    setStatus('Đã tải diagram-brd-draft.md');
+  };
+
+  const handleAcknowledgeOutdatedDraft = () => {
+    setLastGeneratedRevision(diagramRevision);
+    setStatus('Đã giữ BRD draft hiện tại dù diagram đã thay đổi');
+  };
+
+  const executeGenerateBrd = async (options?: { reuseIdempotencyKey?: boolean }) => {
+    const lf = lfRef.current;
+    if (!lf) return;
+    const graphData = lf.getGraphData() as Parameters<typeof buildGenerateRequest>[0];
+    const validationRequest = buildSemanticRequest(graphData, lanesRef.current);
+    const generateRequest = buildGenerateRequest(graphData, lanesRef.current);
+    const requestFingerprint = buildRequestFingerprint(generateRequest);
+    const shouldReuseIdempotencyKey =
+      options?.reuseIdempotencyKey &&
+      lastGenerateFingerprint === requestFingerprint &&
+      lastIdempotencyKey;
+    const idempotencyKey = shouldReuseIdempotencyKey ? lastIdempotencyKey! : makeIdempotencyKey();
+
+    setBrdPanelOpen(true);
+    setBrdPhase('validating');
+    setBrdTab('warnings');
+    setBrdError(null);
+    setBrdWarnings([]);
+    setBrdBlockingIssues([]);
+    setBrdRuntimeStatus('validating');
+    setStatus('Đang validate diagram cho AI BRD…');
+
+    try {
+      const localBlockingIssues = runLocalPreValidation(validationRequest);
+      if (localBlockingIssues.length > 0) {
+        setBrdPhase('blocking');
+        setBrdRuntimeStatus('blocking');
+        setBrdWarnings([]);
+        setBrdBlockingIssues(localBlockingIssues);
+        setBrdError({
+          code: 'VALIDATION_BLOCKING',
+          message: 'Diagram còn blocking issue cơ bản; hãy sửa trước khi generate.',
+          retryable: false,
+          related_node_ids: localBlockingIssues.flatMap((item) => item.related_node_ids),
+        });
+        setStatus('Không thể generate BRD: diagram còn blocking issue cơ bản');
+        return;
+      }
+
+      const validationEnvelope = await validateDiagram(validationRequest);
+      setBrdRequestId(validationEnvelope.request_id);
+      setBrdMetadata(validationEnvelope.metadata);
+      setBrdWarnings(validationEnvelope.warnings);
+      setBrdBlockingIssues(validationEnvelope.blocking_issues);
+      if (
+        validationEnvelope.status === 'blocking' ||
+        validationEnvelope.blocking_issues.length > 0
+      ) {
+        setBrdPhase('blocking');
+        setBrdRuntimeStatus(validationEnvelope.status);
+        setBrdError({
+          code: 'VALIDATION_BLOCKING',
+          message: 'Diagram còn blocking issue; hãy sửa trước khi generate.',
+          retryable: false,
+          related_node_ids: validationEnvelope.blocking_issues.flatMap((item) => item.related_node_ids),
+        });
+        setStatus('Không thể generate BRD: diagram còn blocking issue');
+        return;
+      }
+
+      setBrdPhase('generating');
+      setBrdRuntimeStatus('generating');
+      setStatus('Đang sinh BRD draft…');
+      const { statusCode, payload } = await generateBrd(generateRequest, idempotencyKey);
+      setBrdRequestId(payload.request_id);
+      setBrdMetadata(payload.metadata);
+      setBrdWarnings(payload.warnings);
+      setBrdBlockingIssues(payload.blocking_issues);
+      setBrdRuntimeStatus(payload.status);
+      setLastIdempotencyKey(idempotencyKey);
+      setLastGenerateFingerprint(requestFingerprint);
+
+      if (statusCode === 202 || payload.status === 'in_progress') {
+        setBrdPhase('in-progress');
+        setBrdError(null);
+        setStatus('Generate đang được xử lý…');
+        return;
+      }
+
+      if (statusCode >= 400 || payload.error) {
+        setBrdPhase(payload.status === 'blocking' ? 'blocking' : 'failed');
+        setBrdError(payload.error);
+        setStatus(payload.error?.message ?? 'Sinh BRD thất bại');
+        return;
+      }
+
+      const result = payload.result as GenerateResult;
+      setBrdSpec(result.spec);
+      setBrdDraft(result.brd_markdown);
+      setBrdPhase('ready');
+      setBrdTab('draft');
+      setBrdError(null);
+      setLastGeneratedRevision(diagramRevision);
+      setStatus(
+        payload.status === 'replayed'
+          ? 'Đã dùng lại kết quả generate trước đó'
+          : 'Đã sinh BRD draft thành công',
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Không thể gọi backend AI BRD';
+      setBrdPhase('failed');
+      setBrdError({
+        code: 'BACKEND_REQUEST_FAILED',
+        message,
+        retryable: true,
+        related_node_ids: [],
+      });
+      setBrdRuntimeStatus('failed');
+      setStatus(message);
+    }
   };
 
   const handleImportJSON = (ev: React.ChangeEvent<HTMLInputElement>) => {
@@ -1151,6 +1338,7 @@ export default function App() {
           setActiveLaneId(importedLanes[0]?.id ?? null);
         }
         setActiveNodeId(null);
+        markDiagramChanged();
         setStatus(`Đã load: ${file.name}`);
       } catch (e) {
         setStatus(`Lỗi parse JSON: ${(e as Error).message}`);
@@ -1173,6 +1361,7 @@ export default function App() {
     setActiveLaneId(seeded[0]?.id ?? null);
     setActiveNodeId(null);
     lfRef.current?.fitView(20, 20);
+    markDiagramChanged();
     setStatus('Đã reset về diagram mẫu');
   };
 
@@ -1188,6 +1377,7 @@ export default function App() {
     applyLaneModels(lanesRef.current, laneHeightRef.current);
     setActiveLaneId(lanesRef.current[0]?.id ?? null);
     setActiveNodeId(null);
+    markDiagramChanged();
     setStatus('Đã xoá nội dung (giữ lại lane)');
   };
 
@@ -1340,6 +1530,7 @@ export default function App() {
         }
       }
       setStatus('Đã cập nhật kích thước lane');
+      markDiagramChanged();
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
@@ -1449,6 +1640,7 @@ export default function App() {
     const handleMouseUp = () => {
       shapeResizeSessionRef.current = null;
       setStatus('Đã cập nhật kích thước shape');
+      markDiagramChanged();
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
@@ -1504,6 +1696,9 @@ export default function App() {
         </button>
         <button className="toolbar-btn" onClick={handleExportSVG}>
           Export SVG
+        </button>
+        <button className="toolbar-btn primary" onClick={() => void executeGenerateBrd()}>
+          Generate BRD
         </button>
         <button className="toolbar-btn primary" onClick={handleExportPNG}>
           Export PNG
@@ -1592,6 +1787,33 @@ export default function App() {
             }
           />
         ) : null}
+        <BrdPanel
+          open={brdPanelOpen}
+          phase={brdPhase}
+          activeTab={brdTab}
+          onTabChange={setBrdTab}
+          warnings={brdWarnings}
+          blockingIssues={brdBlockingIssues}
+          spec={brdSpec}
+          draft={brdDraft}
+          onDraftChange={setBrdDraft}
+          onClose={() => setBrdPanelOpen(false)}
+          onCopy={() => void handleCopyBrdDraft()}
+          onExport={handleExportBrdDraft}
+          onRetry={
+            brdError?.retryable
+              ? () => {
+                  void executeGenerateBrd({ reuseIdempotencyKey: true });
+                }
+              : null
+          }
+          onAcknowledgeOutdated={isBrdOutdated ? handleAcknowledgeOutdatedDraft : null}
+          metadata={brdMetadata}
+          requestId={brdRequestId}
+          runtimeStatus={brdRuntimeStatus}
+          error={brdError}
+          isOutdated={isBrdOutdated}
+        />
       </div>
     </div>
   );

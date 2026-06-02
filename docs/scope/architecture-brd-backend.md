@@ -175,6 +175,7 @@ Nếu chỉ muốn dev frontend không kèm AI: dùng `BRD_PROVIDER=mock`, backe
 - **Không log** prompt body / structured spec / BRD markdown ở production (Section 14.3).
 - Metric counter cơ bản: số request validate, số request generate, tỉ lệ blocking warning, tỉ lệ post-check fail.
 - OpenRouter workspace / organization là lớp theo dõi usage ngoài ứng dụng; backend app không cần tự xây usage dashboard ở Phase 1.
+- Response/status contract, error shape, và idempotency states phải bám theo Section 13 của feature doc; backend architecture không tự tạo contract thứ hai riêng.
  
 ## 11. Bảo mật
 

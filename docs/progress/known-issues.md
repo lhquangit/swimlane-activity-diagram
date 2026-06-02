@@ -21,6 +21,370 @@ Severity:
 
 ---
 
+## [FIXED] AI BRD suy main flow theo topology graph thay vì tọa độ canvas (severity: P1) {#fixed-ai-brd-main-flow-by-coordinates}
+
+- **ID**: KI-07
+- **Phát hiện**: 2026-05-31 by Codex (implementation review)
+- **Severity**: P1 — BRD draft có thể mô tả sai luồng chính dù diagram và edge đều đúng.
+
+### Reproduction
+
+1. Tạo diagram có branch hoặc node rời, trong đó vị trí `y/x` của node không phản ánh đúng thứ tự đi theo edge.
+2. Bấm `Generate BRD`.
+3. Mở tab `Structured Spec` hoặc `BRD Draft`.
+4. **Triệu chứng**: `main_flow_steps` đi theo thứ tự tọa độ canvas thay vì thứ tự topology từ `start` qua các edge.
+
+### Root cause
+
+`apps/api/app/services/interpret.py` hiện tạo `main_flow_nodes` bằng cách sort toàn bộ `activity`, `decision`, `end` theo `(y, x, id)` rồi dùng danh sách đó làm luồng chính. Logic này không hề traverse graph từ `start`, không tách node reachable khỏi node rời, và không phân biệt main path với branch/parallel path.
+
+### Fix
+
+1. Đổi `interpret_request()` sang traversal theo edge từ `start`, không còn sort toàn bộ flow node theo `(y, x)`.
+2. Tách `reachable_ids` khỏi `preferred_path_ids`: main flow ưu tiên spine hợp lý trước, rồi mới append các node reachable còn lại theo distance.
+3. Ghi `open_questions` cho node flow không reachable từ `start`.
+4. Thêm regression test cho graph có topology khác với vị trí canvas.
+
+### Verified
+
+- 2026-06-02 by Codex — `apps/api/.venv/bin/python -m pytest apps/api/tests` pass (`35 passed`) sau khi thêm regression test cho provider transport error.
+- 2026-06-02 by Codex — `npm run test:api-live` pass (`2 passed`), xác nhận live path vẫn generate được với OpenRouter sau khi harden transport handling.
+
+- 2026-05-31 by Codex — `apps/api/.venv/bin/python -m pytest apps/api/tests` pass.
+- 2026-05-31 by Codex — browser local: sample `Generate BRD` sinh main flow theo spine topology (nhánh `Có` đi trước trong sample), không còn phụ thuộc vị trí canvas.
+
+---
+
+## [FIXED] AI BRD không còn tự gán lane gần nhất cho node ngoài lane (severity: P1) {#fixed-ai-brd-nearest-lane-inference}
+
+- **ID**: KI-08
+- **Phát hiện**: 2026-05-31 by Codex (implementation review)
+- **Severity**: P1 — node đặt lệch lane vẫn được generate như hợp lệ, dẫn tới sai actor/handoff trong BRD.
+
+### Reproduction
+
+1. Kéo một `activity` hoặc `decision` lệch khỏi mọi lane nhưng vẫn gần một lane nào đó hơn lane khác.
+2. Bấm `Generate BRD`.
+3. **Triệu chứng**: frontend vẫn gửi `lane_id` cho node đó, backend không block `NODE_MISSING_LANE`, và BRD tiếp tục map node vào actor gần nhất.
+
+### Root cause
+
+`src/brd/normalize.ts` dùng `inferLaneId()` để chọn lane có `center x` gần nhất nếu `properties.laneId` không còn hợp lệ. Backend chỉ block khi `lane_id` bị thiếu, nên việc auto-gán này làm mất hoàn toàn tín hiệu lỗi placement.
+
+### Fix
+
+1. `inferLaneId()` chỉ còn infer khi `x` của node nằm trong biên thực của đúng 1 lane.
+2. Nếu node nằm ngoài tất cả lane, hoặc đúng vào ranh giới giữa hai lane, frontend trả `undefined` thay vì map âm thầm sang lane gần nhất.
+3. Explicit `properties.laneId` chỉ được giữ nếu vẫn còn hợp lệ theo boundary mới.
+4. Thêm regression test cho case ngoài lane và case đúng biên lane.
+
+### Verified
+
+- 2026-05-31 by Codex — `npm run test:ui-mock` pass với case ngoài lane và case đứng đúng biên lane.
+- 2026-05-31 by Codex — `npm run test:brd-mock` pass sau khi đổi lane inference.
+
+---
+
+## [OPEN] AI BRD live-provider path chưa khớp contract Phase 1 đã chốt (severity: P1) {#open-ai-brd-live-contract-gap}
+
+- **ID**: KI-09
+- **Phát hiện**: 2026-05-31 by Codex (implementation review)
+- **Severity**: P1 — mock/demo path chạy được, nhưng live path chưa đủ điều kiện để coi là hoàn thiện cho real generation.
+
+### Reproduction
+
+1. Đối chiếu implementation hiện tại của `/validate`, `/generate`, và `OpenRouterProvider` với `docs/product/ai-brd-description-feature.md` + `docs/scope/architecture-brd-backend.md`.
+2. **Triệu chứng**:
+   - `X-Schema-Version` chưa được enforce.
+   - `BRD_REQUEST_RATE_LIMIT` mới chỉ là config, chưa có runtime behavior `429`.
+   - Live provider chưa có controlled retry.
+   - OpenRouter path mới dùng `response_format: { type: "json_object" }`, chưa ưu tiên strict schema output như doc đã chốt.
+   - `estimated_cost_usd` đang hard-code.
+
+### Root cause
+
+Implementation hiện ưu tiên dựng vertical slice mock-first và mới scaffold nhánh live, nên nhiều cam kết contract/operability của Phase 1 chưa được hiện thực hóa trong runtime.
+
+### Fix
+
+1. Enforce `X-Schema-Version` trên cả `/validate` và `/generate`.
+2. Implement rate-limit Phase 1.
+3. Nâng `OpenRouterProvider` lên structured output strict mode + bounded retry.
+4. Ghi metadata attempt/cost từ response thật thay vì constant.
+
+### Verified
+
+- 2026-05-31 by Codex — source inspection tại `apps/api/app/routes/brd_validate.py`, `apps/api/app/routes/brd_generate.py`, `apps/api/app/providers/openrouter_provider.py`, `apps/api/app/config.py`.
+
+---
+
+## [FIXED] AI BRD retry không còn bị kẹt `in_progress` sau lỗi generate (severity: P1) {#open-ai-brd-idempotency-stuck-on-failure}
+
+- **ID**: KI-10
+- **Phát hiện**: 2026-05-31 by Codex (completion review)
+- **Severity**: P1 — user retry đúng contract nhưng request có thể bị treo logic đến hết TTL idempotency.
+
+### Reproduction
+
+1. Gọi `POST /api/brd/generate` với `Idempotency-Key` cố định.
+2. Để request đầu tiên rơi vào một trong các nhánh:
+   - `422 VALIDATION_BLOCKING`
+   - `502 MODEL_TIMEOUT`
+   - `503 PROVIDER_UNAVAILABLE`
+3. Retry lại cùng payload và cùng `Idempotency-Key`.
+4. **Triệu chứng**: backend có thể trả `202 in_progress` thay vì xử lý lại hoặc trả terminal response phù hợp.
+
+### Root cause
+
+`IdempotencyStore.begin()` luôn tạo entry mới với `state="in_progress"`, nhưng `routes/brd_generate.py` chỉ gọi `idempotency_store.complete(...)` ở nhánh success `200 completed`. Các nhánh `422`, `502`, `503` return sớm mà không đóng hoặc reset trạng thái nên key bị giữ ở trạng thái đang xử lý cho đến khi TTL hết.
+
+### Fix
+
+1. Định nghĩa terminal policy rõ cho non-success outcomes:
+   - cache/replay được,
+   - release để retry lại,
+   - hoặc mark failed với metadata riêng.
+2. Implement API phù hợp trong `IdempotencyStore` (`complete`, `fail`, hoặc `release`).
+3. Áp policy đó cho mọi exit path của `/generate`.
+4. Thêm regression tests cho retry sau `422`, `502`, và `503`.
+
+### Verified
+
+- 2026-06-01 by Codex — `apps/api/.venv/bin/python -m pytest apps/api/tests` pass, gồm retry cùng `Idempotency-Key` sau `422`, `502`, `503`.
+
+---
+
+## [FIXED] AI BRD post-check không còn false-positive với branch target hợp lệ ngoài main flow (severity: P1) {#open-ai-brd-branch-target-false-positive}
+
+- **ID**: KI-11
+- **Phát hiện**: 2026-05-31 by Codex (completion review)
+- **Severity**: P1 — output warning có thể báo sai “decision bịa target” dù target là node thật trong graph.
+
+### Reproduction
+
+1. Tạo diagram có decision với một nhánh phụ hợp lệ, nhưng node target của nhánh đó không nằm trên preferred main path.
+2. Generate BRD thành `DiagramBRDSpec`.
+3. Chạy `postcheck_spec()` hoặc xem warnings trả về từ `/generate`.
+4. **Triệu chứng**: branch target hợp lệ vẫn bị gắn `BRANCH_TARGET_UNKNOWN`.
+
+### Root cause
+
+`postcheck_spec()` chỉ xây `seen_node_ids` từ `spec.main_flow_steps`, rồi warn cho mọi `branch.outcomes[].target_node_id` không thuộc tập này. Điều kiện đó không phân biệt target “không có trong canonical graph” với target “có thật nhưng thuộc branch/parallel path”.
+
+### Fix
+
+1. Đổi post-check sang traceability set rộng hơn `main_flow_steps`, ví dụ:
+   - canonical registry của mọi node đã được interpret,
+   - hoặc pass thêm `normalized/interpreted context` vào post-check.
+2. Giữ warning chỉ cho target thật sự không trace được.
+3. Thêm regression test cho:
+   - branch target hợp lệ ngoài main path,
+   - branch target lạ thật sự.
+
+### Verified
+
+- 2026-06-01 by Codex — `apps/api/.venv/bin/python -m pytest apps/api/tests` pass, gồm case branch target hợp lệ ngoài main flow không còn sinh `BRANCH_TARGET_UNKNOWN`.
+
+---
+
+## [FIXED] Sticky note semantics của AI BRD đã phân biệt note gắn step và note toàn cục (severity: P2) {#open-ai-brd-note-anchoring-gap}
+
+- **ID**: KI-12
+- **Phát hiện**: 2026-05-31 by Codex (completion review)
+- **Severity**: P2 — BRD vẫn generate được, nhưng phần assumption/open question thiếu độ chính xác nghiệp vụ.
+
+### Reproduction
+
+1. Tạo một sticky note rất xa mọi step nhưng vẫn trong cùng lane với một activity nào đó.
+2. Generate BRD.
+3. **Triệu chứng**:
+   - backend không coi note là orphan/global note,
+   - output không phân biệt note đang bám vào step hay chỉ là ghi chú toàn cục.
+
+### Root cause
+
+`validate.py` chỉ kiểm tra note có chung `lane_id` với node flow nào đó hay không, không kiểm tra khoảng cách/anchor. `interpret.py` thì đưa toàn bộ note vào `annotations` và `assumptions` bằng cùng một policy.
+
+### Fix
+
+1. Thêm proximity/anchor rule cho note ở Step 3-4.
+2. Phân loại `anchored_note` và `global_note`.
+3. Render/record assumption khác nhau cho hai loại note.
+4. Thêm tests cho note gần step và note xa toàn cục.
+
+### Verified
+
+- 2026-06-01 by Codex — `apps/api/.venv/bin/python -m pytest apps/api/tests` pass, gồm case global note xa flow được map vào `assumptions` và sinh `NOTE_ORPHAN`.
+
+---
+
+## [FIXED] AI BRD reader-facing output từng đúng schema nhưng vô nghĩa khi đọc (severity: P1) {#fixed-ai-brd-reader-facing-quality-gap}
+
+- **ID**: KI-13
+- **Phát hiện**: 2026-06-01 by Quân (user report) / Codex (review xác nhận)
+- **Severity**: P1 — feature generate được BRD, nhưng output có thể khó đọc đến mức gần như không usable cho BA review.
+
+### Reproduction
+
+1. Tạo hoặc import một diagram có:
+   - decision branch rõ ràng,
+   - cross-lane transitions,
+   - sync-bar hoặc nhiều terminal path.
+2. Bấm `Generate BRD`.
+3. Đọc `BRD Draft`.
+4. **Triệu chứng**:
+   - `Main workflow` là một list phẳng, khó hiểu if/else ở đâu.
+   - `Handoffs` chứa các cặp node-id hoặc edge cross-lane không mang nghĩa business.
+   - `Actors` / `Decision logic` / `Parallel activities` có thể lộ raw `lane_id` và `node_id`.
+
+### Root cause
+
+1. `interpret.py` đang flatten gần như toàn bộ node reachable vào `main_flow_nodes` thay vì giữ spine chính và các nhánh riêng.
+2. `interpret.py` suy `handoffs` từ mọi edge cross-lane, không phân biệt business handoff với edge điều hướng.
+3. `render.py` dùng raw ids trực tiếp trong markdown reader-facing thay vì tách trace/debug khỏi prose.
+
+### Fix
+
+1. `interpret.py` chỉ giữ `preferred path` làm `main spine`; branch/alternate path được capture riêng qua `path_summary` và `rejoin_node_text`.
+2. `handoff` được định nghĩa lại theo nghĩa nghiệp vụ: chỉ emit khi có chuyển giao thật giữa các actor, loại edge từ decision/sync-bar/start/end.
+3. `render.py` loại raw ids khỏi 10 section BRD chính và dồn trace sang `Appendix A. Traceability (debug)`.
+4. `parallel_blocks` được enrich thành summary đọc hiểu được (`actor_names`, `branch_summaries`, `join_summary`).
+5. Thêm golden quality tests + route-level harmonization test để chặn regression “schema pass nhưng BRD reader-facing vô nghĩa”.
+
+### Verified
+
+- 2026-06-01 by Codex — `apps/api/.venv/bin/python -m pytest apps/api/tests` pass (`26 passed`).
+- 2026-06-01 by Codex — `npm run test:brd-mock` pass, gồm Vitest + backend mock suite + Playwright E2E.
+- 2026-06-01 by Codex — regression route test xác nhận live provider output thô vẫn bị harmonize trước khi render BRD.
+
+---
+
+## [FIXED] AI BRD từng sinh `Parallel activities` giả cho `sync-bar` không phân nhánh (severity: P1) {#fixed-ai-brd-false-positive-parallel}
+
+- **ID**: KI-14
+- **Phát hiện**: 2026-06-01 by Quân (draft review) / Codex (review xác nhận)
+- **Severity**: P1 — BRD có thể invent cơ chế phối hợp song song không tồn tại trong diagram.
+
+### Reproduction
+
+1. Dùng sample cháy mặc định của app.
+2. Bấm `Generate BRD`.
+3. Đọc section `Parallel activities`.
+4. **Triệu chứng**: BRD mô tả có nhánh song song/dồng bộ dù graph thực tế chỉ có `n-a4 -> n-sync -> n-b1`.
+
+### Root cause
+
+1. `analyze_sync_bars()` vẫn emit `parallel_block` cho `role == "sync"` hoặc `role == "join"` ở [apps/api/app/services/interpret.py](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/apps/api/app/services/interpret.py:428).
+2. Với sample mặc định, `n-sync` không có fan-out thật nhưng vẫn được render thành câu `Các nhánh song song được đồng bộ trước bước ...`.
+
+### Fix
+
+1. `interpret.py` không còn emit `parallel_block` cho `role == "sync"` tuyến tính.
+2. Chỉ các sync-bar có bằng chứng join/fork thật mới còn lên section `Parallel activities`.
+3. Thêm regression fixture cho case sync-bar tuyến tính.
+
+### Verified
+
+- 2026-06-01 by Codex — `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py` pass với fixture `test_non_branching_sync_bar_does_not_create_parallel_block`.
+- 2026-06-01 by Codex — `npm run test:brd-mock` pass sau khi bỏ false-positive parallel.
+
+---
+
+## [FIXED] AI BRD từng gán sai `context note` thành annotation của một step cụ thể (severity: P1) {#fixed-ai-brd-context-note-misclassified}
+
+- **ID**: KI-15
+- **Phát hiện**: 2026-06-01 by Quân (draft review) / Codex (review xác nhận)
+- **Severity**: P1 — BRD gán sai ngữ nghĩa của note, khiến người đọc hiểu sai rằng đó là comment của một step cụ thể.
+
+### Reproduction
+
+1. Dùng sample cháy mặc định của app.
+2. Bấm `Generate BRD`.
+3. Đọc section `Assumptions / open questions`.
+4. **Triệu chứng**: note liệt kê “1 trong 4 nhóm phát hiện dấu hiệu cháy” được render thành `Note cho bước "Bắt đầu quy trình" ...`.
+
+### Root cause
+
+1. `resolve_note_anchor()` auto-anchor note vào node gần nhất cùng lane tại [apps/api/app/services/interpret.py](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/apps/api/app/services/interpret.py:341).
+2. `format_anchored_note_annotation()` luôn render note đã anchor thành step annotation tại [apps/api/app/services/interpret.py](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/apps/api/app/services/interpret.py:361).
+3. Sample note trong [src/lf-config.ts](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/src/lf-config.ts:25) thực chất là process-entry context, không phải note của riêng step `start`.
+
+### Fix
+
+1. Thêm semantic phân loại note: `step_annotation`, `context_note`, `global_note`.
+2. Đổi heuristic anchoring để note dạng list/context gần `start` hoặc gần đầu quy trình được hạ xuống `context_note`.
+3. Render `context_note` vào section `Assumptions / open questions` với prefix `Context:`.
+4. Thêm regression test reader-facing cho sample cháy và fixture note dạng list gần start.
+
+### Verified
+
+- 2026-06-01 by Codex — `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py` pass với fixture `test_interpret_context_note_near_start_is_not_step_annotation`.
+- 2026-06-01 by Codex — `npm run test:api-live` pass sau khi schema/spec được bổ sung `context_notes`.
+
+---
+
+## [FIXED] AI BRD section `Assumptions / open questions` không còn tự mâu thuẫn khi chỉ có `context note` (severity: P1) {#open-ai-brd-context-note-empty-state-contradiction}
+
+- **ID**: KI-16
+- **Phát hiện**: 2026-06-01 by Quân (draft review) / Codex (review xác nhận)
+- **Severity**: P1 — BRD reader-facing có thể tự phủ định chính nó, làm giảm niềm tin vào output dù semantic đã đúng hơn.
+
+### Reproduction
+
+1. Dùng sample cháy mặc định sau khi đã fix `context note`.
+2. Bấm `Generate BRD`.
+3. Đọc section `Assumptions / open questions`.
+4. **Triệu chứng**: draft vừa có dòng `Context: ...`, vừa có dòng `Không có assumption/open question.`
+
+### Root cause
+
+1. `render.py` đã render `spec.context_notes` vào section 10 tại [apps/api/app/services/render.py](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/apps/api/app/services/render.py:78).
+2. Nhưng điều kiện empty-state ở [apps/api/app/services/render.py](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/apps/api/app/services/render.py:85) chỉ check `annotations`, `assumptions`, và `open_questions`, không tính `context_notes`.
+
+### Fix
+
+1. Tính `context_notes` như một loại content hợp lệ của section 10 khi quyết định có render empty-state hay không.
+2. Thêm regression test cho case section 10 chỉ có `context_notes`.
+
+### Verified
+
+- 2026-06-01 by Codex — `apps/api/.venv/bin/python -m pytest apps/api/tests` pass (`32 passed`) sau khi thêm regression renderer.
+- 2026-06-01 by Codex — `npm run test:brd-mock` pass; sample reader-facing không còn đồng thời hiện `Context:` và `Không có assumption/open question.`
+
+---
+
+## [FIXED] AI BRD live provider không còn văng `500` khi OpenRouter trả chunked response bị đứt (severity: P1) {#fixed-ai-brd-openrouter-incomplete-read}
+
+- **ID**: KI-17
+- **Phát hiện**: 2026-06-02 by Quân (user report) / Codex (review xác nhận)
+- **Severity**: P1 — live generate thất bại bằng `500 Internal Server Error`, phá vỡ retry contract và làm frontend không thể xử lý graceful.
+
+### Reproduction
+
+1. Chạy backend với `BRD_PROVIDER=openrouter` và key thật.
+2. Gửi `POST /api/brd/generate`.
+3. Trong lúc OpenRouter trả response, kết nối chunked bị ngắt giữa chừng.
+4. **Triệu chứng**: backend văng `http.client.IncompleteRead` ra ngoài và trả `500 Internal Server Error`.
+
+### Root cause
+
+1. `openrouter_provider.py` đọc `response.read()` trực tiếp tại [apps/api/app/providers/openrouter_provider.py](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/apps/api/app/providers/openrouter_provider.py:65).
+2. Khi stream chunked bị đứt, Python ném `IncompleteRead`.
+3. Exception này không được map sang `OpenRouterProviderError`, nên route `/generate` không thể áp retry/502 contract hiện có.
+
+### Fix
+
+1. Bắt các lỗi transport như `IncompleteRead`, `RemoteDisconnected`, và `HTTPException` trong `OpenRouterProvider`.
+2. Map chúng sang `OpenRouterProviderError(retryable=True)` với message rõ ràng.
+3. Thêm regression test trực tiếp cho provider để case `IncompleteRead` luôn được hạ xuống retryable provider error thay vì văng `500`.
+
+### Verified
+
+- 2026-06-02 by Codex — `apps/api/.venv/bin/python -m pytest apps/api/tests` pass (`35 passed`).
+- 2026-06-02 by Codex — regression `apps/api/tests/test_openrouter_provider.py` xác nhận `IncompleteRead` được map thành `OpenRouterProviderError(retryable=True)`.
+
+---
+
 ## [FIXED] Lane resize/reorder giữ node trong lane theo binding mới (severity: P1) {#fixed-lane-layout-node-containment}
 
 - **ID**: KI-05

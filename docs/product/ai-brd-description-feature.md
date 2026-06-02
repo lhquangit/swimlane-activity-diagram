@@ -404,12 +404,12 @@ Phase 1 render markdown theo template ngắn gọn, dễ review:
 7. Parallel activities
 8. Handoffs
 9. Exceptions / warnings
-10. Assumptions / open questions
+10. Context / assumptions / open questions
 
 Quy tắc map nội dung cho Phase 1:
 
 - `loops[]` -> render trong `Exceptions / warnings`
-- `annotations[]` -> render trong `Assumptions / open questions`
+- `annotations[]` -> render trong `Context / assumptions / open questions`
 
 Phase 1 không tạo section riêng tên `Loops` hoặc `Annotations`.
 
@@ -474,15 +474,72 @@ Phase 1 khuyến nghị:
 
 ## 13. API contract đề xuất
 
+### 13.1. Response envelope chung cho Phase 1
+
+Mọi response từ backend nên dùng envelope nhất quán:
+
+```json
+{
+  "request_id": "req_01abc...",
+  "status": "ok",
+  "schema_version": "2026-05-31",
+  "warnings": [],
+  "blocking_issues": [],
+  "result": {},
+  "error": null,
+  "metadata": {}
+}
+```
+
+Quy ước:
+
+- `request_id`: id duy nhất cho mỗi request backend nhận được
+- `status`: trạng thái ngắn gọn để frontend quyết định UI flow
+- `schema_version`: version của contract response
+- `warnings[]`: semantic warning không block generation
+- `blocking_issues[]`: issue khiến request không thể tiếp tục
+- `result`: payload thành công của endpoint
+- `error`: object lỗi khi request fail ở mức transport/runtime/provider
+- `metadata`: thông tin kỹ thuật như latency, model, attempt count, estimated cost
+
 ### `POST /api/brd/validate`
 
 Input: `DiagramSemanticRequest`
 
 Output:
 
-- warnings
-- blocking issues
-- normalized summary
+```json
+{
+  "request_id": "req_...",
+  "status": "ok | blocking",
+  "schema_version": "2026-05-31",
+  "warnings": [],
+  "blocking_issues": [],
+  "result": {
+    "normalized_summary": {
+      "lane_count": 3,
+      "node_count": 18,
+      "edge_count": 17
+    }
+  },
+  "error": null,
+  "metadata": {
+    "latency_ms": 420
+  }
+}
+```
+
+Status codes:
+
+- `200 OK`: request parse được và validate semantic đã chạy xong; có thể là `status = ok` hoặc `status = blocking`
+- `400 Bad Request`: JSON/body/header sai contract, thiếu field bắt buộc, hoặc `X-Schema-Version` không hỗ trợ
+- `429 Too Many Requests`: vượt rate limit Phase 1
+- `500 Internal Server Error`: lỗi nội bộ ngoài dự kiến trong pipeline deterministic
+
+Policy:
+
+- Diagram có vấn đề nghiệp vụ như thiếu start/end, decision unlabeled, orphan note... **không dùng 4xx transport-level**; backend vẫn trả `200` với `status = blocking` hoặc `status = ok` kèm `warnings[]`
+- `validate` không cần `Idempotency-Key`
 
 ### `POST /api/brd/generate`
 
@@ -490,19 +547,135 @@ Input:
 
 - `DiagramSemanticRequest`
 - template: `default` | `full`
+- header `Idempotency-Key` là bắt buộc ở Phase 1
 
 Output:
 
-- `DiagramBRDSpec`
-- `brd_markdown`
-- warnings
-- generation metadata
+```json
+{
+  "request_id": "req_...",
+  "status": "completed | replayed | in_progress | blocking | conflict | failed",
+  "schema_version": "2026-05-31",
+  "warnings": [],
+  "blocking_issues": [],
+  "result": {
+    "spec": {},
+    "brd_markdown": "# BRD Draft",
+    "draft_status": "Draft",
+    "review_status": "Needs review"
+  },
+  "error": null,
+  "metadata": {
+    "provider": "openrouter",
+    "model": "openai/gpt-5.5",
+    "attempt_count": 1,
+    "latency_ms": 12400,
+    "estimated_cost_usd": 0.08
+  }
+}
+```
+
+Status codes:
+
+- `200 OK`: generate hoàn tất hoặc replay thành công; `status = completed | replayed`
+- `202 Accepted`: request cùng `Idempotency-Key` đang được xử lý; `status = in_progress`
+- `400 Bad Request`: body/header sai contract, template không hỗ trợ, thiếu `Idempotency-Key`
+- `409 Conflict`: cùng `Idempotency-Key` nhưng payload khác; `status = conflict`
+- `422 Unprocessable Entity`: diagram parse được nhưng đang có blocking issue; `status = blocking`, không gọi model
+- `429 Too Many Requests`: vượt rate limit
+- `502 Bad Gateway`: provider timeout, provider trả invalid structured output sau retry, hoặc upstream fail; `status = failed`, `error.retryable = true`
+- `503 Service Unavailable`: backend chưa có `BRD_OPENROUTER_API_KEY` hoặc provider bị disable tạm thời; `status = failed`
+
+Policy:
+
+- `generate` được phép tự chạy validate semantic lại ở backend; frontend không phải là trust boundary duy nhất
+- `generate` chỉ gọi model sau khi pipeline deterministic xác nhận không còn blocking issue
+- `metadata.estimated_cost_usd` là ước lượng observability, không phải số billing tuyệt đối
 
 ### `POST /api/brd/regenerate-section`
 
 Phase 2:
 
 - regenerate một section cụ thể từ structured spec hiện tại
+
+### 13.4. Error object và status contract
+
+Khi `error != null`, backend trả object theo shape:
+
+```json
+{
+  "code": "MODEL_TIMEOUT",
+  "message": "Sinh BRD thất bại do provider timeout.",
+  "retryable": true,
+  "related_node_ids": ["n-12", "n-18"]
+}
+```
+
+Field:
+
+- `code`: machine-readable code
+- `message`: message ngắn gọn, có thể hiển thị trực tiếp hoặc map sang i18n key sau này
+- `retryable`: frontend có nên hiện CTA `Retry` hay không
+- `related_node_ids[]`: optional, dùng khi lỗi/warning gắn với node cụ thể
+
+Danh sách code tối thiểu cho Phase 1:
+
+- `INVALID_REQUEST`
+- `SCHEMA_VERSION_UNSUPPORTED`
+- `VALIDATION_BLOCKING`
+- `IDEMPOTENCY_KEY_REQUIRED`
+- `IDEMPOTENCY_KEY_CONFLICT`
+- `MODEL_TIMEOUT`
+- `MODEL_INVALID_STRUCTURED_OUTPUT`
+- `PROVIDER_UNAVAILABLE`
+- `RATE_LIMITED`
+- `INTERNAL_ERROR`
+
+Mapping khuyến nghị:
+
+- `VALIDATION_BLOCKING` đi với `422`
+- `IDEMPOTENCY_KEY_CONFLICT` đi với `409`
+- `MODEL_TIMEOUT` và `MODEL_INVALID_STRUCTURED_OUTPUT` đi với `502`
+- `PROVIDER_UNAVAILABLE` đi với `503`
+
+### 13.5. Idempotency policy và response shape
+
+Phase 1 dùng idempotency cho duy nhất `POST /api/brd/generate`.
+
+Request contract:
+
+- frontend phải gửi header `Idempotency-Key`
+- key có scope theo `(endpoint, request body hash)`
+- TTL mặc định dùng `BRD_IDEMPOTENCY_TTL_SECONDS`
+
+Hành vi backend:
+
+1. Nếu key mới và payload hợp lệ -> xử lý bình thường, trả `200` với `status = completed`
+2. Nếu key cũ và payload giống hệt, kết quả đã có -> trả lại kết quả cũ, `200` với `status = replayed`
+3. Nếu key cũ và payload giống hệt nhưng request đầu tiên còn đang chạy -> trả `202` với `status = in_progress`
+4. Nếu key cũ nhưng payload khác -> trả `409` với `status = conflict`
+
+Response shape tối thiểu cho idempotency:
+
+```json
+{
+  "request_id": "req_...",
+  "status": "completed | replayed | in_progress | conflict",
+  "idempotency_key": "brd-gen-01",
+  "result": {},
+  "error": null,
+  "metadata": {
+    "cached": false,
+    "first_request_at": "2026-05-31T14:00:00Z"
+  }
+}
+```
+
+Lưu ý:
+
+- `validate` không cần idempotency
+- frontend phải reuse cùng `Idempotency-Key` khi user bấm retry cho cùng một lần generate
+- nếu user sửa diagram hoặc đổi template, frontend phải tạo key mới
 
 ## 14. Privacy, security, compliance
 
@@ -532,11 +705,13 @@ Phase 1 nên giả định diagram có thể chứa SOP nội bộ. Vì vậy:
 
 ## 15. Error handling
 
-- blocking validation error -> không generate
-- non-blocking ambiguity -> generate draft + warnings
-- model timeout -> cho retry
-- invalid structured output -> backend retry có kiểm soát trước khi fail
-- diagram có loop -> generate với mục `loops` / `open_questions`
+- blocking validation error -> `422` với `status = blocking`, không gọi model
+- non-blocking ambiguity -> vẫn generate draft + warnings, `200`
+- model timeout -> retry có kiểm soát; nếu vẫn fail, `502` với `error.retryable = true`
+- invalid structured output -> retry có kiểm soát; nếu vẫn fail, `502`
+- thiếu `Idempotency-Key` ở `/generate` -> `400`
+- cùng `Idempotency-Key` nhưng payload khác -> `409`
+- diagram có loop -> generate với warning phù hợp, không fail chỉ vì có cycle
 
 ## 16. Storage và lifecycle
 
@@ -581,6 +756,22 @@ Xây bộ golden set nhỏ:
 3. branch correctness
 4. warning usefulness
 5. human acceptance after review
+6. generate latency
+7. estimated cost per draft
+
+### Performance và cost target cho Phase 1
+
+Target này là **engineering target**, không phải SLA public:
+
+- `POST /api/brd/validate`
+  - p95 `< 2s` với diagram tối đa `30 node / 40 edge`
+- `POST /api/brd/generate`
+  - p50 `< 20s` với diagram tối đa `30 node / 40 edge`
+  - p95 `< 45s` với diagram tối đa `30 node / 40 edge`
+- deterministic render + post-check sau khi đã có structured spec nên chiếm `< 2s` trong tổng thời gian generate
+- estimated cost trung bình cho một lần generate Phase 1 nên giữ `< $0.12`
+- hard guardrail cho một lần generate không retry nên giữ `< $0.25`
+- backend chỉ retry model khi timeout ngắn hoặc invalid structured output; tối đa `1` controlled retry trong Phase 1 để tránh cost runaway
 
 ## 18. Phase plan
 
@@ -602,6 +793,9 @@ Xây bộ golden set nhỏ:
 - có warning list
 - mọi step trong BRD trace được về node id
 - không dùng browser-side provider key
+- `POST /api/brd/validate` và `POST /api/brd/generate` có status/error contract nhất quán theo Section 13
+- `/generate` có idempotency hoạt động đúng cho các trạng thái `completed | replayed | in_progress | conflict`
+- đạt performance/cost target tối thiểu của Section 17 trên golden set Phase 1
 
 ### Phase 2
 

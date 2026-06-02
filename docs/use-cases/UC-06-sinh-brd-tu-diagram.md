@@ -23,13 +23,13 @@
    - tối thiểu 1 start + 1 end
    - mọi node activity / decision đều thuộc 1 lane
    - mọi edge có source + target hợp lệ
-4. Nếu validate sơ bộ fail → frontend hiển thị dialog lỗi, chưa gọi backend.
+4. Nếu validate sơ bộ fail → frontend mở panel BRD ở trạng thái `blocking`, hiển thị lỗi ngay trên UI, và **chưa gọi backend**.
 5. Nếu pass, frontend normalize graph thành `DiagramSemanticRequest` (Section 9.1 của feature doc) và gọi `POST /api/brd/validate`.
 6. Backend chạy Step 1-3 của pipeline (Extract, Normalize, Validate) và trả:
    - `warnings[]` cấp deep semantic (cycle, decision unlabeled, sync-bar span thiếu, orphan note...)
    - blocking issues nếu có
 7. Nếu có blocking issue → panel mở tab `Warnings`, user phải sửa diagram trước khi tiếp tục.
-8. Nếu không có blocking, frontend gọi tiếp `POST /api/brd/generate` với `template: 'default'`.
+8. Nếu không có blocking, frontend gọi tiếp `POST /api/brd/generate` với `template: 'default'` và header `Idempotency-Key`.
 9. Backend chạy Step 4-7 của pipeline:
    - Interpret graph thành canonical structure
    - Gọi model sinh `DiagramBRDSpec` (structured spec) theo schema cố định
@@ -44,12 +44,12 @@
  
 ## Kết quả mong đợi
  
-- Panel hiển thị BRD draft với đầy đủ 10 section của template Phase 1 (process overview → assumptions / open questions).
+- Panel hiển thị BRD draft với đầy đủ 10 section của template Phase 1 (process overview → context / assumptions / open questions).
 - Mọi actor trong BRD map được về `lane_id` trong diagram.
 - Mọi main flow step có `node_id` reference (traceability đầy đủ).
 - Decision không có label trên edge xuất hiện ở mục `open_questions`, không bị model tự bịa `Có/Không`.
 - Loop được render trong `Exceptions / warnings`, không tạo section `Loops` riêng ở Phase 1.
-- Sticky note không tạo step mới; nội dung note được map vào `Assumptions / open questions`.
+- Sticky note không tạo step mới; nội dung note được map vào `Context / assumptions / open questions`.
 - Status: `Draft · Needs review · Warnings present` (hoặc `No blocking warnings` nếu graph sạch).
  
 ## Use case mở rộng
@@ -70,14 +70,21 @@
 ### UC-06c — Sticky note không gần node nào
  
 - Step 4 (Interpret) phân loại note thành `global_note` thay vì `anchored_note`.
-- BRD draft đưa nội dung note vào `Assumptions / open questions`, không gắn vào bất kỳ step cụ thể nào.
+- BRD draft đưa nội dung note vào `Context / assumptions / open questions`, không gắn vào bất kỳ step cụ thể nào.
 - `assumptions[]` ghi: "Note '<text>' không xác định được vị trí trong flow."
  
 ### UC-06d — Model timeout hoặc trả invalid JSON
- 
+
 - Backend retry tối đa N lần (Section 15 feature doc).
 - Nếu vẫn fail, backend trả `502 Bad Gateway` với `retryable: true`.
 - Frontend hiển thị toast: "Sinh BRD thất bại. Bấm để thử lại." kèm `Idempotency-Key` cũ.
+
+### UC-06g — User retry cùng một lần generate
+
+- Frontend reuse cùng `Idempotency-Key` khi user bấm retry mà diagram chưa đổi.
+- Nếu backend đã có kết quả cho key đó, response trả `200` với `status = replayed`.
+- Nếu request đầu tiên vẫn đang xử lý, backend trả `202` với `status = in_progress`.
+- Nếu user đổi diagram rồi vẫn reuse key cũ, backend trả `409` với `status = conflict`; frontend phải generate key mới và gửi lại.
  
 ### UC-06e — User chỉnh sửa BRD draft rồi export
  
