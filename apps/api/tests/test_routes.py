@@ -461,8 +461,7 @@ def test_generate_harmonizes_reader_facing_sections_from_live_provider(
     )
 
     assert response.status_code == 200
-    markdown = response.json()["result"]["brd_markdown"]
-    reader_facing_markdown, appendix = markdown.split("## Appendix A. Traceability (debug)")
+    reader_facing_markdown = response.json()["result"]["brd_markdown"]
 
     assert "Demo summary" not in reader_facing_markdown
     assert "Quy trình bắt đầu khi có tín hiệu hoặc yêu cầu đầu vào; sau đó VOC tiếp nhận và điều phối xử lý ban đầu." in reader_facing_markdown
@@ -471,4 +470,62 @@ def test_generate_harmonizes_reader_facing_sections_from_live_provider(
     assert "n-dec1" not in reader_facing_markdown
     assert "VOC" in reader_facing_markdown
     assert "Tiếp nhận yêu cầu" in reader_facing_markdown
-    assert "S01 -> n-a1" in appendix
+    assert "## Appendix A. Traceability (debug)" not in reader_facing_markdown
+
+
+def test_generate_full_template_keeps_debug_appendix(client, monkeypatch, valid_generate_payload: dict) -> None:
+    monkeypatch.setattr(
+        brd_generate,
+        "settings",
+        SimpleNamespace(
+            provider="openrouter",
+            model_primary="openai/gpt-5.5",
+            openrouter_api_key="test-key",
+        ),
+    )
+
+    class SimpleProvider:
+        def __init__(self, settings) -> None:
+            self.settings = settings
+
+        def generate_structured(self, system_prompt, user_content, response_schema, model):
+            return ProviderResult(
+                output=response_schema.model_validate(
+                    {
+                        "metadata": {
+                            "diagram_name": "Diagram BRD Demo",
+                            "source_language": "vi",
+                            "generated_language": "vi",
+                            "generated_at": "2026-05-31T10:00:00Z",
+                            "generator_model": model,
+                            "generator_version": "fake-live-v3",
+                        },
+                        "summary": "Demo summary",
+                        "actors": [],
+                        "main_flow_steps": [],
+                        "branches": [],
+                        "parallel_blocks": [],
+                        "handoffs": [],
+                        "loops": [],
+                        "annotations": [],
+                        "assumptions": [],
+                        "open_questions": [],
+                        "warnings": [],
+                    }
+                ),
+                usage=ProviderUsage(estimated_cost_usd=0.01),
+            )
+
+    monkeypatch.setattr(brd_generate, "OpenRouterProvider", SimpleProvider)
+
+    payload = {**valid_generate_payload, "template": "full"}
+    response = client.post(
+        "/api/brd/generate",
+        json=payload,
+        headers={**SCHEMA_HEADERS, "Idempotency-Key": "idem-demo-8"},
+    )
+
+    assert response.status_code == 200
+    markdown = response.json()["result"]["brd_markdown"]
+    assert "## Appendix A. Traceability (debug)" in markdown
+    assert "S01 -> n-a1" in markdown

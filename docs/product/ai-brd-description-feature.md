@@ -115,12 +115,14 @@ Không gọi output là BRD chính thức ở Phase 1.
    - tab `Structured spec`
    - tab `BRD Draft`
 8. User review, chỉnh sửa BRD draft, rồi export markdown hoặc copy nội dung.
+9. Nếu user đóng panel, app vẫn giữ last BRD snapshot trong frontend cache để có thể mở lại mà không generate mới.
 
 ### Alternate flows
 
 - Diagram mơ hồ -> vẫn generate draft nhưng buộc hiển thị `open_questions`
 - Diagram có cycle / unlabeled decision / orphan note -> generate với warning rõ ràng
 - Model fail / timeout -> backend trả trạng thái lỗi có thể retry
+- User reset / import diagram khác sau khi đã có draft -> cache cũ được giữ nhưng phải hiển thị `Outdated` khi reopen
 
 ## 6. UX đề xuất
 
@@ -142,12 +144,15 @@ Phase 1 cho phép:
 
 - user chỉnh sửa **BRD Draft** trực tiếp trong editor text area / markdown editor
 - user **không chỉnh sửa trực tiếp canonical structured spec** ở Phase 1
+- app lưu **một last BRD snapshot** ở frontend cache (`localStorage`) cho workspace hiện tại
+- user có thể dùng `Open last BRD draft` để mở lại snapshot đã cache hoặc `Discard cached BRD` để xoá thủ công
 
 Lý do:
 
 - BRD draft là lớp trình bày, hợp để BA chỉnh ngôn ngữ cho nhanh
 - structured spec là canonical layer để giữ traceability và consistency
 - nếu cho sửa cả 2 ngay từ Phase 1, nguy cơ lệch giữa semantic source và prose rất cao
+- frontend cache giúp giữ continuity trước khi có database, nhưng vẫn phải gắn với policy `Outdated` để tránh nhầm draft cũ với diagram mới
 
 Phase 2 có thể mở thêm:
 
@@ -393,7 +398,7 @@ type DiagramBRDSpec = {
 
 ### 11.1. Default export template cho Phase 1
 
-Phase 1 render markdown theo template ngắn gọn, dễ review:
+Phase 1 render markdown theo template reader-facing, dễ review:
 
 1. Process overview
 2. Business objective
@@ -413,6 +418,13 @@ Quy tắc map nội dung cho Phase 1:
 
 Phase 1 không tạo section riêng tên `Loops` hoặc `Annotations`.
 
+Quy tắc reader-facing cho Phase 1:
+
+- `Scope` ưu tiên mô tả trigger, điểm bắt đầu xử lý, điểm kết thúc chính, và phạm vi bao phủ; số actor / số bước chỉ là metadata phụ.
+- `Actors` hiển thị tên actor kèm responsibilities khi hệ thống suy diễn đủ rõ.
+- `Main workflow` dùng format mở rộng theo từng bước: heading + `Đầu vào / kích hoạt`, `Mục đích`, `Thực hiện`, `Kết quả mong đợi`.
+- `template=default` không kèm `Appendix A. Traceability (debug)` trong bản export reader-facing.
+
 ### 11.2. Full template cho Phase 2
 
 Phase 2 bổ sung template đầy đủ hơn cho enterprise:
@@ -428,6 +440,8 @@ Phase 2 bổ sung template đầy đủ hơn cho enterprise:
 9. Branches and decision logic
 10. Parallel activities
 11. Handoffs
+
+Trong implementation hiện tại của Phase 1, `template=full` được dùng như debug export mode để giữ `Appendix A. Traceability (debug)` khi QA / dev cần đối chiếu lại với diagram gốc.
 12. Postconditions / outputs
 13. Business rules inferred from labels
 14. Exceptions / failure handling

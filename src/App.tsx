@@ -21,6 +21,12 @@ import {
 } from './lf-config';
 import DndPanel, { DndPaletteItem } from './DndPanel';
 import BrdPanel from './brd/BrdPanel';
+import {
+  BRD_WORKSPACE_CACHE_VERSION,
+  clearBrdWorkspaceCache,
+  loadBrdWorkspaceCache,
+  saveBrdWorkspaceCache,
+} from './brd/cache';
 import { generateBrd, validateDiagram } from './brd/client';
 import { buildGenerateRequest, buildRequestFingerprint, buildSemanticRequest } from './brd/normalize';
 import { runLocalPreValidation } from './brd/prevalidate';
@@ -695,15 +701,105 @@ export default function App() {
     setDiagramRevision((revision) => revision + 1);
   };
 
+  const hasCachedBrdSnapshot = Boolean(brdDraft || brdSpec);
+  const currentBrdFingerprint = (() => {
+    void diagramRevision;
+    const lf = lfRef.current;
+    if (!lf) return null;
+    try {
+      const graphData = lf.getGraphData() as Parameters<typeof buildGenerateRequest>[0];
+      return buildRequestFingerprint(buildGenerateRequest(graphData, lanesRef.current));
+    } catch {
+      return null;
+    }
+  })();
+
   const isBrdOutdated =
-    lastGeneratedRevision !== null &&
-    diagramRevision !== lastGeneratedRevision &&
-    Boolean(brdDraft);
+    hasCachedBrdSnapshot &&
+    ((lastGeneratedRevision !== null && diagramRevision !== lastGeneratedRevision) ||
+      (lastGenerateFingerprint !== null &&
+        currentBrdFingerprint !== null &&
+        lastGenerateFingerprint !== currentBrdFingerprint));
+
+  const resetBrdState = () => {
+    setBrdPanelOpen(false);
+    setBrdPhase('idle');
+    setBrdTab('warnings');
+    setBrdWarnings([]);
+    setBrdBlockingIssues([]);
+    setBrdSpec(null);
+    setBrdDraft('');
+    setBrdError(null);
+    setBrdMetadata(null);
+    setBrdRequestId(null);
+    setBrdRuntimeStatus(null);
+    setLastGenerateFingerprint(null);
+    setLastGeneratedRevision(null);
+    setLastIdempotencyKey(null);
+  };
+
+  const formatContextSwitchStatus = (base: string) =>
+    hasCachedBrdSnapshot ? `${base} — BRD draft đã cache được giữ và sẽ hiển thị là outdated.` : base;
 
   // Keep ref in sync so event handlers (registered once) always see current value
   useEffect(() => {
     lanesRef.current = lanes;
   }, [lanes]);
+
+  useEffect(() => {
+    const cached = loadBrdWorkspaceCache();
+    if (!cached) return;
+    setBrdPhase(cached.phase);
+    setBrdTab(cached.activeTab);
+    setBrdWarnings(cached.warnings);
+    setBrdBlockingIssues(cached.blockingIssues);
+    setBrdSpec(cached.spec);
+    setBrdDraft(cached.draft);
+    setBrdError(cached.error);
+    setBrdMetadata(cached.metadata);
+    setBrdRequestId(cached.requestId);
+    setBrdRuntimeStatus(cached.runtimeStatus);
+    setLastGenerateFingerprint(cached.lastGenerateFingerprint);
+    setLastGeneratedRevision(cached.lastGeneratedRevision);
+    setLastIdempotencyKey(cached.idempotencyKey);
+    setBrdPanelOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!hasCachedBrdSnapshot) return;
+    saveBrdWorkspaceCache({
+      version: BRD_WORKSPACE_CACHE_VERSION,
+      draft: brdDraft,
+      spec: brdSpec,
+      warnings: brdWarnings,
+      blockingIssues: brdBlockingIssues,
+      metadata: brdMetadata,
+      requestId: brdRequestId,
+      runtimeStatus: brdRuntimeStatus,
+      phase: brdPhase,
+      activeTab: brdTab,
+      error: brdError,
+      lastGenerateFingerprint,
+      lastGeneratedRevision,
+      idempotencyKey: lastIdempotencyKey,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [
+    brdBlockingIssues,
+    brdDraft,
+    brdError,
+    brdMetadata,
+    brdPhase,
+    brdRequestId,
+    brdRuntimeStatus,
+    brdSpec,
+    brdTab,
+    brdWarnings,
+    hasCachedBrdSnapshot,
+    lastGenerateFingerprint,
+    lastGeneratedRevision,
+    lastIdempotencyKey,
+  ]);
 
   const bumpViewportTick = () => setViewportTick((tick) => tick + 1);
 
@@ -1179,6 +1275,23 @@ export default function App() {
     setStatus('Đã giữ BRD draft hiện tại dù diagram đã thay đổi');
   };
 
+  const handleOpenCachedBrd = () => {
+    if (!hasCachedBrdSnapshot) return;
+    setBrdPanelOpen(true);
+    setStatus(
+      isBrdOutdated ? 'Đã mở lại BRD draft đã cache (outdated).' : 'Đã mở lại BRD draft đã cache.',
+    );
+  };
+
+  const handleDiscardCachedBrd = () => {
+    if (!hasCachedBrdSnapshot) return;
+    const confirmed = window.confirm('Xoá BRD draft đã cache khỏi trình duyệt này?');
+    if (!confirmed) return;
+    clearBrdWorkspaceCache();
+    resetBrdState();
+    setStatus('Đã xoá BRD draft đã cache');
+  };
+
   const executeGenerateBrd = async (options?: { reuseIdempotencyKey?: boolean }) => {
     const lf = lfRef.current;
     if (!lf) return;
@@ -1339,7 +1452,7 @@ export default function App() {
         }
         setActiveNodeId(null);
         markDiagramChanged();
-        setStatus(`Đã load: ${file.name}`);
+        setStatus(formatContextSwitchStatus(`Đã load: ${file.name}`));
       } catch (e) {
         setStatus(`Lỗi parse JSON: ${(e as Error).message}`);
       }
@@ -1362,7 +1475,7 @@ export default function App() {
     setActiveNodeId(null);
     lfRef.current?.fitView(20, 20);
     markDiagramChanged();
-    setStatus('Đã reset về diagram mẫu');
+    setStatus(formatContextSwitchStatus('Đã reset về diagram mẫu'));
   };
 
   const handleClear = () => {
@@ -1378,7 +1491,7 @@ export default function App() {
     setActiveLaneId(lanesRef.current[0]?.id ?? null);
     setActiveNodeId(null);
     markDiagramChanged();
-    setStatus('Đã xoá nội dung (giữ lại lane)');
+    setStatus(formatContextSwitchStatus('Đã xoá nội dung (giữ lại lane)'));
   };
 
   const handleUndo = () => lfRef.current?.undo();
@@ -1699,6 +1812,20 @@ export default function App() {
         </button>
         <button className="toolbar-btn primary" onClick={() => void executeGenerateBrd()}>
           Generate BRD
+        </button>
+        <button
+          className="toolbar-btn"
+          onClick={handleOpenCachedBrd}
+          disabled={!hasCachedBrdSnapshot}
+        >
+          Open last BRD draft
+        </button>
+        <button
+          className="toolbar-btn"
+          onClick={handleDiscardCachedBrd}
+          disabled={!hasCachedBrdSnapshot}
+        >
+          Discard cached BRD
         </button>
         <button className="toolbar-btn primary" onClick={handleExportPNG}>
           Export PNG

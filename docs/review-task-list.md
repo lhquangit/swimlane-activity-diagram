@@ -1047,3 +1047,255 @@
   - Chốt giữ 10 section của Phase 1 nhưng đổi label section 10 sang `Context / assumptions / open questions`.
   - Renderer, test suite, feature doc, và `UC-06` đã được sync theo label mới.
   - Contract Phase 1 vẫn giữ 10 section, chỉ làm rõ hơn nội dung thực tế của section cuối.
+
+#### TASK-045 - Mở rộng schema `MainFlowStep` để chứa nội dung BRD-level cho từng bước
+- Priority: P1
+- Status: Done
+- Module: ai-brd-core-pipeline
+- Problem: `MainFlowStep` hiện chỉ có một `description` ngắn, nên section 5 không thể diễn đạt mục đích bước, hành động chính, và kết quả mong đợi như một BRD thật.
+- Why it matters: Đây là khoảng cách lớn nhất còn lại giữa draft hiện tại và một BRD nháp thực thụ. Nếu schema không giàu hơn, renderer không có đủ dữ liệu để nâng chất section 5.
+- Implementation steps:
+  1. Mở rộng `MainFlowStep` trong `apps/api/app/schemas/spec.py` với các field BRD-facing tối thiểu như `step_title`, `step_purpose`, `business_action`, `expected_result`, và optional `input_or_trigger`.
+  2. Cập nhật `build_deterministic_spec()` để suy diễn các field này từ `main_flow_nodes`, context, handoff, và neighboring nodes.
+  3. Giữ fallback an toàn cho diagram nghèo ngữ nghĩa để field nào không suy ra được thì không bịa thêm.
+  4. Cập nhật live harmonization nếu cần để mock/live giữ cùng contract.
+- Acceptance criteria:
+  - `DiagramBRDSpec.main_flow_steps` có đủ dữ liệu để render một step giàu nghiệp vụ hơn một dòng text.
+  - Không làm regress traceability hay thứ tự main spine.
+- Dependencies: None
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - `MainFlowStep` đã được mở rộng với `step_title`, `step_purpose`, `business_action`, `expected_result`, và `input_or_trigger`.
+  - `build_deterministic_spec()` giờ không chỉ copy text node mà còn enrich từng bước bằng heuristic bảo thủ theo loại node, ngữ cảnh đầu vào, handoff, và bước lân cận.
+  - End step không còn rơi về actor mồ côi khi thiếu `lane_id`; hệ thống suy actor đóng quy trình từ bước ngay trước nếu hợp lý.
+
+#### TASK-046 - Render section `Main workflow` theo format BRD mở rộng thay vì numbered list một dòng
+- Priority: P1
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: Dù semantic đã đúng, section 5 hiện vẫn giống checklist flow vì renderer chỉ in `[Actor] description`.
+- Why it matters: Đây là phần BA sẽ đọc kỹ nhất. Nếu section 5 còn ngắn gọn quá mức, toàn bộ draft vẫn chưa đạt cảm giác "BRD thật".
+- Implementation steps:
+  1. Thiết kế format ổn định cho mỗi step, ví dụ:
+     - heading: `1. [Actor] Tên bước`
+     - sub-lines: `Mục đích`, `Thực hiện`, `Kết quả`
+  2. Cập nhật `render_brd_markdown()` để dùng các field mới của `MainFlowStep` thay vì chỉ `description`.
+  3. Giữ output đủ ngắn để không biến section 5 thành đoạn văn dày đặc, nhưng đủ rõ để BA hiểu nghiệp vụ của từng bước.
+  4. Thêm golden snapshot cho sample cháy và ít nhất một sample khác.
+- Acceptance criteria:
+  - `Main workflow` đọc như mô tả nghiệp vụ của từng bước, không còn giống checklist tối giản.
+  - Section 5 vẫn bám đúng thứ tự spine và actor ownership.
+- Dependencies: TASK-045
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - `render.py` đã đổi section 5 sang format nhiều lớp cho mỗi step: heading + `Đầu vào / kích hoạt`, `Mục đích`, `Thực hiện`, `Kết quả mong đợi`.
+  - Reader-facing `Main workflow` giờ không còn là checklist một dòng; nó giữ spine cũ nhưng đọc gần hơn với mô tả nghiệp vụ.
+  - Golden tests đã khóa format mới cho sample reader-facing.
+
+#### TASK-047 - Điền `responsibilities` cho actor và làm section `Actors` mang tính BRD hơn
+- Priority: P2
+- Status: Done
+- Module: ai-brd-core-pipeline
+- Problem: Section `Actors` hiện chỉ liệt kê tên actor, trong khi schema đã có `responsibilities` nhưng builder luôn để trống.
+- Why it matters: BRD thật cần cho người đọc hiểu vai trò của từng bên trong quy trình, không chỉ danh sách người tham gia.
+- Implementation steps:
+  1. Suy diễn trách nhiệm chính của từng actor từ các bước main flow và decision mà actor đó sở hữu.
+  2. Lọc trùng và chuẩn hóa responsibilities thành 1-3 bullet ngắn cho mỗi actor.
+  3. Cập nhật renderer để section 4 hiển thị actor name kèm responsibilities khi có.
+  4. Thêm regression/golden test cho sample cháy.
+- Acceptance criteria:
+  - Ít nhất các actor chính trong sample có trách nhiệm được mô tả ngắn gọn.
+  - Không bịa trách nhiệm vượt quá semantic hiện có của diagram.
+- Dependencies: TASK-045
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - Builder đã suy diễn `responsibilities` từ step titles và business actions của từng actor thay vì để trống.
+  - Renderer hiện hiển thị actor name kèm responsibilities dưới dạng sub-bullets khi có.
+  - Rule suy diễn đã được chỉnh để tránh false-positive trách nhiệm chỉ vì câu expected-result có chứa từ khóa nghiệp vụ.
+
+#### TASK-048 - Làm lại section `Scope` theo hướng ranh giới quy trình thay vì thống kê số lượng
+- Priority: P2
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: `Scope` hiện chỉ có số actor và số bước chính, nên chưa phản ánh phạm vi nghiệp vụ của quy trình.
+- Why it matters: Một BRD reader-facing cần nói quy trình bắt đầu từ đâu, xử lý đến mức nào, và khép ở điều kiện nào. Chỉ đếm số lượng là chưa đủ.
+- Implementation steps:
+  1. Thiết kế lại nội dung section 3 để gồm các mục như `Trigger`, `Điểm bắt đầu xử lý`, `Điểm kết thúc`, `Phạm vi bao phủ`.
+  2. Suy diễn các field này từ `summary`, `context_notes`, `main_flow_steps`, `end` node, và decision outcomes.
+  3. Giữ lại các chỉ số đếm nếu cần nhưng chuyển chúng thành metadata phụ, không phải trọng tâm của section.
+  4. Cập nhật docs/golden tests tương ứng.
+- Acceptance criteria:
+  - Section `Scope` giúp người đọc hiểu ranh giới quy trình chứ không chỉ số liệu thống kê.
+  - Sample cháy nêu được trigger, đầu mối tiếp nhận, và trạng thái kết thúc chính.
+- Dependencies: TASK-045
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - Section 3 đã được làm lại để nêu `Trigger / đầu vào`, `Điểm bắt đầu xử lý`, `Điểm kết thúc chính`, `Phạm vi bao phủ`, và metadata tổng quan.
+  - Số actor / số bước vẫn còn nhưng chỉ là thông tin tổng quan phụ, không còn là toàn bộ section.
+  - Golden tests hiện khóa được scope boundaries của sample reader-facing.
+
+#### TASK-049 - Tách bản export BRD reader-facing khỏi `Appendix A. Traceability (debug)`
+- Priority: P2
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: Bản BRD hiện xuất ra luôn kèm appendix debug, nên vẫn mang tính artifact kỹ thuật hơn là tài liệu nghiệp vụ thuần.
+- Why it matters: Với mục tiêu "gần BRD thật nhất có thể", phần trace/debug nên là tùy chọn cho người kỹ thuật chứ không phải mặc định của bản reader-facing.
+- Implementation steps:
+  1. Thêm mode hoặc option export cho `render_brd_markdown()`, ví dụ `include_debug_appendix=True|False`.
+  2. Mặc định UI/export reader-facing tắt appendix debug, còn debug mode hoặc internal export có thể bật.
+  3. Cập nhật panel/export flow để user chọn hoặc hệ thống tự chọn mode phù hợp.
+  4. Thêm test cho cả hai mode.
+- Acceptance criteria:
+  - Có thể export một bản BRD sạch không chứa appendix debug.
+  - Traceability appendix vẫn tồn tại khi cần cho QA/dev review.
+- Dependencies: None
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests` và manual export review
+- Progress update:
+  - `render_brd_markdown()` giờ dùng `template="default"` cho bản reader-facing không appendix, và `template="full"` cho bản có `Appendix A. Traceability (debug)`.
+  - Flow hiện tại của frontend vẫn gửi `template=default`, nên export markdown mặc định đã sạch hơn cho BA đọc.
+  - Regression tests đã khóa cả mode mặc định lẫn mode `full`.
+
+#### TASK-050 - Thêm golden acceptance test cho tiêu chí “giống BRD thật” ở sample reader-facing
+- Priority: P2
+- Status: Done
+- Module: ai-brd-eval
+- Problem: Test hiện khóa khá tốt semantic correctness, nhưng chưa khóa đủ những tiêu chí prose khiến draft trông giống BRD thật hơn.
+- Why it matters: Khi bắt đầu nâng chất section 3/4/5, rất dễ regress về độ dài, cấu trúc, hoặc quay lại kiểu output quá kỹ thuật.
+- Implementation steps:
+  1. Chọn 2-3 sample điển hình như cháy và đe dọa bom.
+  2. Viết golden assertions cho section 3, 4, 5, và export mode không appendix.
+  3. Thêm một rubric reader-facing tối thiểu: step richness, actor responsibilities, scope boundaries, absence of debug dump.
+  4. Tách suite này khỏi smoke/live để nó phục vụ quality gate cho prose.
+- Acceptance criteria:
+  - Có test tự động cho ít nhất một sample “đủ giống BRD thật” theo tiêu chí đã chốt.
+  - Các task prose tiếp theo không còn chỉ dựa vào review thủ công.
+- Dependencies: TASK-045, TASK-046, TASK-047, TASK-048, TASK-049
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests`
+- Progress update:
+  - Test suite đã bổ sung golden assertions cho section 3, 4, 5 và mode export không appendix.
+  - Route tests cũng đã được cập nhật để phân biệt rõ `default` reader-facing với `full` debug appendix.
+  - Live smoke với OpenRouter đã được rerun thành công sau khi schema `MainFlowStep` được mở rộng.
+
+#### TASK-051 - Định nghĩa frontend cache contract cho AI BRD draft
+- Priority: P1
+- Status: Done
+- Module: ai-brd-frontend-state
+- Problem: BRD state hiện chỉ nằm trong React memory, chưa có một contract cache rõ ràng để lưu và khôi phục draft/spec/warnings sau khi đóng panel hoặc reload app.
+- Why it matters: Nếu không chốt shape cache ngay từ đầu, feature rất dễ rơi vào trạng thái “lưu được markdown nhưng mất metadata, outdated state, hoặc retry context”.
+- Implementation steps:
+  1. Định nghĩa một `BrdWorkspaceCacheEntry` trong frontend types, gồm tối thiểu: `draft`, `spec`, `warnings`, `blockingIssues`, `metadata`, `requestId`, `runtimeStatus`, `phase`, `lastGenerateFingerprint`, `lastGeneratedRevision`, `updatedAt`.
+  2. Chốt storage key/version, ví dụ `swimlane.ai_brd.cache.v1`.
+  3. Chốt policy Phase 1: chỉ lưu **một last snapshot** cho workspace hiện tại, chưa làm multi-history.
+  4. Document rõ field nào là source of truth khi hydrate lại app.
+- Acceptance criteria:
+  - Có contract cache rõ ràng, versioned, đủ dữ liệu để khôi phục BRD panel mà không generate lại.
+  - Không cần đoán lại state từ raw markdown.
+- Dependencies: None
+- Verification: typecheck + unit test parse/serialize cache payload
+- Progress update:
+  - Đã thêm `BrdWorkspaceCacheEntry` và helper `src/brd/cache.ts` với storage key `swimlane.ai_brd.cache.v1`.
+  - Cache contract được version hóa ở mức frontend và có guard parse/version trong unit test.
+
+#### TASK-052 - Persist AI BRD snapshot vào `localStorage` khi generate thành công hoặc user chỉnh draft
+- Priority: P1
+- Status: Done
+- Module: ai-brd-frontend-state
+- Problem: Sau khi generate xong hoặc user edit draft, dữ liệu vẫn chỉ ở RAM; reload trang là mất.
+- Why it matters: Đây là lõi của yêu cầu cache frontend trước khi có database.
+- Implementation steps:
+  1. Thêm helper save/load/clear cache trong `src/brd/*`, tách khỏi `App.tsx`.
+  2. Khi `/generate` thành công, persist snapshot mới vào `localStorage`.
+  3. Khi user chỉnh `BRD Draft`, debounce hoặc persist lại snapshot đã sửa.
+  4. Chỉ lưu các field cần thiết; không lưu graph JSON trùng lặp nếu chưa cần.
+- Acceptance criteria:
+  - Reload app vẫn khôi phục được BRD draft gần nhất và các metadata liên quan.
+  - Bản export sau khi reload vẫn đúng với nội dung user đã sửa.
+- Dependencies: TASK-051
+- Verification: Vitest unit test cho save/load + browser manual reload test
+- Progress update:
+  - `App.tsx` giờ persist snapshot sau khi đã có BRD draft/spec và tự cập nhật lại cache khi user sửa `BRD Draft`.
+  - Snapshot lưu đủ draft/spec/warnings/metadata/runtime state để export sau reload vẫn bám đúng nội dung user đã sửa.
+
+#### TASK-053 - Hydrate cache khi app mở và thêm affordance `Open last BRD draft`
+- Priority: P1
+- Status: Done
+- Module: ai-brd-ui
+- Problem: Hiện close panel chỉ ẩn UI, và panel chỉ được mở lại từ flow generate; user không có đường rõ ràng để mở lại draft đã có.
+- Why it matters: Đây là lý do UX hiện bị cảm nhận như “đóng là mất draft”.
+- Implementation steps:
+  1. Khi `App` mount, đọc cache và hydrate các state BRD nếu payload hợp lệ.
+  2. Thêm action UI rõ ràng để reopen draft đã cache, ví dụ một nút `Open last BRD draft` trên toolbar hoặc cạnh nút generate.
+  3. Nếu panel bị close nhưng cache/state còn, action reopen phải mở lại đúng tab/draft/spec thay vì generate mới.
+  4. Giữ close panel là đóng UI, không xóa cache.
+- Acceptance criteria:
+  - User có thể đóng panel rồi mở lại draft cũ mà không generate lại.
+  - Reload app vẫn có affordance để mở lại bản draft đã cache.
+- Dependencies: TASK-051, TASK-052
+- Verification: Playwright E2E cho close -> reopen và reload -> reopen
+- Progress update:
+  - App hydrate BRD state từ cache khi mount nhưng giữ panel đóng mặc định.
+  - Toolbar có action `Open last BRD draft` để reopen đúng snapshot đã lưu.
+
+#### TASK-054 - Thêm invalidation và `outdated` policy cho BRD cache theo fingerprint/revision
+- Priority: P1
+- Status: Done
+- Module: ai-brd-frontend-state
+- Problem: Nếu chỉ hydrate cache mà không so với diagram hiện tại, user có thể đọc nhầm draft cũ như thể nó còn khớp hoàn toàn với graph mới.
+- Why it matters: Cache không có invalidation sẽ làm feature “tiện” nhưng nguy hiểm về mặt nghiệp vụ.
+- Implementation steps:
+  1. Khi lưu cache, persist cả `lastGenerateFingerprint` và `lastGeneratedRevision`.
+  2. Khi hydrate, so sánh với diagram hiện tại để xác định `fresh` / `outdated`.
+  3. Nếu outdated, panel hoặc action reopen phải hiển thị badge/warning rõ ràng.
+  4. Chốt policy khi import JSON mới hoặc reset canvas: giữ cache cũ ở trạng thái outdated hay clear hẳn.
+- Acceptance criteria:
+  - Cache cũ không bao giờ được trình bày như bản còn khớp tuyệt đối với diagram mới.
+  - User luôn được báo rõ khi đang mở lại draft outdated.
+- Dependencies: TASK-052, TASK-053
+- Verification: unit test fingerprint compare + E2E cho mutate diagram sau hydrate
+- Progress update:
+  - Cache snapshot lưu cả `lastGenerateFingerprint` và `lastGeneratedRevision`.
+  - Reopen sau reset/import/reload giờ tính `Outdated` theo fingerprint/revision thay vì coi cache luôn là fresh.
+  - Policy Phase 1 được chốt là giữ cache cũ ở trạng thái `Outdated` cho đến khi user regenerate hoặc discard.
+
+#### TASK-055 - Thêm hành động xóa cache BRD thủ công và dọn lifecycle khi reset/import
+- Priority: P2
+- Status: Done
+- Module: ai-brd-ui
+- Problem: Sau khi có cache, hệ thống cũng cần cách cho user bỏ bản cũ đi khi nó không còn giá trị hoặc sau các hành động phá ngữ cảnh như reset/import hoàn toàn diagram khác.
+- Why it matters: Cache mà không có clear path sẽ sớm trở thành nguồn nhầm lẫn.
+- Implementation steps:
+  1. Thêm action `Discard cached BRD` hoặc tương đương.
+  2. Xác định các event nên prompt/auto-clear cache: reset canvas, import diagram khác, load sample khác.
+  3. Clear cả in-memory BRD state và `localStorage` khi user xác nhận discard.
+  4. Update status text/UX copy cho rõ.
+- Acceptance criteria:
+  - User có cách chủ động bỏ BRD cache cũ.
+  - Các thao tác thay đổi diagram mang tính “context switch” không để lại cached draft mơ hồ.
+- Dependencies: TASK-052, TASK-053
+- Verification: manual test reset/import/discard
+- Progress update:
+  - Toolbar có action `Discard cached BRD` để clear cả in-memory state lẫn `localStorage`.
+  - Reset/import/clear hiện giữ cache ở trạng thái outdated và update status copy để user biết draft cũ không còn khớp hoàn toàn.
+
+#### TASK-056 - Khóa frontend cache behavior bằng unit + E2E tests
+- Priority: P2
+- Status: Done
+- Module: ai-brd-tests
+- Problem: Cache UI/state rất dễ regress: save thiếu field, hydrate sai tab, close/reopen không ổn, outdated badge biến mất.
+- Why it matters: Không có test, tính năng cache sẽ mong manh hơn chính feature generate.
+- Implementation steps:
+  1. Thêm unit test cho serialize/deserialize cache entry và version guard.
+  2. Mở rộng Playwright flow cho:
+     - generate -> close -> reopen
+     - generate -> edit draft -> reload -> reopen
+     - generate -> mutate diagram -> reopen cached draft -> thấy outdated
+  3. Thêm test discard cache.
+  4. Nếu cần, mock `localStorage` trong Vitest cho component-level test.
+- Acceptance criteria:
+  - Có automated coverage cho save, hydrate, reopen, outdated, discard.
+  - Cache behavior không chỉ dựa vào manual test.
+- Dependencies: TASK-052, TASK-053, TASK-054, TASK-055
+- Verification: `npm run test:brd-mock` + Playwright E2E
+- Progress update:
+  - Đã thêm `src/brd/cache.test.ts` cho save/load/clear/version guard.
+  - Playwright flow đã mở rộng để cover `generate -> close -> reopen -> reload -> outdated -> discard`.

@@ -70,7 +70,12 @@ export default function BrdPanel({
             {runtimeStatus ? ` · ${runtimeStatus}` : ''}
           </p>
         </div>
-        <button className="brd-panel__icon-btn" onClick={onClose} title="Đóng panel">
+        <button
+          className="brd-panel__icon-btn"
+          onClick={onClose}
+          title="Đóng panel"
+          aria-label="Đóng panel"
+        >
           ×
         </button>
       </div>

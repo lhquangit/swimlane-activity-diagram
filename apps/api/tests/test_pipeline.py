@@ -44,8 +44,9 @@ def test_reader_facing_markdown_keeps_raw_ids_in_appendix_only(valid_generate_pa
         )
     )
 
-    markdown = render_brd_markdown(spec)
-    reader_facing_markdown, appendix = markdown.split("## Appendix A. Traceability (debug)")
+    reader_facing_markdown = render_brd_markdown(spec)
+    markdown_with_appendix = render_brd_markdown(spec, template="full")
+    appendix = markdown_with_appendix.split("## Appendix A. Traceability (debug)")[1]
 
     assert "## 2. Business objective" in reader_facing_markdown
     assert "Mục tiêu nghiệp vụ được suy ra từ flow hiện tại" not in reader_facing_markdown
@@ -60,6 +61,7 @@ def test_reader_facing_markdown_keeps_raw_ids_in_appendix_only(valid_generate_pa
     assert "n-a1" not in reader_facing_markdown
     assert "n-dec1" not in reader_facing_markdown
     assert "lane-a" not in reader_facing_markdown
+    assert "## Appendix A. Traceability (debug)" not in reader_facing_markdown
     assert "S01 -> n-a1" in appendix
     assert "Đủ thông tin? -> n-dec1" in appendix
 
@@ -293,8 +295,7 @@ def test_render_section_10_does_not_emit_empty_state_when_context_exists() -> No
         }
     )
 
-    markdown = render_brd_markdown(spec)
-    section_10, _ = markdown.split("## Appendix A. Traceability (debug)")
+    section_10 = render_brd_markdown(spec)
 
     assert "## 10. Context / assumptions / open questions" in section_10
     assert "- Context: 1 trong 4 nhóm phát hiện dấu hiệu cháy." in section_10
@@ -352,7 +353,7 @@ def test_render_alternate_branch_uses_narrative_wording_instead_of_arrow_trace()
     markdown = render_brd_markdown(spec)
 
     assert "Thực hiện lần lượt [Trưởng điều phối] Xác nhận thông tin sai, rồi [Trưởng điều phối] Báo cáo kết quả xác minh; sau đó nhập lại luồng chính tại [Trưởng điều phối] Kết thúc quy trình." in markdown
-    assert "->" not in markdown.split("## Appendix A. Traceability (debug)")[0]
+    assert "->" not in markdown
 
 
 def test_deterministic_summary_mentions_trigger_context_and_first_actor() -> None:
@@ -515,8 +516,7 @@ def test_reader_facing_markdown_normalizes_multiline_canvas_text() -> None:
         }
     )
 
-    markdown = render_brd_markdown(spec)
-    reader_facing_markdown = markdown.split("## Appendix A. Traceability (debug)")[0]
+    reader_facing_markdown = render_brd_markdown(spec)
 
     assert "Xác minh sự cố là cháy thật?" in reader_facing_markdown
     assert "Báo cáo qua bộ đàm về kết quả xác minh cho các actor trong VOC" in reader_facing_markdown
@@ -525,6 +525,61 @@ def test_reader_facing_markdown_normalizes_multiline_canvas_text() -> None:
     assert "Xác minh sự cố\nlà cháy thật?" not in reader_facing_markdown
     assert "kết quả xác minh\ncho các actor" not in reader_facing_markdown
     assert "gần nhất\nqua bộ đàm" not in reader_facing_markdown
+
+
+def test_render_main_workflow_uses_brd_rich_step_format(valid_generate_payload: dict) -> None:
+    payload = dict(valid_generate_payload)
+    payload.pop("template", None)
+    request = DiagramSemanticRequest.model_validate(payload)
+    interpreted = interpret_request(request, [])
+
+    spec = DiagramBRDSpec.model_validate(
+        build_deterministic_spec(
+            payload=request.model_dump(mode="python"),
+            interpreted=interpreted,
+            warnings=[],
+            model_name="openai/gpt-5.5",
+        )
+    )
+
+    markdown = render_brd_markdown(spec)
+
+    assert "## 5. Main workflow" in markdown
+    assert "1. [VOC] Tiếp nhận yêu cầu" in markdown
+    assert "   - Đầu vào / kích hoạt:" in markdown
+    assert "   - Mục đích:" in markdown
+    assert "   - Thực hiện:" in markdown
+    assert "   - Kết quả mong đợi:" in markdown
+
+
+def test_render_scope_actors_and_template_modes_support_reader_facing_brd(valid_generate_payload: dict) -> None:
+    payload = dict(valid_generate_payload)
+    payload.pop("template", None)
+    request = DiagramSemanticRequest.model_validate(payload)
+    interpreted = interpret_request(request, [])
+
+    spec = DiagramBRDSpec.model_validate(
+        build_deterministic_spec(
+            payload=request.model_dump(mode="python"),
+            interpreted=interpreted,
+            warnings=[],
+            model_name="openai/gpt-5.5",
+        )
+    )
+
+    default_markdown = render_brd_markdown(spec)
+    full_markdown = render_brd_markdown(spec, template="full")
+
+    assert "## 3. Scope" in default_markdown
+    assert "- Điểm bắt đầu xử lý: [VOC] Tiếp nhận yêu cầu." in default_markdown
+    assert "- Điểm kết thúc chính: [Nhân sự xử lý] Kết thúc quy trình." in default_markdown
+    assert "- Phạm vi bao phủ:" in default_markdown
+    assert "## 4. Actors" in default_markdown
+    assert "  - Tiếp nhận, ghi nhận, và lưu vết thông tin ban đầu của quy trình." in default_markdown
+    assert "  - Kiểm tra, xác minh, và xác định hướng xử lý tiếp theo theo tình huống thực tế." in default_markdown
+    assert "  - Thực hiện hoặc theo dõi biện pháp xử lý phù hợp với tình huống đã được xác minh." in default_markdown
+    assert "## Appendix A. Traceability (debug)" not in default_markdown
+    assert "## Appendix A. Traceability (debug)" in full_markdown
 
 
 def test_non_branching_sync_bar_does_not_create_parallel_block() -> None:

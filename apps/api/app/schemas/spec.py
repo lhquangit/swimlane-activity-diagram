@@ -28,6 +28,11 @@ class MainFlowStep(StrictBaseModel):
     node_id: str
     actor_lane_id: str | None = None
     actor_name: str | None = None
+    step_title: str | None = None
+    step_purpose: str | None = None
+    business_action: str | None = None
+    expected_result: str | None = None
+    input_or_trigger: str | None = None
     description: str
 
 

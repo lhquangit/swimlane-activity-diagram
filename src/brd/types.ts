@@ -52,6 +52,11 @@ export type BrdSpec = {
     node_id: string;
     actor_lane_id?: string | null;
     actor_name?: string | null;
+    step_title?: string | null;
+    step_purpose?: string | null;
+    business_action?: string | null;
+    expected_result?: string | null;
+    input_or_trigger?: string | null;
     description: string;
   }>;
   branches: Array<{
@@ -163,3 +168,21 @@ export type BrdPanelPhase =
   | 'ready'
   | 'failed'
   | 'in-progress';
+
+export type BrdWorkspaceCacheEntry = {
+  version: 'v1';
+  draft: string;
+  spec: BrdSpec | null;
+  warnings: WarningItem[];
+  blockingIssues: WarningItem[];
+  metadata: ResponseMetadata | null;
+  requestId: string | null;
+  runtimeStatus: string | null;
+  phase: BrdPanelPhase;
+  activeTab: BrdTabId;
+  error: ErrorObject | null;
+  lastGenerateFingerprint: string | null;
+  lastGeneratedRevision: number | null;
+  idempotencyKey: string | null;
+  updatedAt: string;
+};

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.schemas.spec import BranchOutcome, DiagramBRDSpec
+from app.schemas.spec import BranchOutcome, DiagramBRDSpec, MainFlowStep
 from app.services.reader_text import normalize_inline_text
 from app.services.reader_text import split_structured_note
 
@@ -16,21 +16,32 @@ def render_brd_markdown(spec: DiagramBRDSpec, template: str = "default") -> str:
     lines.append(build_business_objective(spec))
     lines.append("")
     lines.append("## 3. Scope")
-    lines.append(f"- Số actor: {len(spec.actors)}")
-    lines.append(f"- Số bước chính: {len(spec.main_flow_steps)}")
+    lines.extend(render_scope(spec))
     lines.append("")
     lines.append("## 4. Actors")
     if spec.actors:
         for actor in spec.actors:
             lines.append(f"- {actor.actor_name}")
+            if actor.responsibilities:
+                lines.extend(
+                    f"  - {normalize_inline_text(responsibility)}"
+                    for responsibility in actor.responsibilities
+                )
     else:
         lines.append("- Chưa xác định actor.")
     lines.append("")
     lines.append("## 5. Main workflow")
     if spec.main_flow_steps:
         for step in spec.main_flow_steps:
-            actor_prefix = f"[{step.actor_name}] " if step.actor_name else ""
-            lines.append(f"1. {actor_prefix}{normalize_inline_text(step.description)}")
+            lines.append(f"1. {format_step_heading(step)}")
+            if step.input_or_trigger:
+                lines.append(f"   - Đầu vào / kích hoạt: {normalize_inline_text(step.input_or_trigger)}")
+            if step.step_purpose:
+                lines.append(f"   - Mục đích: {normalize_inline_text(step.step_purpose)}")
+            if step.business_action:
+                lines.append(f"   - Thực hiện: {normalize_inline_text(step.business_action)}")
+            if step.expected_result:
+                lines.append(f"   - Kết quả mong đợi: {normalize_inline_text(step.expected_result)}")
     else:
         lines.append("- Chưa xác định được bước chính.")
     lines.append("")
@@ -55,9 +66,7 @@ def render_brd_markdown(spec: DiagramBRDSpec, template: str = "default") -> str:
     if spec.handoffs:
         for handoff in spec.handoffs:
             description = normalize_inline_text(handoff.reason) or "Chuyển giao công việc giữa các actor."
-            lines.append(
-                f'- {handoff.from_actor} -> {handoff.to_actor}: {description}'
-            )
+            lines.append(f"- {handoff.from_actor} -> {handoff.to_actor}: {description}")
     else:
         lines.append("- Không phát sinh điểm bàn giao rõ ràng giữa các actor.")
     lines.append("")
@@ -86,9 +95,73 @@ def render_brd_markdown(spec: DiagramBRDSpec, template: str = "default") -> str:
         lines.append(f"- Open question: {normalize_inline_text(question)}")
     if not has_assumption_section_content(spec):
         lines.append("- Không có giả định hoặc câu hỏi mở nổi bật.")
-    lines.append("")
-    lines.extend(render_traceability_appendix(spec))
+
+    if template == "full":
+        lines.append("")
+        lines.extend(render_traceability_appendix(spec))
+
     return "\n".join(lines)
+
+
+def render_scope(spec: DiagramBRDSpec) -> list[str]:
+    lines: list[str] = []
+    context_heading = first_context_heading(spec)
+    first_step = spec.main_flow_steps[0] if spec.main_flow_steps else None
+    last_step = spec.main_flow_steps[-1] if spec.main_flow_steps else None
+
+    if context_heading:
+        lines.append(f"- Trigger / đầu vào: {context_heading}.")
+    elif spec.summary:
+        lines.append("- Trigger / đầu vào: Quy trình được khởi phát khi xuất hiện tín hiệu hoặc yêu cầu cần xử lý.")
+
+    if first_step:
+        lines.append(f"- Điểm bắt đầu xử lý: {render_scope_step_reference(first_step)}.")
+    if last_step:
+        lines.append(f"- Điểm kết thúc chính: {render_scope_step_reference(last_step)}.")
+
+    lines.append(f"- Phạm vi bao phủ: {build_scope_coverage(spec)}")
+    lines.append(
+        f"- Thông tin tổng quan: {len(spec.actors)} actor tham gia và {len(spec.main_flow_steps)} bước chính trong luồng xử lý."
+    )
+    return lines
+
+
+def render_scope_step_reference(step: MainFlowStep) -> str:
+    actor_prefix = f"[{step.actor_name}] " if step.actor_name else ""
+    return f"{actor_prefix}{normalize_inline_text(step.step_title or step.description)}"
+
+
+def build_scope_coverage(spec: DiagramBRDSpec) -> str:
+    if not spec.main_flow_steps:
+        return "Chưa xác định đủ bước chính để mô tả phạm vi quy trình."
+
+    first_step = spec.main_flow_steps[0]
+    last_step = spec.main_flow_steps[-1]
+    branch_count = len(spec.branches)
+
+    coverage = (
+        f'Quy trình bao phủ từ bước "{normalize_inline_text(first_step.step_title or first_step.description)}" '
+        f'đến bước "{normalize_inline_text(last_step.step_title or last_step.description)}"'
+    )
+    if branch_count:
+        coverage += f", với {branch_count} điểm quyết định điều hướng nhánh xử lý."
+    else:
+        coverage += "."
+    return coverage
+
+
+def first_context_heading(spec: DiagramBRDSpec) -> str | None:
+    if not spec.context_notes:
+        return None
+    heading, _ = split_structured_note(spec.context_notes[0])
+    normalized_heading = normalize_inline_text(heading)
+    return normalized_heading.rstrip(".")
+
+
+def format_step_heading(step: MainFlowStep) -> str:
+    actor_prefix = f"[{step.actor_name}] " if step.actor_name else ""
+    step_title = normalize_inline_text(step.step_title or step.description) or "Thực hiện bước công việc"
+    return f"{actor_prefix}{step_title}"
 
 
 def branch_outcome_prefix(outcome: BranchOutcome) -> str:
@@ -151,7 +224,20 @@ def build_business_objective(spec: DiagramBRDSpec) -> str:
 
 def build_reader_facing_corpus(spec: DiagramBRDSpec) -> str:
     parts: list[str] = [spec.summary]
-    parts.extend(step.description for step in spec.main_flow_steps)
+    for step in spec.main_flow_steps:
+        parts.extend(
+            filter(
+                None,
+                (
+                    step.description,
+                    step.step_title,
+                    step.step_purpose,
+                    step.business_action,
+                    step.expected_result,
+                    step.input_or_trigger,
+                ),
+            )
+        )
     parts.extend(branch.decision_text for branch in spec.branches)
     parts.extend(spec.context_notes)
     return normalize_inline_text(" ".join(part for part in parts if part)).lower()
@@ -174,7 +260,7 @@ def render_traceability_appendix(spec: DiagramBRDSpec) -> list[str]:
     lines.append("### Decision trace")
     if spec.branches:
         for branch in spec.branches:
-            lines.append(f'- {branch.decision_text} -> {branch.decision_node_id}')
+            lines.append(f"- {branch.decision_text} -> {branch.decision_node_id}")
             for outcome in branch.outcomes:
                 label = outcome.label or "unlabeled"
                 lines.append(f"  - {label} -> {outcome.target_node_id}")

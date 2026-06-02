@@ -40,16 +40,23 @@
     - `Structured Spec` — JSON view, read-only
     - `BRD Draft` — markdown editor, **có thể chỉnh sửa**
 11. User review, chỉnh sửa BRD markdown trực tiếp trong tab `BRD Draft` nếu cần.
-12. User bấm `Export markdown` để tải file `.md`, hoặc `Copy` để copy vào clipboard.
+12. Frontend persist last BRD snapshot vào `localStorage` sau khi generate thành công và sau các lần user chỉnh draft.
+13. Nếu user đóng panel, user có thể bấm `Open last BRD draft` trên toolbar để mở lại snapshot đã cache mà không generate mới.
+14. User bấm `Export markdown` để tải file `.md` reader-facing mặc định, hoặc `Copy` để copy vào clipboard.
  
 ## Kết quả mong đợi
  
 - Panel hiển thị BRD draft với đầy đủ 10 section của template Phase 1 (process overview → context / assumptions / open questions).
+- `Main workflow` được render theo format mở rộng cho từng bước, không chỉ là danh sách một dòng.
+- `Actors` có thể kèm responsibilities nếu hệ thống suy diễn đủ rõ từ diagram.
+- `Scope` mô tả trigger, điểm bắt đầu xử lý, điểm kết thúc chính, và phạm vi bao phủ.
 - Mọi actor trong BRD map được về `lane_id` trong diagram.
 - Mọi main flow step có `node_id` reference (traceability đầy đủ).
 - Decision không có label trên edge xuất hiện ở mục `open_questions`, không bị model tự bịa `Có/Không`.
 - Loop được render trong `Exceptions / warnings`, không tạo section `Loops` riêng ở Phase 1.
 - Sticky note không tạo step mới; nội dung note được map vào `Context / assumptions / open questions`.
+- Bản export mặc định không kèm `Appendix A. Traceability (debug)`; appendix chỉ xuất hiện ở mode debug/template đầy đủ khi cần cho QA/dev review.
+- Reload app vẫn có thể reopen last BRD draft đã cache nếu payload còn hợp lệ.
 - Status: `Draft · Needs review · Warnings present` (hoặc `No blocking warnings` nếu graph sạch).
  
 ## Use case mở rộng
@@ -97,6 +104,19 @@
 - Sau khi đã có BRD draft, user tiếp tục chỉnh sửa diagram (thêm node, đổi label edge).
 - Panel hiển thị badge `Outdated — diagram changed since last generate`.
 - User phải bấm `Regenerate` để cập nhật, hoặc bấm `Keep this draft` để xác nhận giữ bản cũ.
+
+### UC-06h — User đóng panel hoặc reload app sau khi đã generate
+
+- Close panel chỉ đóng UI, không xoá cache.
+- Khi app mở lại, frontend hydrate BRD cache nếu payload hợp lệ.
+- Toolbar hiển thị action `Open last BRD draft` để reopen snapshot gần nhất.
+- Nếu diagram hiện tại khác fingerprint/revision của snapshot đã lưu, panel phải hiện badge `Outdated`.
+
+### UC-06i — User chủ động bỏ BRD cache cũ
+
+- Toolbar cung cấp action `Discard cached BRD`.
+- Khi user xác nhận discard, frontend xoá cả in-memory BRD state và `localStorage`.
+- Sau reset/import diagram khác, cache cũ mặc định được giữ ở trạng thái `Outdated` cho đến khi user discard hoặc regenerate.
  
 ## Out of scope cho UC-06 ở Phase 1
  
