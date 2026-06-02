@@ -1299,3 +1299,188 @@
 - Progress update:
   - Đã thêm `src/brd/cache.test.ts` cho save/load/clear/version guard.
   - Playwright flow đã mở rộng để cover `generate -> close -> reopen -> reload -> outdated -> discard`.
+
+#### TASK-057 - Chốt draw.io XML interchange contract và supported subset
+- Priority: P1
+- Status: Done
+- Module: file-interchange
+- Problem: Repo hiện chỉ có contract file thao tác trực tiếp ở mức JSON/SVG, trong khi yêu cầu mới là import/export draw.io XML theo format `mxfile > diagram > mxGraphModel` giống [examples/bomb.drawio.xml](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/examples/bomb.drawio.xml:1).
+- Why it matters: Nếu không chốt subset hỗ trợ trước, parser và serializer sẽ dễ lệch nhau, dẫn tới import được một kiểu nhưng export ra một kiểu khác hoặc mất semantic lane/node.
+- Implementation steps:
+  1. Tạo doc contract ngắn cho draw.io XML support trong repo docs hoặc README kỹ thuật: outer swimlane container, lane columns, start/end/activity/decision/sync-bar/note, edges có label.
+  2. Chốt field mapping giữa LogicFlow graph và draw.io `mxCell`:
+     - lane root container
+     - lane parent cell
+     - node `type -> style`
+     - edge `source/target/value/style`
+  3. Chốt policy text: decode HTML-rich `value` khi import và encode subset ổn định khi export.
+  4. Chốt policy Phase 1: tạm ẩn `Mở JSON`, `Lưu JSON`, `Export SVG` khỏi toolbar, nhưng không xóa code path nền ngay.
+- Acceptance criteria:
+  - Có supported subset rõ ràng cho import/export XML.
+  - Dev có thể implement parser/serializer mà không phải đoán format draw.io được support.
+- Dependencies: None
+- Verification: Review chéo contract với [examples/bomb.drawio.xml](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/examples/bomb.drawio.xml:1)
+- Progress update:
+  - Supported subset đã được chốt trong [docs/use-cases/UC-05-import-export.md](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/docs/use-cases/UC-05-import-export.md:1).
+  - Contract text/style/geometry đã được encode thành adapter helpers tại `src/io/drawio-shared.ts`.
+
+#### TASK-058 - Tách XML adapter layer khỏi `App.tsx`
+- Priority: P1
+- Status: Done
+- Module: editor-toolbar-runtime
+- Problem: Import/export hiện đang được xử lý inline trong [src/App.tsx](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/src/App.tsx:1798), không phù hợp để nhét thêm parse/serialize draw.io XML.
+- Why it matters: Nếu xử lý XML trực tiếp trong `App.tsx`, file này sẽ phình thêm và rất khó test unit cho file-interchange logic.
+- Implementation steps:
+  1. Tạo module mới, ví dụ `src/io/drawio-import.ts` và `src/io/drawio-export.ts`.
+  2. Giữ `App.tsx` chỉ làm việc với `FileReader`, download, và call adapter.
+  3. Nếu cần, thêm `src/io/drawio-types.ts` cho các shape trung gian như `MxCell`, `MxGeometry`, `DrawioDocument`.
+  4. Chuẩn bị helper text decode/encode dùng chung thay vì lặp lại logic trong import/export.
+- Acceptance criteria:
+  - `App.tsx` không tự parse XML string hoặc build `mxCell` string thủ công.
+  - XML mapping logic nằm trong module có thể unit test độc lập.
+- Dependencies: TASK-057
+- Verification: Typecheck + code review entrypoint flow
+- Progress update:
+  - Đã tách parser/serializer sang `src/io/drawio-import.ts`, `src/io/drawio-export.ts`, `src/io/drawio-shared.ts`, `src/io/drawio-types.ts`.
+  - `App.tsx` chỉ còn giữ file-picker/download orchestration.
+
+#### TASK-059 - Implement import XML draw.io -> LogicFlow graph normalization
+- Priority: P1
+- Status: Done
+- Module: file-interchange
+- Problem: Editor chưa thể đọc file draw.io XML kiểu [examples/bomb.drawio.xml](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/examples/bomb.drawio.xml:1), dù đây là format interchange người dùng muốn dùng.
+- Why it matters: Không có import path thì user không thể đưa các sơ đồ hiện có từ draw.io vào editor để tiếp tục chỉnh hoặc generate BRD.
+- Implementation steps:
+  1. Parse XML bằng `DOMParser` và validate sơ bộ cấu trúc `mxfile/diagram/mxGraphModel/root`.
+  2. Đọc outer swimlane container và lane children để reconstruct `LaneConfig[]`.
+  3. Map `mxCell` vertex styles sang node types:
+     - `shape=startState` -> `start`
+     - `shape=endState` -> `end`
+     - `shape=mxgraph.bpmn.task2` -> `activity` hoặc `note` theo heuristics contract
+     - `rhombus` -> `decision`
+     - `shape=line` -> `sync-bar`
+  4. Map edge cells sang LogicFlow edges, giữ label nếu có.
+  5. Normalize text từ HTML-rich `value` về plain text editor-facing.
+  6. Trả ra graph data + lane metadata tương thích với flow hydrate hiện tại.
+- Acceptance criteria:
+  - Import được `examples/bomb.drawio.xml` vào canvas mà không crash.
+  - Lane/node/edge topology chính được giữ đúng ở mức dùng được cho editor và BRD pipeline.
+  - Các node import xong vẫn bám lane hợp lệ.
+- Dependencies: TASK-057, TASK-058
+- Verification: fixture import test với `examples/bomb.drawio.xml` + browser smoke import
+- Progress update:
+  - Import path hiện parse được `mxfile/diagram/mxGraphModel/root`, reconstruct lane columns, map node/edge types, và normalize text draw.io HTML về plain text editor-facing.
+  - Playwright smoke đã cover import fixture từ toolbar.
+
+#### TASK-060 - Implement export LogicFlow graph -> draw.io XML serializer
+- Priority: P1
+- Status: Done
+- Module: file-interchange
+- Problem: Sau khi chỉnh diagram trong editor, user cần xuất ra draw.io XML tương thích để dùng lại ở diagrams.net hoặc lưu trữ theo format yêu cầu.
+- Why it matters: Import-only sẽ làm feature bị cụt; export là nửa còn lại của interchange contract.
+- Implementation steps:
+  1. Build serializer tạo `mxfile > diagram > mxGraphModel > root`.
+  2. Sinh outer swimlane container + lane child cells tương đương contract đã chốt.
+  3. Map node types sang draw.io styles/geometry:
+     - lane
+     - start/end ellipse
+     - activity/note task-like blocks
+     - decision rhombus
+     - sync-bar line
+  4. Map edges sang `mxCell edge="1"` với `source`, `target`, `value`, và style mặc định ổn định.
+  5. Encode text thành HTML-safe `value` nhất quán để re-import không vỡ nội dung.
+- Acceptance criteria:
+  - Export XML mở được ở draw.io/diagrams.net.
+  - File export có cấu trúc cùng họ với `examples/bomb.drawio.xml`.
+  - Re-import file vừa export lại vào app cho ra topology tương đương.
+- Dependencies: TASK-057, TASK-058
+- Verification: golden XML export test + manual open in draw.io
+- Progress update:
+  - Export path sinh outer swimlane container, lane cells, node cells, edge cells, và edge-label cells.
+  - Exported XML đã pass round-trip test `graph -> XML -> graph`.
+
+#### TASK-061 - Đổi toolbar sang XML-first và tạm ẩn JSON/SVG
+- Priority: P2
+- Status: Done
+- Module: editor-toolbar-runtime
+- Problem: Toolbar hiện vẫn lộ các action cũ `Mở JSON…`, `Lưu JSON`, `Export SVG` ở [src/App.tsx](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/src/App.tsx:1798), trong khi user muốn XML là interchange chính.
+- Why it matters: UX phải phản ánh đúng workflow đang được khuyến nghị; nếu không user sẽ bị kéo theo hai cơ chế file song song.
+- Implementation steps:
+  1. Tạm ẩn khỏi toolbar các action:
+     - `Mở JSON…`
+     - `Lưu JSON`
+     - `Export SVG`
+  2. Thêm action mới:
+     - `Import XML…`
+     - `Export XML`
+  3. Giữ `Export PNG` nếu vẫn hữu ích cho snapshot hình ảnh.
+  4. Update status copy và error copy cho XML-specific failures.
+  5. Không xóa code JSON/SVG adapter nền ngay; chỉ hạ khỏi surface UI trong Phase 1 của XML rollout.
+- Acceptance criteria:
+  - Toolbar không còn hiển thị JSON/SVG actions cũ.
+  - User thấy rõ XML là file format chính cho interchange.
+- Dependencies: TASK-059, TASK-060
+- Verification: browser smoke toolbar flow
+- Progress update:
+  - Toolbar hiện hiển thị `Import XML…`, `Export XML`, `Export PNG`.
+  - `Mở JSON…`, `Lưu JSON`, `Export SVG` vẫn còn code path nền nhưng đã bị hạ khỏi surface UI.
+
+#### TASK-062 - Harden lane/node geometry mapping cho import XML
+- Priority: P2
+- Status: Done
+- Module: logicflow-canvas-model
+- Problem: draw.io XML dùng nested parent geometry và absolute offsets rất khác với layout nội bộ hiện tại; import dễ làm node lệch lane hoặc `sync-bar` span sai.
+- Why it matters: Nếu import topology không chắc, BRD generation sau import sẽ cho output sai hoặc khó hiểu.
+- Implementation steps:
+  1. Xử lý đúng parent-child coordinates của lane và node khi convert từ `mxGeometry`.
+  2. Backfill metadata nội bộ như `laneId`, `laneOffsetX`/binding hiện tại, `nodeSize`, `syncBar` span.
+  3. Chốt heuristic note-vs-activity nếu draw.io task shape được dùng cho cả sticky context note.
+  4. Add warning/fallback path cho unsupported style hoặc cell orphan.
+- Acceptance criteria:
+  - Diagram import từ XML không làm node “rơi khỏi lane”.
+  - `sync-bar`, decision, start/end giữ semantics đủ để editor và BRD pipeline tiếp tục dùng được.
+- Dependencies: TASK-059
+- Verification: import fixture + generate BRD smoke from imported XML
+- Progress update:
+  - Import đã normalize lane geometry về layout nội bộ, backfill `laneId`/`nodeSize`, và dùng heuristic `note` vs `activity` an toàn hơn cho draw.io task shape.
+  - False-positive swimlane detection và draw.io multiline text encoding đã được harden bằng regression tests.
+
+#### TASK-063 - Update docs và user workflow cho XML import/export
+- Priority: P2
+- Status: Done
+- Module: docs-and-tests
+- Problem: README và workflow hiện vẫn mô tả JSON/SVG là thao tác file chính ở [README.md](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/README.md:18).
+- Why it matters: Nếu code đã chuyển sang XML-first mà docs không đổi, user sẽ đi sai luồng ngay từ README.
+- Implementation steps:
+  1. Cập nhật README feature list và local test flow.
+  2. Cập nhật use case/import-export doc hiện có nếu repo đã có doc owner phù hợp.
+  3. Nếu cần, thêm note rằng JSON/SVG đang bị ẩn khỏi toolbar chứ chưa bị loại hẳn khỏi codebase.
+  4. Ghi changelog cho behavior change này.
+- Acceptance criteria:
+  - Docs user-facing mô tả đúng toolbar và file format mới.
+  - Không còn chỗ nào nói JSON/SVG là hành động toolbar mặc định nếu UI đã đổi.
+- Dependencies: TASK-061
+- Verification: review chéo README + UI
+- Progress update:
+  - README, UC-05, và architecture overview đã được sync sang XML-first workflow.
+  - Changelog và activity log đã ghi nhận behavior change.
+
+#### TASK-064 - Thêm golden + E2E tests cho XML interchange
+- Priority: P2
+- Status: Done
+- Module: docs-and-tests
+- Problem: Import/export XML là feature dễ regress vì vừa có parser vừa có serializer, lại phụ thuộc style/text/geometry contract.
+- Why it matters: Không có test, mỗi lần chỉnh layout/node style sẽ có nguy cơ làm XML round-trip hỏng âm thầm.
+- Implementation steps:
+  1. Thêm unit tests cho parser với fixture `examples/bomb.drawio.xml`.
+  2. Thêm unit tests cho serializer để assert cấu trúc `mxfile`, `diagram`, `mxGraphModel`, `mxCell`.
+  3. Thêm round-trip test `XML -> graph -> XML` ở mức supported subset.
+  4. Nếu khả thi, thêm Playwright/browser smoke cho `Import XML…` và `Export XML`.
+- Acceptance criteria:
+  - Có automated coverage cho import fixture, export structure, và ít nhất một round-trip.
+  - Regression ở XML adapter sẽ fail test thay vì chỉ lộ khi user mở file ngoài draw.io.
+- Dependencies: TASK-059, TASK-060, TASK-061
+- Verification: `npm run test:ui-mock` + browser/E2E smoke
+- Progress update:
+  - Đã thêm `src/io/drawio-xml.test.ts` cho fixture import, export structure, và round-trip.
+  - Đã thêm Playwright flow `Import XML fixture and export XML from toolbar`.

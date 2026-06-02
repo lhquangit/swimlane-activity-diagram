@@ -15,7 +15,7 @@ Repo hiện có thêm backend FastAPI để:
 - Nối edge giữa node, đặt label cho edge (Có / Không).
 - Undo / Redo (Ctrl+Z, Ctrl+Y), Zoom +/−, Fit view.
 - **Reset mẫu** (load lại diagram demo), **Xoá nội dung** (giữ lại lane).
-- **Mở JSON…**, **Lưu JSON**, **Export SVG**, **Export PNG**.
+- **Import XML…**, **Export XML**, **Export PNG**.
 - **Generate BRD**: gọi backend để validate diagram, sinh structured spec, và render BRD draft.
 - BRD panel có 3 tab: **Warnings / Structured Spec / BRD Draft**.
 - User có thể **chỉnh sửa trực tiếp BRD draft**, export markdown, và thấy badge `Outdated` khi diagram đổi sau lần generate gần nhất.
@@ -97,14 +97,15 @@ http://localhost:5173
 
 1. Mở `http://localhost:5173`
 2. Giữ sample diagram mặc định hoặc chỉnh sửa thêm node/lane
-3. Bấm `Generate BRD`
-4. Kiểm tra:
+3. Thử `Export XML`, rồi `Import XML…` lại bằng file draw.io tương thích như `examples/bomb.drawio.xml`
+4. Bấm `Generate BRD`
+5. Kiểm tra:
    - tab `Warnings`
    - tab `Structured Spec`
    - tab `BRD Draft`
-5. Sửa thử nội dung trong `BRD Draft`
-6. Bấm `Export markdown`
-7. Chỉnh diagram thêm một thay đổi bất kỳ rồi kiểm tra badge `Outdated`
+6. Sửa thử nội dung trong `BRD Draft`
+7. Bấm `Export markdown`
+8. Chỉnh diagram thêm một thay đổi bất kỳ rồi kiểm tra badge `Outdated`
 
 ## Chạy test
 
@@ -174,6 +175,7 @@ swimlane-logicflow/
 | Đổi tên/định nghĩa lane | `src/nodes.ts` → `LANES` array |
 | Thêm shape mới vào palette | `src/App.tsx` → `PALETTE` array + register node model ở `src/nodes.ts` |
 | Đổi diagram khởi tạo | `src/lf-config.ts` → `buildInitialData()` |
+| Đổi contract draw.io XML | `src/io/drawio-import.ts`, `src/io/drawio-export.ts`, `src/io/drawio-shared.ts` |
 | Đổi style node (màu, font, border) | `src/nodes.ts` → từng `getNodeStyle()` / `getTextStyle()` |
 | Đổi provider/model AI BRD | `apps/api/.env` → `BRD_PROVIDER`, `BRD_MODEL_PRIMARY` |
 | Đổi structured output / provider behavior | `apps/api/app/providers/openrouter_provider.py` |

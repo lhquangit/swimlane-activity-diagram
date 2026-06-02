@@ -39,6 +39,9 @@ import {
   ResponseMetadata,
   WarningItem,
 } from './brd/types';
+import { exportDrawioXml } from './io/drawio-export';
+import { importDrawioXml } from './io/drawio-import';
+import type { EditorGraphData } from './io/drawio-types';
 
 LogicFlow.use(Snapshot);
 LogicFlow.use(SelectionSelect);
@@ -1258,6 +1261,38 @@ export default function App() {
     setStatus('Đã tải swimlane.json');
   };
 
+  const applyImportedGraph = ({
+    graph,
+    importedLanes,
+    importedLaneHeight,
+    statusMessage,
+  }: {
+    graph: EditorGraphData;
+    importedLanes: LaneConfig[];
+    importedLaneHeight?: number;
+    statusMessage: string;
+  }) => {
+    const lf = lfRef.current;
+    if (!lf) return;
+    lf.render(graph as Parameters<typeof lf.render>[0]);
+    if (importedLanes.length > 0) {
+      updateLaneState(importedLanes);
+      hydrateNodeLaneBindings(importedLanes, importedLanes);
+      hydrateSyncBarBindings(importedLanes, importedLanes);
+      const nextLaneHeight = Math.max(
+        importedLaneHeight ?? MIN_LANE_HEIGHT,
+        getRequiredLaneHeight(lf, MIN_LANE_HEIGHT),
+      );
+      laneHeightRef.current = nextLaneHeight;
+      applyLaneModels(importedLanes, laneHeightRef.current);
+      setActiveLaneId(importedLanes[0]?.id ?? null);
+    }
+    setActiveNodeId(null);
+    lf.fitView(20, 20);
+    markDiagramChanged();
+    setStatus(formatContextSwitchStatus(statusMessage));
+  };
+
   const handleCopyBrdDraft = async () => {
     if (!brdDraft) return;
     await navigator.clipboard.writeText(brdDraft);
@@ -1420,10 +1455,6 @@ export default function App() {
             text?: { value: string };
           }>;
         };
-        const lf = lfRef.current;
-        if (!lf) return;
-        lf.render(data);
-        // Rebuild lane state from imported lanes (if any)
         const importedLanes: LaneConfig[] = (data.nodes ?? [])
           .filter((n) => n.type === 'lane')
           .map((n) => ({
@@ -1433,32 +1464,54 @@ export default function App() {
             width: n.properties?.width ?? 320,
           }))
           .sort((a, b) => a.x - b.x);
-        if (importedLanes.length > 0) {
-          updateLaneState(importedLanes);
-          hydrateNodeLaneBindings(importedLanes, importedLanes);
-          hydrateSyncBarBindings(importedLanes, importedLanes);
-          const importedLaneHeight = Math.max(
-            ...((data.nodes ?? [])
-              .filter((node) => node.type === 'lane')
-              .map((node) => node.properties?.height ?? MIN_LANE_HEIGHT)),
-            MIN_LANE_HEIGHT,
-          );
-          laneHeightRef.current = Math.max(
-            importedLaneHeight,
-            getRequiredLaneHeight(lf, MIN_LANE_HEIGHT),
-          );
-          applyLaneModels(importedLanes, laneHeightRef.current);
-          setActiveLaneId(importedLanes[0]?.id ?? null);
-        }
-        setActiveNodeId(null);
-        markDiagramChanged();
-        setStatus(formatContextSwitchStatus(`Đã load: ${file.name}`));
+        const importedLaneHeight = Math.max(
+          ...((data.nodes ?? [])
+            .filter((node) => node.type === 'lane')
+            .map((node) => node.properties?.height ?? MIN_LANE_HEIGHT)),
+          MIN_LANE_HEIGHT,
+        );
+        applyImportedGraph({
+          graph: data,
+          importedLanes,
+          importedLaneHeight,
+          statusMessage: `Đã load: ${file.name}`,
+        });
       } catch (e) {
         setStatus(`Lỗi parse JSON: ${(e as Error).message}`);
       }
     };
     reader.readAsText(file);
     ev.target.value = '';
+  };
+
+  const handleImportXML = (ev: React.ChangeEvent<HTMLInputElement>) => {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const result = importDrawioXml(String(reader.result));
+        applyImportedGraph({
+          graph: result.graph,
+          importedLanes: result.lanes,
+          importedLaneHeight: result.laneHeight,
+          statusMessage: `Đã import XML: ${file.name}`,
+        });
+      } catch (e) {
+        setStatus(`Lỗi import XML: ${(e as Error).message}`);
+      }
+    };
+    reader.readAsText(file);
+    ev.target.value = '';
+  };
+
+  const handleExportXML = () => {
+    const lf = lfRef.current;
+    if (!lf) return;
+    const graphData = lf.getGraphData() as Parameters<typeof exportDrawioXml>[0];
+    const xml = exportDrawioXml(graphData, lanesRef.current, laneHeightRef.current);
+    downloadTextFile(xml, 'diagram.drawio.xml', 'application/xml;charset=utf-8');
+    setStatus('Đã tải diagram.drawio.xml');
   };
 
   const handleResetSample = () => {
@@ -1796,19 +1849,16 @@ export default function App() {
           Xoá nội dung
         </button>
         <label className="toolbar-btn" style={{ cursor: 'pointer' }}>
-          Mở JSON…
+          Import XML…
           <input
             type="file"
-            accept="application/json"
+            accept=".xml,text/xml,application/xml"
             style={{ display: 'none' }}
-            onChange={handleImportJSON}
+            onChange={handleImportXML}
           />
         </label>
-        <button className="toolbar-btn" onClick={handleExportJSON}>
-          Lưu JSON
-        </button>
-        <button className="toolbar-btn" onClick={handleExportSVG}>
-          Export SVG
+        <button className="toolbar-btn" onClick={handleExportXML}>
+          Export XML
         </button>
         <button className="toolbar-btn primary" onClick={() => void executeGenerateBrd()}>
           Generate BRD

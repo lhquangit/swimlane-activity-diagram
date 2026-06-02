@@ -45,6 +45,7 @@ tsconfig.tsbuildinfo
 coverage
 *.lcov
 .nyc_output
+examples/
 
 # Python
 __pycache__/

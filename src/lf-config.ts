@@ -1,5 +1,5 @@
 import LogicFlow, { GraphConfigData } from '@logicflow/core';
-import { LANES, LaneConfig, LANE_HEIGHT, LANE_TOP } from './nodes';
+import { LANES, type LaneConfig, LANE_HEIGHT, LANE_TOP } from './lane-config';
 
 /** Build node data entries for the given lanes. */
 export function buildLaneNodes(lanes: LaneConfig[], laneHeight = LANE_HEIGHT) {

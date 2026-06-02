@@ -59,3 +59,18 @@ test('Local pre-validation blocks invalid diagram before backend validation', as
   await expect(page.getByText('END_REQUIRED')).toBeVisible();
   expect(validateRequests).toBe(0);
 });
+
+test('Import XML fixture and export XML from toolbar', async ({ page }) => {
+  await page.goto('/');
+  await page
+    .locator('input[accept=".xml,text/xml,application/xml"]')
+    .setInputFiles('examples/bomb.drawio.xml');
+
+  await expect(page.getByText('Nhân sự vận hành CCTV')).toBeVisible();
+  await expect(page.getByText('Có vị trí nghi vấn cụ thể?')).toBeVisible();
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export XML' }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('diagram.drawio.xml');
+});
