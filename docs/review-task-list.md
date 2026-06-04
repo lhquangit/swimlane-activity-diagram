@@ -175,3 +175,1312 @@
   - Các bug user report hiện tại sẽ fail test nếu regress.
 - Dependencies: TASK-001 đến TASK-006
 - Verification: Chạy suite local và quan sát từng case pass ổn định.
+
+## AI BRD Docs Alignment
+
+### Now
+
+#### TASK-008 - Đồng bộ Phase 1 BRD template với UC-06 cho loops và annotations
+- Priority: P1
+- Status: Done (2026-05-31)
+- Module: ai-brd-docs
+- Problem: `UC-06` đang yêu cầu section `Loops` và `Annotations`, nhưng template Phase 1 trong feature doc chưa định nghĩa hai section này.
+- Why it matters: Nếu không chốt ngay, backend renderer và QA sẽ không có cùng kỳ vọng về output Phase 1.
+- Implementation steps:
+  1. Chọn một contract duy nhất cho Phase 1:
+     - thêm `Loops` và `Annotations` thành section riêng, hoặc
+     - map chúng vào `Exceptions / warnings` và `Assumptions / open questions`.
+  2. Cập nhật `docs/product/ai-brd-description-feature.md`.
+  3. Cập nhật `docs/use-cases/UC-06-sinh-brd-tu-diagram.md` cho khớp wording và expected output.
+- Acceptance criteria:
+  - Feature doc và UC-06 mô tả cùng một Phase 1 template.
+  - Không còn section nào được UC yêu cầu nhưng template không định nghĩa.
+- Dependencies: None
+- Verification: Review chéo Section 11 của feature doc với phần `Kết quả mong đợi` và các alternate flows trong UC-06.
+
+#### TASK-009 - Chốt contract Step 6: deterministic render hay LLM render
+- Priority: P1
+- Status: Done (2026-05-31)
+- Module: ai-brd-docs
+- Problem: Product spec, backend architecture, và UC-06 chưa thống nhất việc BRD markdown có được render deterministically từ structured spec hay gọi model thêm một lần nữa.
+- Why it matters: Quyết định này ảnh hưởng trực tiếp đến traceability, chi phí, post-check scope, và thiết kế service backend.
+- Implementation steps:
+  1. Chọn contract cho Phase 1.
+  2. Nếu chọn deterministic render, sửa product spec và backend architecture để Step 6 không còn được mô tả như model generation.
+  3. Nếu chọn LLM render, bổ sung guardrails, cost impact, và post-check scope tương ứng.
+  4. Sync lại UC-06 để mô tả đúng flow backend.
+- Acceptance criteria:
+  - Ba doc dùng cùng một mô tả cho Step 5 và Step 6.
+  - Không còn module/service nào ngụ ý một đường đi khác.
+- Dependencies: None
+- Verification: Review chéo pipeline ở feature doc, module map ở backend architecture, và Step 9 trong UC-06.
+
+#### TASK-010 - Siết chặt contract vận hành của backend architecture doc
+- Priority: P2
+- Status: Partial (2026-05-31)
+- Module: ai-brd-docs
+- Problem: `architecture-brd-backend.md` đang mô tả deployment như đã chốt nhưng vẫn để hosting/domain mở, đồng thời thiếu env var `BRD_PROVIDER` dù local workflow dùng nó.
+- Why it matters: Điều này gây drift giữa tài liệu vận hành và bootstrap backend thực tế.
+- Implementation steps:
+  1. Hoặc chốt một lựa chọn deploy Phase 1, hoặc đổi wording để nói rõ đây là option memo với decision còn mở.
+  2. Thêm `BRD_PROVIDER` vào bảng env vars và mô tả precedence rules.
+  3. Nếu giữ nhiều deployment option, thêm tiêu chí chọn giữa Fly.io và VPS.
+  4. Cập nhật review v2 hoặc thêm addendum để chỉ rõ `UC-06` và `architecture-brd-backend.md` đã tồn tại.
+- Acceptance criteria:
+  - Backend architecture doc không còn tự mâu thuẫn giữa phần mở đầu và phần open questions.
+  - Env-var table bao phủ toàn bộ biến được local workflow sử dụng.
+  - Review v2 không còn khiến người đọc nghĩ hai doc này chưa được tạo.
+- Dependencies: None
+- Remaining gap: Hai acceptance criteria đầu đã thỏa, nhưng AC thứ 3 vẫn còn mở vì `docs/reviews/2026-05-31-ai-brd-feature-doc-review-v2.md` chưa có addendum/superseding note.
+- Verification: Review chéo Section 1/7/12 của backend architecture doc và phần disposition cuối của review v2.
+
+## AI BRD Implementation Order
+
+### Now
+
+#### TASK-011 - Scaffold backend app và shared contract types cho AI BRD
+- Priority: P1
+- Status: Done (2026-05-31)
+- Module: ai-brd-backend-contract
+- Problem: Hiện repo mới có tài liệu; chưa có FastAPI app, response models, hay frontend type tương ứng để hiện thực hóa contract vừa chốt.
+- Why it matters: Nếu không dựng contract trước, backend và frontend sẽ phải đoán shape của request/response trong lúc code, rất dễ lệch khỏi doc.
+- Implementation steps:
+  1. Tạo `apps/api/` theo layout đã chốt trong `docs/scope/architecture-brd-backend.md`.
+  2. Khai báo Pydantic models cho:
+     - `DiagramSemanticRequest`
+     - `DiagramBRDSpec`
+     - `ResponseEnvelope`
+     - `ValidationResult`
+     - `GenerateResult`
+     - `ErrorObject`
+  3. Tạo TypeScript types tương ứng ở frontend cho request/response envelope.
+  4. Thêm `.env.example` cho backend với toàn bộ env vars đã mô tả trong doc, nhưng không chứa secret thật.
+- Acceptance criteria:
+  - Repo có backend app skeleton chạy được với `/healthz`.
+  - Backend và frontend cùng dùng một contract type rõ ràng cho `validate` và `generate`.
+  - Không có field nào trong Section 13 của feature doc bị thiếu ở schema code.
+- Dependencies: None
+- Verification: Chạy backend local, hit `/healthz`, typecheck backend/frontend schema layer.
+
+#### TASK-012 - Implement deterministic core pipeline và `MockProvider`
+- Priority: P1
+- Status: Done (2026-05-31)
+- Module: ai-brd-core-pipeline
+- Problem: Frontend chưa thể tích hợp ổn định nếu backend chưa có deterministic path để trả về fixture hợp lệ theo contract.
+- Why it matters: Đây là nền cho chiến lược `mock-first`; cần test flow thật qua HTTP mà chưa phụ thuộc OpenRouter key.
+- Implementation steps:
+  1. Implement stub/pure modules:
+     - `extract.py`
+     - `normalize.py`
+     - `validate.py`
+     - `interpret.py`
+     - `render.py`
+     - `postcheck.py`
+  2. Tạo `MockProvider` trả `DiagramBRDSpec` deterministic theo input hash hoặc fixture seed.
+  3. Đảm bảo BRD markdown luôn được render từ spec bằng template deterministic, không có prose pass thứ hai.
+  4. Backfill 2-3 fixture diagram representative: happy path, blocking validation, ambiguity with warnings.
+- Acceptance criteria:
+  - Backend có thể tạo `spec + brd_markdown` bằng `BRD_PROVIDER=mock`.
+  - Cùng một input mock cho ra cùng một output.
+  - Có ít nhất một fixture cho `completed`, một fixture cho `blocking`, và một fixture cho `warnings`.
+- Dependencies: TASK-011
+- Verification: Unit tests cho pipeline modules + snapshot test cho renderer output.
+
+#### TASK-013 - Implement `POST /api/brd/validate` và `POST /api/brd/generate` với error/idempotency contract
+- Priority: P1
+- Status: Done (2026-05-31)
+- Module: ai-brd-backend-runtime
+- Problem: Contract đã có trên doc, nhưng chưa có runtime thực thi envelope, status codes, error object, hay idempotency behavior.
+- Why it matters: Đây là điểm nối thật sự để frontend có thể code dựa trên backend local mà không cần mock thủ công trong client.
+- Implementation steps:
+  1. Implement route `POST /api/brd/validate` theo envelope/status contract.
+  2. Implement route `POST /api/brd/generate` theo envelope/status contract.
+  3. Thêm idempotency storage Phase 1 dạng in-memory hoặc TTL cache local theo `BRD_IDEMPOTENCY_TTL_SECONDS`.
+  4. Implement các trạng thái:
+     - `completed`
+     - `replayed`
+     - `in_progress`
+     - `conflict`
+     - `blocking`
+     - `failed`
+  5. Map đầy đủ các mã lỗi/doc status codes đã chốt trong Section 13 và 15.
+- Acceptance criteria:
+  - `/validate` trả đúng `200/400/429/500` theo contract.
+  - `/generate` trả đúng `200/202/400/409/422/429/502/503` theo contract.
+  - Reuse cùng `Idempotency-Key` + payload giống nhau cho ra `replayed` hoặc `in_progress`.
+  - Reuse cùng key + payload khác cho ra `409 conflict`.
+- Dependencies: TASK-011, TASK-012
+- Verification: API integration tests cho status/error/idempotency matrix bằng `MockProvider`.
+
+#### TASK-014 - Tích hợp frontend với backend mock và hoàn thiện BRD side panel
+- Priority: P1
+- Status: Done (2026-05-31)
+- Module: ai-brd-frontend-flow
+- Problem: Feature UX chính chưa tồn tại: nút `Generate BRD`, side panel, warning states, editable draft, outdated state.
+- Why it matters: Đây là phần user nhìn thấy; cần nối với backend mock trước để kiểm được toàn bộ luồng mà chưa phụ thuộc provider thật.
+- Implementation steps:
+  1. Thêm action `Generate BRD` trên toolbar editor.
+  2. Tạo API client gọi `POST /api/brd/validate` và `POST /api/brd/generate`.
+  3. Render panel 3 tab:
+     - `Warnings`
+     - `Structured Spec`
+     - `BRD Draft`
+  4. Cho phép edit markdown trực tiếp trong `BRD Draft`.
+  5. Implement UX cho các trạng thái:
+     - loading step-by-step
+     - `blocking`
+     - `failed`
+     - `replayed`
+     - `conflict`
+     - `outdated`
+  6. Implement `Copy` và `Export markdown`.
+- Acceptance criteria:
+  - User có thể generate BRD từ backend mock và thấy đủ 3 tab.
+  - User sửa được `BRD Draft` và export ra đúng nội dung đã sửa.
+  - Diagram đổi sau khi generate làm panel hiển thị `Outdated`.
+  - Frontend không chứa hard-coded fake response ngoài test harness.
+- Dependencies: TASK-013
+- Verification: Browser smoke test local với backend mock + frontend dev server.
+
+#### TASK-015 - Thêm test pyramid mặc định cho mock path
+- Priority: P1
+- Status: Done (2026-06-01)
+- Module: ai-brd-test-pyramid
+- Problem: Nếu không khóa mock path bằng test sớm, feature sẽ rất dễ regress ngay khi bắt đầu nối provider thật.
+- Why it matters: Đây là hàng rào giúp vòng coding hằng ngày không cần API key nhưng vẫn an toàn.
+- Implementation steps:
+  1. Thêm backend unit tests cho deterministic modules.
+  2. Thêm backend integration tests cho `validate/generate` với `MockProvider`.
+  3. Thêm browser/Playwright flow cho:
+     - happy path generate
+     - blocking validation
+     - edited draft export
+     - outdated badge
+     - idempotent retry/replay
+  4. Thêm scripts/package commands tách biệt rõ:
+     - `test:api-mock`
+     - `test:ui-mock`
+     - `test:brd-mock`
+- Acceptance criteria:
+  - Có command test mặc định không cần key thật.
+  - PR/local dev có thể verify feature AI BRD end-to-end bằng mock path.
+  - Failure ở contract/status/idempotency hoặc UI tab flow sẽ làm test fail rõ.
+- Dependencies: TASK-013, TASK-014
+- Verification: Chạy full mock suite local không cần `BRD_OPENROUTER_API_KEY`.
+- Progress update:
+  - Da them backend pytest suite cho `validate/generate`, idempotency, va deterministic render mapping.
+  - Da them UI tests bang Vitest + Testing Library cho semantic normalization va BRD panel tabs/edit flow.
+  - Da them scripts `test:api-mock`, `test:ui-mock`, `test:brd-mock`.
+  - Da them Playwright E2E cho flow `Generate BRD` -> edit draft -> outdated -> export, va case local pre-validation chan request backend.
+
+#### TASK-019 - Đổi `interpret_request()` sang graph traversal thật cho main flow
+- Priority: P1
+- Module: ai-brd-core-pipeline
+- Status: Done (2026-05-31)
+- Problem: `main_flow_steps` hiện được suy từ thứ tự tọa độ (`y`, `x`) của node thay vì đi theo topology của graph, nên BRD có thể mô tả sai luồng chính khi diagram có branch, parallel path, hoặc node rời.
+- Why it matters: Đây là lỗi correctness trực tiếp trên output nghiệp vụ; BRD nghe mượt nhưng có thể sai logic thực của diagram.
+- Implementation steps:
+  1. Trong `services/interpret.py`, thay logic sort theo tọa độ bằng traversal bắt đầu từ `start` nodes và adjacency từ edges.
+  2. Tách rõ:
+     - `main_flow_nodes`
+     - `branch outcomes`
+     - `parallel blocks`
+     - `disconnected / unreachable nodes`
+  3. Định nghĩa policy Phase 1 cho nhiều `start` hoặc graph rời: block hay warning + `open_questions`.
+  4. Thêm regression tests cho:
+     - happy path tuyến tính
+     - branch có hai outcome
+     - node rời không được lọt vào `main_flow_steps`
+     - loop không phá traversal
+- Acceptance criteria:
+  - `main_flow_steps` phản ánh thứ tự theo edge topology, không theo tọa độ canvas.
+  - Node không reachable từ `start` không tự xuất hiện trong main flow.
+  - Branch và parallel path vẫn được giữ riêng theo contract hiện tại.
+- Dependencies: TASK-012, TASK-013
+- Verification: Backend tests với fixture graph có cùng tọa độ nhưng topology khác nhau phải cho main flow khác nhau.
+
+#### TASK-020 - Ngừng gán lane theo “nearest center” cho node ngoài lane
+- Priority: P1
+- Module: ai-brd-frontend-flow
+- Status: Done (2026-05-31)
+- Problem: `buildSemanticRequest()` đang tự gán `lane_id` theo lane gần nhất nếu node không có `properties.laneId`, khiến node đặt lệch khỏi lane vẫn được hợp thức hóa và backend không còn cơ hội block đúng.
+- Why it matters: Sai actor, sai handoff, và che khuất lỗi diagram placement trước khi AI diễn giải nghiệp vụ.
+- Implementation steps:
+  1. Thay `inferLaneId()` trong `src/brd/normalize.ts` bằng check theo biên lane thực tế (`lane.x`, `lane.width`) thay vì sort theo khoảng cách tâm.
+  2. Chỉ infer `lane_id` khi node nằm trong horizontal span hợp lệ của lane; nếu mơ hồ hoặc nằm ngoài tất cả lane, trả `undefined`.
+  3. Preserve explicit `properties.laneId` nếu còn hợp lệ; nếu không hợp lệ thì clear và để backend block.
+  4. Thêm UI/backend test cho node bị kéo ra ngoài lane và expected blocking issue.
+- Acceptance criteria:
+  - Node ngoài lane không còn được map âm thầm sang lane gần nhất.
+  - Backend trả `NODE_MISSING_LANE` cho activity/decision bị lệch lane sau normalize.
+  - Handoff/actor mapping không đổi đối với diagram hợp lệ hiện có.
+- Dependencies: TASK-014
+- Verification: Thêm test normalize + manual browser smoke với node kéo ra ngoài lane rồi generate.
+
+#### TASK-021 - Khóa lại live-provider contract theo doc Phase 1
+- Priority: P1
+- Module: ai-brd-provider-live
+- Status: Partial (2026-05-31)
+- Problem: Nhánh live hiện chưa khớp contract đã chốt: `X-Schema-Version` chưa được enforce, `BRD_REQUEST_RATE_LIMIT` chưa có runtime effect, không có controlled retry, và OpenRouter path mới dùng `json_object` thay vì strict schema output khi khả dụng.
+- Why it matters: Mock path chạy được nhưng live path vẫn chưa đủ điều kiện để gọi là “hoàn thiện” hay merge-ready cho real generation.
+- Implementation steps:
+  1. Enforce `X-Schema-Version` ở `/validate` và `/generate`, trả `400` cho version không hỗ trợ.
+  2. Implement rate-limit Phase 1 tối thiểu theo `BRD_REQUEST_RATE_LIMIT` và trả `429` đúng envelope.
+  3. Trong `OpenRouterProvider`, ưu tiên structured output strict mode theo doc khi model route hỗ trợ.
+  4. Thêm controlled retry tối đa 1 lần cho timeout / invalid structured output, populate `attempt_count`.
+  5. Thay `estimated_cost_usd = 0.08` hard-code bằng metadata tính từ response usage hoặc policy fallback có ghi rõ nguồn.
+- Acceptance criteria:
+  - Live path match được status/error contract chính trong docs.
+  - Provider timeout / invalid structured output có retry bounded và metadata phản ánh số lần thử.
+  - Cost metadata không còn là constant giả định.
+- Dependencies: TASK-016
+- Verification: Live smoke test với key thật + tests/mock cho schema-version và rate-limit branch.
+- Progress update:
+  - Da enforce `X-Schema-Version` tren `/validate` va `/generate`.
+  - Da them in-memory rate limit Phase 1 va response `429`.
+  - Da nang `OpenRouterProvider` len `json_schema` strict mode, wrap schema validation error thanh retryable provider error, va map usage cost/tokens.
+  - Da them bounded retry toi da 1 lan cho live path va metadata `attempt_count`.
+- Remaining gap:
+  - Chua co live smoke voi `BRD_OPENROUTER_API_KEY`, nen chua the xac nhan runtime thuc te cua OpenRouter path.
+
+#### TASK-022 - Sửa post-check branch target và thêm regression test cho hallucinated outcome
+- Priority: P2
+- Module: ai-brd-core-pipeline
+- Status: Done (2026-06-01)
+- Problem: `postcheck_spec()` đang dùng điều kiện không thể bắt đúng case target branch “có giá trị nhưng không trace được”, nên hallucinated/stale target IDs có thể lọt qua.
+- Why it matters: Đây là guard cuối cùng giữa structured spec và BRD markdown; nếu guard hỏng, traceability guarantee bị thủng.
+- Implementation steps:
+  1. Sửa điều kiện trong `services/postcheck.py` để warn khi `target_node_id` không thuộc `seen_node_ids`, không chỉ khi target rỗng.
+  2. Bổ sung warning code/wording rõ cho case target không trace được.
+  3. Thêm unit test tạo spec có branch outcome trỏ tới node không tồn tại trong main flow.
+- Acceptance criteria:
+  - Outcome trỏ tới node lạ sinh warning deterministic.
+  - Không có false positive cho branch target hợp lệ.
+- Dependencies: TASK-019
+- Verification: Pytest cho `postcheck_spec()` với cả valid và invalid branch target.
+- Progress update:
+  - Da sua condition de bat duoc target node la that su khong trace duoc thay vi bo qua hoan toan.
+  - Da them regression test cho case target branch tro toi node la.
+  - Da doi traceability set cua post-check sang canonical node registry de tranh false-positive voi target hop le ngoai main flow.
+
+#### TASK-023 - Hoàn thiện idempotency lifecycle cho mọi exit path của `/generate`
+- Priority: P1
+- Status: Done (2026-06-01)
+- Module: ai-brd-provider-live
+- Problem: `/generate` hiện chỉ đóng idempotency entry ở nhánh `200 completed`; các nhánh `422`, `502`, `503` có thể để key nằm mãi ở trạng thái `in_progress` cho đến khi TTL hết.
+- Why it matters: Retry cùng `Idempotency-Key` là contract cốt lõi của feature. Nếu key bị “poisoned”, user bấm retry đúng cách vẫn không tiến thêm được.
+- Implementation steps:
+  1. Chốt policy idempotency cho non-success outcomes:
+     - case nào được cache/replay,
+     - case nào release để thử lại,
+     - case nào mark failed với metadata riêng.
+  2. Mở rộng `IdempotencyStore` với API rõ ràng cho terminal failure path (`fail` hoặc `release`).
+  3. Áp policy đó cho tất cả early-return branches của `/generate`.
+  4. Đồng bộ lại frontend retry behavior nếu cần phân biệt retry key cũ hay key mới.
+  5. Thêm regression tests cho retry sau `422 blocking`, `502 retryable`, `503 non-retryable`.
+- Acceptance criteria:
+  - Retry sau lỗi generate không bị kẹt `202 in_progress` cho đến hết TTL.
+  - `replayed`, `in_progress`, `conflict`, và terminal failure đều có semantics nhất quán.
+  - Tests fail nếu non-success path lại bỏ quên idempotency transition.
+- Dependencies: TASK-021
+- Verification: Pytest cho từng status branch + manual retry smoke ở UI.
+- Progress update:
+  - Da them `IdempotencyStore.release(...)` cho entry dang `in_progress`.
+  - `/generate` hien release key tren moi non-success exit path sau khi da `begin(...)`.
+  - Da them regression tests cho retry sau `422`, `502`, `503` voi cung `Idempotency-Key`.
+
+#### TASK-024 - Đổi post-check traceability set từ `main_flow_steps` sang canonical node registry
+- Priority: P1
+- Status: Done (2026-06-01)
+- Module: ai-brd-core-pipeline
+- Problem: Guard hiện tại chỉ biết `main_flow_steps`, nên branch target hợp lệ ở alternate path vẫn bị flag là unknown.
+- Why it matters: Warning false-positive làm người dùng mất niềm tin vào post-check, trong khi đây là lớp chống hallucination cuối cùng.
+- Implementation steps:
+  1. Chọn nguồn traceability set đúng cho post-check:
+     - mọi node đã interpret,
+     - hoặc registry canonical lưu trong spec metadata/result.
+  2. Refactor `postcheck_spec()` để validate branch target theo registry mới, không chỉ theo main flow.
+  3. Giữ warning riêng cho target thật sự không trace được.
+  4. Thêm regression tests cho:
+     - branch target hợp lệ ngoài preferred main path,
+     - target node lạ thật sự,
+     - target thuộc parallel path.
+- Acceptance criteria:
+  - Branch target hợp lệ ngoài main flow không còn false-positive.
+  - Target node bịa/hỏng vẫn sinh warning deterministic.
+  - `TASK-022` có thể chuyển sang `Done` khi AC này pass.
+- Dependencies: TASK-019
+- Verification: Pytest cho post-check với fixtures main-flow/branch/parallel khác nhau.
+- Progress update:
+  - `postcheck_spec()` da nhan `traceable_node_ids` thay vi hard-code vao `main_flow_steps`.
+  - Route `/generate` da truyen canonical registry cua tat ca node khong phai note vao post-check.
+  - Da them regression test cho branch target hop le ngoai main flow.
+
+#### TASK-025 - Implement sticky note anchoring và `global_note` semantics
+- Priority: P2
+- Status: Done (2026-06-01)
+- Module: ai-brd-core-pipeline
+- Problem: Hệ thống hiện chỉ nhìn note theo `lane_id`, chưa phân biệt note gắn với một step cụ thể và note toàn cục không neo vào flow.
+- Why it matters: Đây là nơi BA thường ghi assumption và open question; nếu semantics mờ, BRD mất nhiều giá trị review nhất.
+- Implementation steps:
+  1. Định nghĩa rule proximity/anchor cho sticky note ở normalize/validate/interpret.
+  2. Phân loại `anchored_note` và `global_note`.
+  3. Với `anchored_note`, gắn trace về step gần nhất hoặc node liên quan.
+  4. Với `global_note`, map vào `Assumptions / open questions` theo wording của UC-06.
+  5. Thêm tests cho note gần step, note xa step, note ở lane khác.
+- Acceptance criteria:
+  - Note xa mọi step được coi là `global_note`.
+  - Note gần step không bị gom mù vào assumption chung.
+  - Output BRD phản ánh rõ distinction này.
+- Dependencies: TASK-020
+- Verification: Pytest cho proximity rules + browser smoke với note gần/xa.
+- Progress update:
+  - Da them rule anchor cho note theo explicit metadata (`anchor_node_id`) hoac proximity trong cung lane.
+  - Note gan step duoc dua vao `annotations` voi context cua step gan nhat.
+  - Note xa step duoc coi la `global_note`, sinh `NOTE_ORPHAN` va map vao `assumptions`.
+  - Da them regression test cho global note xa flow.
+
+#### TASK-026 - Nâng semantic của `sync-bar` từ “parallel generic” lên fork/join block có nghĩa
+- Priority: P2
+- Status: Done (2026-06-01)
+- Module: ai-brd-core-pipeline
+- Problem: Mỗi `sync-bar` hiện chỉ tạo ra một `parallel_block` chung chung với `join_node_id=None`, nên BRD mới biết “có song song” chứ chưa mô tả được cấu trúc song song.
+- Why it matters: Parallel flow là một trong những phần khó nhất để BA review; nếu mô tả quá nông, feature sẽ hụt giá trị ở các diagram thực tế.
+- Implementation steps:
+  1. Chốt metadata/heuristic để phân biệt fork, join, hoặc combined sync-bar.
+  2. Suy ra các branch song song liên quan tới từng sync-bar.
+  3. Populate `parallel_blocks` với shape giàu nghĩa hơn (`fork_node_id`, `join_node_id`, `lane_ids`, path summary).
+  4. Render markdown cho parallel block theo wording dễ review hơn.
+  5. Thêm tests cho simple fork-join và cross-lane sync sample.
+- Acceptance criteria:
+  - `parallel_blocks` không còn chỉ là description stock + lane list.
+  - BRD draft mô tả được điểm bắt đầu/kết thúc của phần song song ở mức Phase 1.
+  - Không regress các diagram không có sync-bar.
+- Dependencies: TASK-019, TASK-024
+- Verification: Pytest fixture cho parallel graph + browser smoke trên sample diagram có sync-bar.
+- Progress update:
+  - Da classify `sync-bar` thanh `fork`, `join`, `fork_join`, hoac `sync`.
+  - Da suy join candidate cho fork block bang common downstream sync-bar.
+  - `parallel_blocks` hien co `join_node_id` va description co y nghia hon thay vi message stock.
+  - Da them regression test cho fork/join sample.
+
+### Next
+
+#### TASK-016 - Implement `OpenRouterProvider` và live provider adapter
+- Priority: P2
+- Status: Done (2026-06-01)
+- Module: ai-brd-provider-live
+- Problem: Sau khi mock path ổn định, backend vẫn chưa thực sự gọi provider thật để sinh structured spec.
+- Why it matters: Đây là bước chuyển từ MVP contract sang khả năng generate thật cho người dùng.
+- Implementation steps:
+  1. Implement `openrouter_provider.py` theo `LLMProvider` interface.
+  2. Gọi OpenRouter với model slug `openai/gpt-5.5`.
+  3. Parse structured output theo schema strict nếu route hỗ trợ.
+  4. Thêm controlled retry tối đa 1 lần cho timeout / invalid structured output.
+  5. Populate metadata runtime:
+     - `provider`
+     - `model`
+     - `attempt_count`
+     - `latency_ms`
+     - `estimated_cost_usd`
+- Acceptance criteria:
+  - Khi `BRD_PROVIDER=openrouter` và key hợp lệ, `/generate` trả kết quả thật theo cùng envelope mock path.
+  - Khi key thiếu, backend trả `503` đúng contract.
+  - Không có nhánh live nào phá vỡ deterministic renderer/postcheck chain.
+- Dependencies: TASK-013
+- Progress update:
+  - Backend hien da auto-load `apps/api/.env` cho local runtime, giup live provider path doc duoc key va provider mode ma khong can export env thu cong moi lan.
+  - Da sua schema normalizer de OpenRouter/OpenAI strict structured output chap nhan `additionalProperties=false` va `required` day du cho moi object node.
+  - Da verify live happy path va replay cung `Idempotency-Key` voi `BRD_PROVIDER=openrouter`.
+- Verification: Manual smoke test local với `.env` có `BRD_OPENROUTER_API_KEY`.
+
+#### TASK-017 - Thêm live smoke suite và guard cost cho provider thật
+- Priority: P2
+- Status: Done (2026-06-01)
+- Module: ai-brd-live-smoke
+- Problem: Nếu chỉ có mock suite, provider adapter thật và cost/retry behavior có thể hỏng âm thầm; nếu chạy live vô điều kiện, chi phí và độ ổn định sẽ tệ.
+- Why it matters: Cần một lớp verify hẹp nhưng đáng tin cho OpenRouter path.
+- Implementation steps:
+  1. Thêm command riêng, ví dụ:
+     - `test:api-live`
+     - `test:eval-live`
+  2. Gate các command này bằng env presence:
+     - `BRD_PROVIDER=openrouter`
+     - `BRD_OPENROUTER_API_KEY`
+  3. Viết 2-3 smoke case tối thiểu:
+     - happy path valid diagram
+     - same-key replay
+     - provider error path nếu controllable
+  4. Log rõ estimated cost để theo dõi budget.
+- Acceptance criteria:
+  - Live suite không chạy mặc định khi thiếu key.
+  - Có thể verify provider path end-to-end mà không ảnh hưởng mock suite.
+  - Live run không vượt guardrail cost đã chốt trong feature doc.
+- Dependencies: TASK-016
+- Verification: Chạy command live cục bộ với key thật và xem response/metadata.
+- Progress update:
+  - Da them command `npm run test:api-live`.
+  - Da them `apps/api/tests/test_live_smoke.py` voi 2 smoke case: happy path va replay cung `Idempotency-Key`.
+  - Live suite hien skip ro rang khi `BRD_PROVIDER` khac `openrouter` hoac thieu `BRD_OPENROUTER_API_KEY`.
+  - Da chay live thanh cong voi key that tren `openai/gpt-4o-mini`; smoke metadata mau: `latency_ms ~ 6500`, `estimated_cost_usd ~ 0.0005247`.
+
+#### TASK-027 - Đồng bộ frontend pre-validation với `UC-06`
+- Priority: P2
+- Status: Done (2026-06-01)
+- Module: ai-brd-frontend-validation
+- Problem: `UC-06` mô tả frontend phải chặn sớm các diagram invalid ngay trong browser, nhưng runtime hiện luôn round-trip backend validation trước.
+- Why it matters: Đây là chỗ dễ gây lệch kỳ vọng giữa doc, QA, và UX thật; đồng thời các lỗi quá hiển nhiên chưa cần tốn request backend.
+- Implementation steps:
+  1. Chốt dứt khoát một trong hai hướng:
+     - implement local pre-validation trong frontend,
+     - hoặc sửa `UC-06` để phản ánh backend-first validation là chủ đích.
+  2. Nếu giữ local pre-validation, thêm checks tối thiểu cho:
+     - có `start` và `end`,
+     - activity/decision thuộc đúng 1 lane,
+     - edge có source/target hợp lệ.
+  3. Surface blocking issue ngay trên UI trước khi gọi `/api/brd/validate`.
+  4. Thêm tests cho case invalid graph bị chặn tại client.
+- Acceptance criteria:
+  - Doc và runtime không còn lệch nhau ở bước validate đầu tiên.
+  - Diagram invalid hiển thị feedback sớm, không cần gọi backend nếu lỗi thuộc local rule set.
+  - Nếu chọn backend-first thay vì local validation, `UC-06` được sửa rõ để tránh hiểu nhầm.
+- Dependencies: TASK-014
+- Verification: Vitest/browser smoke cho invalid graph + review lại `UC-06`.
+- Progress update:
+  - Da them local pre-validation trong frontend truoc khi goi `/api/brd/validate`.
+  - Diagram invalid hien blocking issue ngay tren BRD panel va khong tao network request backend.
+  - Da cap nhat `UC-06` de phan anh dung UI behavior hien tai.
+
+#### TASK-028 - Tách `main spine` khỏi branch/alternate path trong canonical BRD spec
+- Priority: P1
+- Status: Done
+- Module: ai-brd-core-pipeline
+- Problem: `interpret_request()` đang gom gần như toàn bộ node reachable vào `main_flow_nodes`, khiến renderer biến branch và alternate path thành một numbered list phẳng.
+- Why it matters: Đây là nguyên nhân lớn nhất làm BRD “đọc không hiểu flow”, kể cả khi graph và model đều đúng.
+- Implementation steps:
+  1. Trong `interpret.py`, tách rõ các lớp:
+     - `main_spine_nodes`
+     - `branch_paths`
+     - `parallel_paths`
+     - `terminal_nodes`
+  2. Main spine chỉ giữ path chính từ `start` đến một terminal/join hợp lý theo policy đã chốt.
+  3. Với mỗi `decision`, capture branch path theo edge label thay vì chỉ giữ `target_node_id`.
+  4. Không append mù toàn bộ node reachable còn lại vào `main_flow`.
+  5. Update schema/spec nếu cần để renderer có đủ dữ liệu branch-aware.
+- Acceptance criteria:
+  - `Main workflow` không còn lẫn các bước chỉ thuộc alternate path.
+  - Nhánh `if/else` có thể được render thành narrative đọc hiểu được.
+  - Diagram branch-heavy không còn cho cảm giác “mọi thứ bị đổ vào một list”.
+- Dependencies: TASK-019, TASK-024, TASK-026
+- Verification: Golden fixture cho diagram có decision + multiple ends; assert output prose thể hiện được nhánh.
+- Progress update:
+  - `interpret.py` giờ chỉ giữ `preferred path` làm `main_flow_nodes`; alternate path không còn bị append mù vào main workflow.
+  - Branch outcome capture thêm `path_summary`, `target_node_text`, và `rejoin_node_text` để renderer có thể kể lại if/else như narrative.
+  - Đã thêm regression test cho case decision có main spine + alternate end path.
+
+#### TASK-029 - Định nghĩa lại semantic của `handoff` thay vì lấy mọi edge cross-lane
+- Priority: P1
+- Status: Done
+- Module: ai-brd-core-pipeline
+- Problem: Handoff hiện được suy từ mọi edge cross-lane, nên section `Handoffs` chứa nhiều dòng gần như vô nghĩa về mặt nghiệp vụ.
+- Why it matters: Section này hiện làm giảm niềm tin vào toàn bộ BRD draft vì người đọc thấy các cặp node-id không mang ý nghĩa business.
+- Implementation steps:
+  1. Chốt rule `business handoff` cho Phase 1, ví dụ:
+     - có chuyển trách nhiệm rõ giữa hai actor,
+     - không phải edge điều hướng từ decision,
+     - không phải fan-out/fan-in quanh sync-bar,
+     - không phải edge kết thúc chỉ để merge về end.
+  2. Refactor `interpret.py` để chỉ emit handoff khi thỏa rule đó.
+  3. Nếu cần, thêm `handoff_reason` hoặc `handoff_label`.
+  4. Update renderer để ưu tiên actor/action wording thay vì id pairs.
+- Acceptance criteria:
+  - Section `Handoffs` không còn các dòng kiểu ``node-id -> node-id`` vô nghĩa.
+  - Decision branches và sync-bar transitions không tự động trở thành handoff.
+  - Handoff còn lại đọc như chuyển giao trách nhiệm thực sự.
+- Dependencies: TASK-028
+- Verification: Fixture với cross-lane branch edge, sync-bar edge, và handoff thật; chỉ handoff thật được render.
+- Progress update:
+  - `interpret.py` chỉ emit handoff khi edge thật sự đi từ activity sang activity/decision ở actor khác.
+  - Edge từ decision, sync-bar, start/end không còn tự động trở thành handoff.
+  - `Handoffs` renderer đổi sang wording nghiệp vụ thay vì in cặp id.
+
+#### TASK-030 - Tách reader-facing BRD khỏi trace/debug identifiers
+- Priority: P1
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: Renderer đang in raw `lane_id`, `node_id`, `fork_node_id`, `target_node_id` vào gần như mọi section của BRD draft.
+- Why it matters: Output hiện đọc như debug dump hơn là tài liệu cho BA/SE review.
+- Implementation steps:
+  1. Thiết kế contract hai lớp:
+     - reader-facing prose
+     - trace appendix/debug metadata
+  2. Trong `render.py`, loại raw ids khỏi `Actors`, `Main workflow`, `Decision logic`, `Parallel activities`, `Handoffs`.
+  3. Nếu vẫn cần traceability, đưa ids xuống appendix cuối file hoặc chỉ giữ trong tab `Structured Spec`.
+  4. Chỉ cho phép ids xuất hiện trong reader-facing markdown khi bật explicit debug mode.
+- Acceptance criteria:
+  - BRD draft chính đọc được mà không cần hiểu internal ids.
+  - Traceability vẫn còn, nhưng không phá readability.
+  - Output sample bomb-threat không còn lane ids kiểu `lane-1780316...` trong section actors.
+- Dependencies: TASK-028, TASK-029
+- Verification: Snapshot test của markdown renderer; assert reader-facing sections không chứa UUID/lane-id pattern.
+- Progress update:
+  - `render.py` bỏ raw ids khỏi 10 section reader-facing đầu tiên.
+  - Thêm `Appendix A. Traceability (debug)` để giữ mapping step/node, decision target, parallel fork/join, và handoff trace.
+  - Live path được harmonize về deterministic reader-facing fields để provider output thô không còn rò sang BRD chính.
+
+#### TASK-031 - Nâng `parallel_blocks` thành business-level parallel summary
+- Priority: P2
+- Status: Done
+- Module: ai-brd-core-pipeline
+- Problem: `parallel_blocks` hiện chỉ nói “có sync-bar” và liệt kê lane ids, chưa giải thích được nhánh song song nào chạy, nhập lại ở đâu, và ý nghĩa nghiệp vụ là gì.
+- Why it matters: Với diagram có phối hợp đa actor, phần parallel là chỗ BA cần đọc nhất nhưng output hiện gần như không giúp gì.
+- Implementation steps:
+  1. Trong `interpret.py`, ngoài `fork_node_id/join_node_id`, capture luôn path summaries của từng branch song song.
+  2. Map lane ids sang actor titles ngay từ semantic layer hoặc render layer.
+  3. Render lại section `Parallel activities` theo kiểu:
+     - điểm tách nhánh,
+     - các nhánh song song,
+     - điểm đồng bộ lại.
+  4. Nếu join không xác định chắc chắn, downgrade thành `open_question`.
+- Acceptance criteria:
+  - Section `Parallel activities` mô tả được ai làm song song việc gì.
+  - Không còn phụ thuộc vào raw sync-bar ids để người đọc hiểu.
+  - Diagram không có sync-bar không bị regress.
+- Dependencies: TASK-028, TASK-026
+- Verification: Golden fixture có fork/join thực; output parallel section phải nêu được từng branch.
+- Progress update:
+  - `parallel_blocks` giờ có `role`, `actor_names`, `branch_summaries`, và `join_summary`.
+  - Sync-bar fork/join được render thành mô tả song song đọc hiểu được, không còn phụ thuộc vào raw ids.
+  - Đã thêm regression fixture xác nhận mô tả được từng nhánh `Actor A` / `Actor B`.
+
+#### TASK-032 - Thêm golden quality tests cho BRD output reader-facing
+- Priority: P1
+- Status: Done
+- Module: ai-brd-eval
+- Problem: Test hiện tại chủ yếu check contract/schema/idempotency; chưa có hàng rào nào cho “output đúng schema nhưng vô nghĩa khi đọc”.
+- Why it matters: Đây chính là kiểu lỗi user vừa báo, và nó sẽ tái phát nếu không có golden tests ở mức narrative quality.
+- Implementation steps:
+  1. Chọn 3-5 diagram representative, trong đó có một diagram branch-heavy như case xử lý đe dọa bom.
+  2. Lưu expected assertions ở mức chất lượng đọc:
+     - không lộ raw ids ở reader-facing sections,
+     - `if/else` xuất hiện đúng section,
+     - `handoffs` không chứa edge vô nghĩa,
+     - parallel section có nhánh đọc hiểu được.
+  3. Viết test runner sau `render_brd_markdown()` hoặc ở eval layer.
+  4. Fail test nếu output vi phạm các quality assertions trên.
+- Acceptance criteria:
+  - Regression kiểu “schema pass nhưng BRD vô nghĩa” bị chặn trong CI/local.
+  - Có ít nhất một fixture sát use case thật của user.
+  - Task này trở thành gate cho các refactor pipeline tiếp theo.
+- Dependencies: TASK-028, TASK-029, TASK-030, TASK-031
+- Verification: Chạy suite golden quality và confirm case bomb-threat pass theo rubric đọc hiểu.
+- Progress update:
+  - `apps/api/tests/test_pipeline.py` giờ có golden assertions cho branch narrative, appendix trace, không lộ raw ids ở reader-facing markdown, handoff semantics, và parallel summary.
+  - `apps/api/tests/test_routes.py` thêm regression cho live provider path: dù provider trả spec thô với raw ids, response cuối vẫn được harmonize thành BRD đọc được.
+  - `playwright.config.ts` tách backend E2E sang port `18000` để suite mock ổn định ngay cả khi máy đang chạy backend live ở `8000`.
+
+### Later
+
+#### TASK-018 - Xây golden-set eval lane cho chất lượng BRD
+- Priority: P3
+- Status: Pending
+- Module: ai-brd-eval
+- Problem: Sau khi feature chạy được, vẫn cần một chất lượng lane riêng để đánh giá traceability, warning usefulness, và acceptance của BA trên diagram thật.
+- Why it matters: Đây là cách kiểm soát drift model/prompt lâu dài mà không trộn vào vòng coding thường ngày.
+- Implementation steps:
+  1. Chọn 5-10 diagram representative từ use case thật.
+  2. Lưu expected review notes / acceptance rubric cho từng diagram.
+  3. Viết runner tạo BRD draft và ghi metadata latency/cost.
+  4. So sánh các tiêu chí đã chốt ở Section 17 của feature doc.
+  5. Document cách chạy eval thủ công hoặc scheduled.
+- Acceptance criteria:
+  - Có golden set tối thiểu cho Phase 1.
+  - Có report cơ bản cho traceability, actor coverage, branch correctness, warning usefulness, human acceptance.
+  - Eval lane tách biệt khỏi mock suite và live smoke suite.
+- Dependencies: TASK-016, TASK-017
+- Verification: Chạy eval trên 5-10 diagram và lưu kết quả review đầu tiên.
+
+#### TASK-033 - Ngăn `sync-bar` không phân nhánh tạo false-positive `Parallel activities`
+- Priority: P1
+- Status: Done
+- Module: ai-brd-core-pipeline
+- Problem: Sample cháy hiện có `sync-bar` như một điểm điều tiết layout/control, nhưng BRD vẫn sinh `Parallel activities` dù graph không có fan-out song song thật.
+- Why it matters: Đây là bug semantic thật: BRD đang invent một cơ chế phối hợp song song không tồn tại trong diagram nguồn.
+- Implementation steps:
+  1. Trong `interpret.py`, với `role == "sync"` hoặc `role == "join"`, chỉ emit `parallel_block` reader-facing nếu có branch evidence thật (`branch_summaries`, multi-in/multi-out phù hợp, hoặc join semantics đã được xác minh).
+  2. Nếu sync-bar chỉ nằm trên một đường đi tuyến tính, hạ nó xuống trace/debug artifact thay vì business summary.
+  3. Thêm regression fixture dựa trên sample cháy mặc định để khẳng định section `Parallel activities` rỗng.
+  4. Đảm bảo case fork/join thật không regress.
+- Acceptance criteria:
+  - Sample cháy mặc định không còn section `Parallel activities` giả.
+  - Fixture fork/join thật vẫn giữ được summary song song đọc hiểu được.
+- Dependencies: TASK-031
+- Verification: `apps/api/tests/test_pipeline.py`, `npm run test:brd-mock`
+- Progress update:
+  - `interpret.py` không còn emit `parallel_block` cho `role == "sync"` tuyến tính.
+  - Sample tuyến tính qua `sync-bar` giờ không tạo section `Parallel activities` giả.
+  - Fixture fork/join thật vẫn pass nguyên.
+
+#### TASK-034 - Tách `context note` khỏi `step annotation`
+- Priority: P1
+- Status: Done
+- Module: ai-brd-core-pipeline
+- Problem: Note mô tả bối cảnh đầu vào như danh sách nguồn phát hiện cháy đang bị anchor vào `start` và render thành `Note cho bước "Bắt đầu quy trình"`.
+- Why it matters: BRD đang gán sai ngữ nghĩa của note, làm người đọc tưởng đây là comment của một step cụ thể thay vì context/assumption của quy trình.
+- Implementation steps:
+  1. Bổ sung semantic loại note riêng: `context_note` hoặc `entry_context_note`.
+  2. Update rule anchoring trong `interpret.py` để note gần `start` nhưng mang nội dung dạng list/context không bị auto-map thành step annotation.
+  3. Render `context_note` vào `Assumptions / open questions` hoặc một wording context phù hợp.
+  4. Thêm golden assertion cho sample cháy mặc định.
+- Acceptance criteria:
+  - Note nguồn phát hiện cháy không còn render thành annotation của `Bắt đầu quy trình`.
+  - Note thực sự bám theo một step cụ thể vẫn anchor đúng như trước.
+- Dependencies: None
+- Verification: pipeline golden tests + manual generate sample cháy
+- Progress update:
+  - Thêm semantic phân loại note: `step_annotation`, `context_note`, `global_note`.
+  - Note dạng list/context gần điểm vào quy trình giờ đi vào `context_notes`, không còn bị ép thành annotation của một step.
+  - Render section 10 dùng prefix `Context:` cho nhóm note này.
+
+#### TASK-035 - Phân biệt `main-path continuation` với `alternate branch` trong decision narrative
+- Priority: P2
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: Decision outcomes hiện luôn dùng phrasing `... sau đó quay lại luồng chính tại ...`, kể cả khi nhánh đó chỉ là continuation bình thường của main flow.
+- Why it matters: Draft đọc được, nhưng vẫn rất “machine-like” và tạo cảm giác flow vòng vèo hơn thực tế.
+- Implementation steps:
+  1. Bổ sung metadata trong branch outcome để đánh dấu `continues_main_flow`.
+  2. Update renderer để main-path outcome dùng phrasing ngắn hơn, ví dụ `Tiếp tục: ...`.
+  3. Chỉ dùng `quay lại luồng chính` cho nhánh alternate thực sự rẽ ra rồi mới nhập lại sau.
+  4. Mở rộng golden tests cho sample cháy và một sample alternate-end.
+- Acceptance criteria:
+  - Main-path decision outcome không còn mang phrasing “quay lại luồng chính” một cách máy móc.
+  - Alternate branches vẫn giữ được semantics rejoin khi cần.
+- Dependencies: TASK-028
+- Verification: markdown golden tests + sample BRD review
+- Progress update:
+  - Branch outcome thêm cờ `continues_main_flow`.
+  - Renderer đổi nhánh continuation trên main path sang phrasing `Tiếp tục: ...`.
+  - Chỉ nhánh alternate thực sự mới còn wording `quay lại luồng chính`.
+
+#### TASK-036 - Sửa empty-state mâu thuẫn trong section `Assumptions / open questions`
+- Priority: P1
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: Khi draft có `context_notes` nhưng không có `annotation`, `assumption`, hay `open_question`, renderer vẫn in thêm dòng `Không có assumption/open question.`
+- Why it matters: Output reader-facing đang tự phủ định chính nó, làm giảm niềm tin vào BRD dù semantic đã đúng hơn.
+- Implementation steps:
+  1. Update điều kiện empty-state trong `render.py` để tính cả `context_notes`.
+  2. Thêm regression test ở mức markdown renderer cho case chỉ có `context_notes`.
+  3. Verify sample cháy không còn đồng thời xuất hiện `Context:` và `Không có assumption/open question.`
+- Acceptance criteria:
+  - Section 10 không còn tự mâu thuẫn khi chỉ có `context_notes`.
+  - Pipeline tests chặn regression này.
+- Dependencies: TASK-034
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - `render.py` dùng helper `has_assumption_section_content()` để tính cả `context_notes` trước khi render empty-state.
+  - Thêm regression test cho case section 10 chỉ có `context_notes`.
+  - Sample cháy không còn đồng thời hiện `Context:` và `Không có assumption/open question.`
+
+#### TASK-037 - Làm `Decision logic` của alternate branch bớt mang hình thái trace graph
+- Priority: P2
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: Nhánh alternate vẫn đang render theo pattern `A -> B; sau đó quay lại luồng chính tại ...`, nên đọc giống trace graph hơn là mô tả nghiệp vụ.
+- Why it matters: Đây là phần BA cần đọc để hiểu if/else, nhưng wording hiện còn buộc người đọc tự diễn giải lại.
+- Implementation steps:
+  1. Bổ sung formatter riêng cho alternate branch outcome thay vì luôn join `path_summary` bằng `->`.
+  2. Ưu tiên các phrasing kiểu `Nếu ... thì ...` hoặc `Trường hợp ...` khi có 1-2 bước rõ ràng.
+  3. Chỉ rơi về trace-style wording khi path dài hoặc semantic không chắc.
+  4. Thêm golden assertions cho case cháy và một case branch nhiều bước.
+- Acceptance criteria:
+  - Decision section vẫn traceable nhưng đọc gần ngôn ngữ nghiệp vụ hơn.
+  - Không regress main-path continuation `Tiếp tục: ...`.
+- Dependencies: TASK-035
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - Renderer không còn join alternate path bằng `->` ở BRD reader-facing.
+  - Alternate branch nhiều bước giờ dùng phrasing `Thực hiện lần lượt ... rồi ...`.
+  - Wording rejoin đổi sang `nhập lại luồng chính` để tự nhiên hơn.
+
+#### TASK-038 - Làm rõ trigger mở đầu của quy trình trong BRD reader-facing
+- Priority: P2
+- Status: Done
+- Module: ai-brd-core-pipeline
+- Problem: Draft hiện bắt đầu main workflow từ actor vận hành trung tâm và bỏ mờ tín hiệu khởi phát, dù diagram và context có actor nguồn phát hiện đầu tiên.
+- Why it matters: Người chỉ đọc BRD có thể hiểu quy trình “bắt đầu ở VOC” thay vì “được kích hoạt bởi một nguồn phát hiện ban đầu”.
+- Implementation steps:
+  1. Chốt rule reader-facing: trigger/start event sẽ đi vào `Process overview`, `Main workflow`, hoặc cả hai.
+  2. Nếu giữ main spine như hiện tại, bổ sung deterministic summary sentence về tác nhân khởi phát.
+  3. Thêm regression cho sample cháy để output nêu rõ nguồn kích hoạt quy trình.
+- Acceptance criteria:
+  - Draft reader-facing nêu rõ vì sao/quy trình được kích hoạt từ đâu.
+  - Không cần đưa raw `start` node vào numbered flow nếu không muốn đổi template.
+- Dependencies: TASK-034
+- Verification: review sample cháy + pipeline golden tests
+- Progress update:
+  - `spec_builder.py` dựng `Process overview` theo deterministic summary mới thay vì giữ summary mơ hồ từ provider.
+  - Summary giờ nêu rõ actor/kênh khởi phát khi có `context_note` gần start và chỉ ra actor tiếp nhận xử lý ban đầu.
+  - Live path cũng bị harmonize về summary deterministic để không regress giữa mock và live provider.
+
+#### TASK-039 - Chuẩn hóa whitespace của canvas text trước khi render BRD reader-facing
+- Priority: P2
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: Reader-facing BRD vẫn giữ nguyên line break trong `node.text` và `note.text`, nên câu văn bị ngắt giữa chừng theo layout của canvas thay vì theo ngữ nghĩa tài liệu.
+- Why it matters: Draft hiện đã đúng semantic hơn nhiều, nhưng vẫn lộ rõ dấu vết “text copy từ shape”, làm giảm chất lượng BA-facing.
+- Implementation steps:
+  1. Thêm helper normalize text cho reader-facing render, gộp line break nội bộ thành khoảng trắng khi không phải list có chủ đích.
+  2. Áp dụng helper này cho `build_main_flow_description()`, `human_node_label()`, handoff reason, và branch path summary.
+  3. Giữ nguyên raw text cho appendix/debug trace nếu cần.
+  4. Thêm regression test cho decision/activity text nhiều dòng.
+- Acceptance criteria:
+  - Main workflow, decision logic, và handoff section không còn ngắt câu theo line break của canvas.
+  - Note/list có chủ đích vẫn giữ được cấu trúc khi cần.
+- Dependencies: None
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - Thêm `reader_text.py` với helper `normalize_inline_text()` để collapse line break của canvas thành prose reader-facing.
+  - Áp dụng normalization ở `spec_builder.py`, `interpret.py`, và `render.py` như một lớp phòng thủ cuối cho mock/live/provider output.
+  - Thêm regression cho activity/decision/handoff nhiều dòng để reader-facing markdown không còn lộ line break của canvas.
+
+#### TASK-040 - Render `Context` note theo cấu trúc tài liệu rõ ràng hơn
+- Priority: P2
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: `Context:` hiện đúng semantic nhưng format markdown còn vụn: bullet tiêu đề và các dòng list con đang trộn cùng cấp, chưa cho cảm giác đây là một mục bối cảnh được trình bày có cấu trúc.
+- Why it matters: Đây là phần mở đầu quan trọng của BRD; nếu trình bày lỏng, người đọc vẫn thấy output giống tool dump hơn là draft tài liệu.
+- Implementation steps:
+  1. Chọn một format ổn định cho `context_notes`: prose ngắn + sub-bullets, hoặc bullet cha với các bullet con thụt cấp rõ ràng.
+  2. Tách dòng đầu của context note làm heading/lead-in, phần còn lại render thành các mục con.
+  3. Đảm bảo nhiều `context_notes` vẫn render nhất quán.
+  4. Thêm golden test cho sample cháy.
+- Acceptance criteria:
+  - Section 10 trình bày `Context` như một mục tài liệu có cấu trúc.
+  - Không regress case context note một dòng.
+- Dependencies: TASK-039
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - `render.py` parse `context_note` thành heading + sub-bullets thay vì đổ nguyên multiline text vào một bullet duy nhất.
+  - `reader_text.py` thêm `split_structured_note()` để tách dòng đầu và các mục con có chủ đích.
+  - Golden test của sample context nhiều dòng giờ kiểm tra được cả heading lẫn sub-bullets.
+
+#### TASK-041 - Đổi empty-state wording kỹ thuật sang phrasing BA-facing
+- Priority: P3
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: Một số empty-state như `Không có parallel block.` vẫn mang ngôn ngữ kỹ thuật của hệ thống thay vì ngôn ngữ tài liệu nghiệp vụ.
+- Why it matters: Đây là polish nhỏ nhưng giúp draft nhìn bớt “máy”, nhất là khi user export trực tiếp để review.
+- Implementation steps:
+  1. Review tất cả empty-state của 10 section BRD chính.
+  2. Đổi các phrasing kỹ thuật sang câu gần ngôn ngữ BA hơn.
+  3. Thêm snapshot/golden assertion cho ít nhất `Parallel activities` và `Decision logic`.
+- Acceptance criteria:
+  - Reader-facing BRD không còn lộ phrasing kỹ thuật như `parallel block`.
+  - Appendix/debug wording có thể giữ nguyên nếu cần.
+- Dependencies: None
+- Verification: review markdown snapshot + `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - Empty-state của `Decision logic`, `Parallel activities`, `Handoffs`, và section 10 đã đổi sang phrasing BA-facing hơn.
+  - Appendix/debug vẫn giữ wording kỹ thuật tối thiểu để không ảnh hưởng traceability.
+  - Regression tests hiện khóa cả wording mới lẫn rule không render empty-state mâu thuẫn.
+
+#### TASK-042 - Sinh `Business objective` theo nghiệp vụ thay vì placeholder tĩnh
+- Priority: P2
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: Section `Business objective` hiện luôn in một câu placeholder chung, không phản ánh quy trình cụ thể của diagram.
+- Why it matters: Khi các section khác đã khá reader-facing, một objective tĩnh làm lộ rõ giới hạn của draft và giảm giá trị dùng ngay cho BA review.
+- Implementation steps:
+  1. Bổ sung deterministic objective builder dựa trên trigger/context, main spine, decision points, và end state.
+  2. Ưu tiên template domain-agnostic nhưng cụ thể, ví dụ `tiếp nhận tín hiệu - xác minh - điều phối - kết thúc an toàn`.
+  3. Giữ fallback generic chỉ khi semantic không đủ.
+  4. Thêm golden test cho sample cháy và một sample không có context note.
+- Acceptance criteria:
+  - `Business objective` không còn là câu placeholder tĩnh ở các sample có semantic đủ rõ.
+  - Nếu semantic nghèo, hệ thống vẫn có fallback an toàn.
+- Dependencies: None
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - `render.py` không còn hard-code objective placeholder mà dựng deterministic objective từ corpus reader-facing.
+  - Có heuristic riêng cho case `sự cố cháy`, `đe dọa bom`, và fallback generic.
+  - Golden test đã khóa case cháy để objective nêu rõ tiếp nhận, xác minh, điều phối, và khép quy trình an toàn.
+
+#### TASK-043 - Làm `Process overview` bớt generic và gắn hơn với domain của diagram
+- Priority: P2
+- Status: Done
+- Module: ai-brd-core-pipeline
+- Problem: `Process overview` hiện đã nêu đúng trigger và actor đầu tiên, nhưng câu mở đầu vẫn là template chung `các actor phối hợp ... theo diagram hiện tại`.
+- Why it matters: Opening paragraph là thứ BA đọc đầu tiên; nếu còn generic, draft vẫn cho cảm giác “template đã được điền dữ liệu” hơn là mô tả nghiệp vụ thật.
+- Implementation steps:
+  1. Bổ sung rule suy diễn domain phrase từ `context_note`, `diagram_name`, hoặc các step đầu.
+  2. Thay câu mở đầu bằng phrasing cụ thể hơn với case hiện tại, ví dụ neo vào `sự cố cháy` nếu có tín hiệu đủ mạnh.
+  3. Giữ deterministic fallback generic cho diagram mơ hồ.
+  4. Thêm golden test cho sample cháy.
+- Acceptance criteria:
+  - Với sample cháy, `Process overview` nêu rõ đây là quy trình xử lý sự cố cháy thay vì chỉ nói “xử lý sự kiện”.
+  - Các sample khác không bị ép domain sai.
+- Dependencies: TASK-042
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - `spec_builder.py` thêm bước suy diễn subject/domain từ `diagram_name`, `context_notes`, và main flow.
+  - `Process overview` giờ có opening domain-specific cho case cháy và đe dọa bom, fallback về generic khi tín hiệu không đủ.
+  - Regression test sample cháy xác nhận opening đã chuyển từ `xử lý sự kiện` sang `xử lý sự cố cháy`.
+
+#### TASK-044 - Xem lại contract section 10 khi chỉ có `Context`
+- Priority: P3
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: Section `Assumptions / open questions` hiện có thể chỉ chứa `Context`, nên tên section hơi lệch với nội dung dù semantic bên trong đã đúng.
+- Why it matters: Đây là polish nhỏ, nhưng ảnh hưởng cảm giác “naturalness” của bản BRD export.
+- Implementation steps:
+  1. Quyết định có giữ contract 10 section cố định hay cho phép đổi label theo content.
+  2. Nếu giữ 10 section, cân nhắc thêm lead-in sentence giải thích context đầu vào được nhóm tại đây.
+  3. Nếu đổi label động, cập nhật use case/doc và golden tests tương ứng.
+- Acceptance criteria:
+  - Section 10 không gây cảm giác lệch nhãn với nội dung trong các draft điển hình.
+  - Không làm rối contract Phase 1 đã chốt nếu chưa thực sự cần.
+- Dependencies: None
+- Verification: review sample cháy + doc alignment check
+- Progress update:
+  - Chốt giữ 10 section của Phase 1 nhưng đổi label section 10 sang `Context / assumptions / open questions`.
+  - Renderer, test suite, feature doc, và `UC-06` đã được sync theo label mới.
+  - Contract Phase 1 vẫn giữ 10 section, chỉ làm rõ hơn nội dung thực tế của section cuối.
+
+#### TASK-045 - Mở rộng schema `MainFlowStep` để chứa nội dung BRD-level cho từng bước
+- Priority: P1
+- Status: Done
+- Module: ai-brd-core-pipeline
+- Problem: `MainFlowStep` hiện chỉ có một `description` ngắn, nên section 5 không thể diễn đạt mục đích bước, hành động chính, và kết quả mong đợi như một BRD thật.
+- Why it matters: Đây là khoảng cách lớn nhất còn lại giữa draft hiện tại và một BRD nháp thực thụ. Nếu schema không giàu hơn, renderer không có đủ dữ liệu để nâng chất section 5.
+- Implementation steps:
+  1. Mở rộng `MainFlowStep` trong `apps/api/app/schemas/spec.py` với các field BRD-facing tối thiểu như `step_title`, `step_purpose`, `business_action`, `expected_result`, và optional `input_or_trigger`.
+  2. Cập nhật `build_deterministic_spec()` để suy diễn các field này từ `main_flow_nodes`, context, handoff, và neighboring nodes.
+  3. Giữ fallback an toàn cho diagram nghèo ngữ nghĩa để field nào không suy ra được thì không bịa thêm.
+  4. Cập nhật live harmonization nếu cần để mock/live giữ cùng contract.
+- Acceptance criteria:
+  - `DiagramBRDSpec.main_flow_steps` có đủ dữ liệu để render một step giàu nghiệp vụ hơn một dòng text.
+  - Không làm regress traceability hay thứ tự main spine.
+- Dependencies: None
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - `MainFlowStep` đã được mở rộng với `step_title`, `step_purpose`, `business_action`, `expected_result`, và `input_or_trigger`.
+  - `build_deterministic_spec()` giờ không chỉ copy text node mà còn enrich từng bước bằng heuristic bảo thủ theo loại node, ngữ cảnh đầu vào, handoff, và bước lân cận.
+  - End step không còn rơi về actor mồ côi khi thiếu `lane_id`; hệ thống suy actor đóng quy trình từ bước ngay trước nếu hợp lý.
+
+#### TASK-046 - Render section `Main workflow` theo format BRD mở rộng thay vì numbered list một dòng
+- Priority: P1
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: Dù semantic đã đúng, section 5 hiện vẫn giống checklist flow vì renderer chỉ in `[Actor] description`.
+- Why it matters: Đây là phần BA sẽ đọc kỹ nhất. Nếu section 5 còn ngắn gọn quá mức, toàn bộ draft vẫn chưa đạt cảm giác "BRD thật".
+- Implementation steps:
+  1. Thiết kế format ổn định cho mỗi step, ví dụ:
+     - heading: `1. [Actor] Tên bước`
+     - sub-lines: `Mục đích`, `Thực hiện`, `Kết quả`
+  2. Cập nhật `render_brd_markdown()` để dùng các field mới của `MainFlowStep` thay vì chỉ `description`.
+  3. Giữ output đủ ngắn để không biến section 5 thành đoạn văn dày đặc, nhưng đủ rõ để BA hiểu nghiệp vụ của từng bước.
+  4. Thêm golden snapshot cho sample cháy và ít nhất một sample khác.
+- Acceptance criteria:
+  - `Main workflow` đọc như mô tả nghiệp vụ của từng bước, không còn giống checklist tối giản.
+  - Section 5 vẫn bám đúng thứ tự spine và actor ownership.
+- Dependencies: TASK-045
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - `render.py` đã đổi section 5 sang format nhiều lớp cho mỗi step: heading + `Đầu vào / kích hoạt`, `Mục đích`, `Thực hiện`, `Kết quả mong đợi`.
+  - Reader-facing `Main workflow` giờ không còn là checklist một dòng; nó giữ spine cũ nhưng đọc gần hơn với mô tả nghiệp vụ.
+  - Golden tests đã khóa format mới cho sample reader-facing.
+
+#### TASK-047 - Điền `responsibilities` cho actor và làm section `Actors` mang tính BRD hơn
+- Priority: P2
+- Status: Done
+- Module: ai-brd-core-pipeline
+- Problem: Section `Actors` hiện chỉ liệt kê tên actor, trong khi schema đã có `responsibilities` nhưng builder luôn để trống.
+- Why it matters: BRD thật cần cho người đọc hiểu vai trò của từng bên trong quy trình, không chỉ danh sách người tham gia.
+- Implementation steps:
+  1. Suy diễn trách nhiệm chính của từng actor từ các bước main flow và decision mà actor đó sở hữu.
+  2. Lọc trùng và chuẩn hóa responsibilities thành 1-3 bullet ngắn cho mỗi actor.
+  3. Cập nhật renderer để section 4 hiển thị actor name kèm responsibilities khi có.
+  4. Thêm regression/golden test cho sample cháy.
+- Acceptance criteria:
+  - Ít nhất các actor chính trong sample có trách nhiệm được mô tả ngắn gọn.
+  - Không bịa trách nhiệm vượt quá semantic hiện có của diagram.
+- Dependencies: TASK-045
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - Builder đã suy diễn `responsibilities` từ step titles và business actions của từng actor thay vì để trống.
+  - Renderer hiện hiển thị actor name kèm responsibilities dưới dạng sub-bullets khi có.
+  - Rule suy diễn đã được chỉnh để tránh false-positive trách nhiệm chỉ vì câu expected-result có chứa từ khóa nghiệp vụ.
+
+#### TASK-048 - Làm lại section `Scope` theo hướng ranh giới quy trình thay vì thống kê số lượng
+- Priority: P2
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: `Scope` hiện chỉ có số actor và số bước chính, nên chưa phản ánh phạm vi nghiệp vụ của quy trình.
+- Why it matters: Một BRD reader-facing cần nói quy trình bắt đầu từ đâu, xử lý đến mức nào, và khép ở điều kiện nào. Chỉ đếm số lượng là chưa đủ.
+- Implementation steps:
+  1. Thiết kế lại nội dung section 3 để gồm các mục như `Trigger`, `Điểm bắt đầu xử lý`, `Điểm kết thúc`, `Phạm vi bao phủ`.
+  2. Suy diễn các field này từ `summary`, `context_notes`, `main_flow_steps`, `end` node, và decision outcomes.
+  3. Giữ lại các chỉ số đếm nếu cần nhưng chuyển chúng thành metadata phụ, không phải trọng tâm của section.
+  4. Cập nhật docs/golden tests tương ứng.
+- Acceptance criteria:
+  - Section `Scope` giúp người đọc hiểu ranh giới quy trình chứ không chỉ số liệu thống kê.
+  - Sample cháy nêu được trigger, đầu mối tiếp nhận, và trạng thái kết thúc chính.
+- Dependencies: TASK-045
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests/test_pipeline.py`
+- Progress update:
+  - Section 3 đã được làm lại để nêu `Trigger / đầu vào`, `Điểm bắt đầu xử lý`, `Điểm kết thúc chính`, `Phạm vi bao phủ`, và metadata tổng quan.
+  - Số actor / số bước vẫn còn nhưng chỉ là thông tin tổng quan phụ, không còn là toàn bộ section.
+  - Golden tests hiện khóa được scope boundaries của sample reader-facing.
+
+#### TASK-049 - Tách bản export BRD reader-facing khỏi `Appendix A. Traceability (debug)`
+- Priority: P2
+- Status: Done
+- Module: ai-brd-renderer
+- Problem: Bản BRD hiện xuất ra luôn kèm appendix debug, nên vẫn mang tính artifact kỹ thuật hơn là tài liệu nghiệp vụ thuần.
+- Why it matters: Với mục tiêu "gần BRD thật nhất có thể", phần trace/debug nên là tùy chọn cho người kỹ thuật chứ không phải mặc định của bản reader-facing.
+- Implementation steps:
+  1. Thêm mode hoặc option export cho `render_brd_markdown()`, ví dụ `include_debug_appendix=True|False`.
+  2. Mặc định UI/export reader-facing tắt appendix debug, còn debug mode hoặc internal export có thể bật.
+  3. Cập nhật panel/export flow để user chọn hoặc hệ thống tự chọn mode phù hợp.
+  4. Thêm test cho cả hai mode.
+- Acceptance criteria:
+  - Có thể export một bản BRD sạch không chứa appendix debug.
+  - Traceability appendix vẫn tồn tại khi cần cho QA/dev review.
+- Dependencies: None
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests` và manual export review
+- Progress update:
+  - `render_brd_markdown()` giờ dùng `template="default"` cho bản reader-facing không appendix, và `template="full"` cho bản có `Appendix A. Traceability (debug)`.
+  - Flow hiện tại của frontend vẫn gửi `template=default`, nên export markdown mặc định đã sạch hơn cho BA đọc.
+  - Regression tests đã khóa cả mode mặc định lẫn mode `full`.
+
+#### TASK-050 - Thêm golden acceptance test cho tiêu chí “giống BRD thật” ở sample reader-facing
+- Priority: P2
+- Status: Done
+- Module: ai-brd-eval
+- Problem: Test hiện khóa khá tốt semantic correctness, nhưng chưa khóa đủ những tiêu chí prose khiến draft trông giống BRD thật hơn.
+- Why it matters: Khi bắt đầu nâng chất section 3/4/5, rất dễ regress về độ dài, cấu trúc, hoặc quay lại kiểu output quá kỹ thuật.
+- Implementation steps:
+  1. Chọn 2-3 sample điển hình như cháy và đe dọa bom.
+  2. Viết golden assertions cho section 3, 4, 5, và export mode không appendix.
+  3. Thêm một rubric reader-facing tối thiểu: step richness, actor responsibilities, scope boundaries, absence of debug dump.
+  4. Tách suite này khỏi smoke/live để nó phục vụ quality gate cho prose.
+- Acceptance criteria:
+  - Có test tự động cho ít nhất một sample “đủ giống BRD thật” theo tiêu chí đã chốt.
+  - Các task prose tiếp theo không còn chỉ dựa vào review thủ công.
+- Dependencies: TASK-045, TASK-046, TASK-047, TASK-048, TASK-049
+- Verification: `apps/api/.venv/bin/python -m pytest apps/api/tests`
+- Progress update:
+  - Test suite đã bổ sung golden assertions cho section 3, 4, 5 và mode export không appendix.
+  - Route tests cũng đã được cập nhật để phân biệt rõ `default` reader-facing với `full` debug appendix.
+  - Live smoke với OpenRouter đã được rerun thành công sau khi schema `MainFlowStep` được mở rộng.
+
+#### TASK-051 - Định nghĩa frontend cache contract cho AI BRD draft
+- Priority: P1
+- Status: Done
+- Module: ai-brd-frontend-state
+- Problem: BRD state hiện chỉ nằm trong React memory, chưa có một contract cache rõ ràng để lưu và khôi phục draft/spec/warnings sau khi đóng panel hoặc reload app.
+- Why it matters: Nếu không chốt shape cache ngay từ đầu, feature rất dễ rơi vào trạng thái “lưu được markdown nhưng mất metadata, outdated state, hoặc retry context”.
+- Implementation steps:
+  1. Định nghĩa một `BrdWorkspaceCacheEntry` trong frontend types, gồm tối thiểu: `draft`, `spec`, `warnings`, `blockingIssues`, `metadata`, `requestId`, `runtimeStatus`, `phase`, `lastGenerateFingerprint`, `lastGeneratedRevision`, `updatedAt`.
+  2. Chốt storage key/version, ví dụ `swimlane.ai_brd.cache.v1`.
+  3. Chốt policy Phase 1: chỉ lưu **một last snapshot** cho workspace hiện tại, chưa làm multi-history.
+  4. Document rõ field nào là source of truth khi hydrate lại app.
+- Acceptance criteria:
+  - Có contract cache rõ ràng, versioned, đủ dữ liệu để khôi phục BRD panel mà không generate lại.
+  - Không cần đoán lại state từ raw markdown.
+- Dependencies: None
+- Verification: typecheck + unit test parse/serialize cache payload
+- Progress update:
+  - Đã thêm `BrdWorkspaceCacheEntry` và helper `src/brd/cache.ts` với storage key `swimlane.ai_brd.cache.v1`.
+  - Cache contract được version hóa ở mức frontend và có guard parse/version trong unit test.
+
+#### TASK-052 - Persist AI BRD snapshot vào `localStorage` khi generate thành công hoặc user chỉnh draft
+- Priority: P1
+- Status: Done
+- Module: ai-brd-frontend-state
+- Problem: Sau khi generate xong hoặc user edit draft, dữ liệu vẫn chỉ ở RAM; reload trang là mất.
+- Why it matters: Đây là lõi của yêu cầu cache frontend trước khi có database.
+- Implementation steps:
+  1. Thêm helper save/load/clear cache trong `src/brd/*`, tách khỏi `App.tsx`.
+  2. Khi `/generate` thành công, persist snapshot mới vào `localStorage`.
+  3. Khi user chỉnh `BRD Draft`, debounce hoặc persist lại snapshot đã sửa.
+  4. Chỉ lưu các field cần thiết; không lưu graph JSON trùng lặp nếu chưa cần.
+- Acceptance criteria:
+  - Reload app vẫn khôi phục được BRD draft gần nhất và các metadata liên quan.
+  - Bản export sau khi reload vẫn đúng với nội dung user đã sửa.
+- Dependencies: TASK-051
+- Verification: Vitest unit test cho save/load + browser manual reload test
+- Progress update:
+  - `App.tsx` giờ persist snapshot sau khi đã có BRD draft/spec và tự cập nhật lại cache khi user sửa `BRD Draft`.
+  - Snapshot lưu đủ draft/spec/warnings/metadata/runtime state để export sau reload vẫn bám đúng nội dung user đã sửa.
+
+#### TASK-053 - Hydrate cache khi app mở và thêm affordance `Open last BRD draft`
+- Priority: P1
+- Status: Done
+- Module: ai-brd-ui
+- Problem: Hiện close panel chỉ ẩn UI, và panel chỉ được mở lại từ flow generate; user không có đường rõ ràng để mở lại draft đã có.
+- Why it matters: Đây là lý do UX hiện bị cảm nhận như “đóng là mất draft”.
+- Implementation steps:
+  1. Khi `App` mount, đọc cache và hydrate các state BRD nếu payload hợp lệ.
+  2. Thêm action UI rõ ràng để reopen draft đã cache, ví dụ một nút `Open last BRD draft` trên toolbar hoặc cạnh nút generate.
+  3. Nếu panel bị close nhưng cache/state còn, action reopen phải mở lại đúng tab/draft/spec thay vì generate mới.
+  4. Giữ close panel là đóng UI, không xóa cache.
+- Acceptance criteria:
+  - User có thể đóng panel rồi mở lại draft cũ mà không generate lại.
+  - Reload app vẫn có affordance để mở lại bản draft đã cache.
+- Dependencies: TASK-051, TASK-052
+- Verification: Playwright E2E cho close -> reopen và reload -> reopen
+- Progress update:
+  - App hydrate BRD state từ cache khi mount nhưng giữ panel đóng mặc định.
+  - Toolbar có action `Open last BRD draft` để reopen đúng snapshot đã lưu.
+
+#### TASK-054 - Thêm invalidation và `outdated` policy cho BRD cache theo fingerprint/revision
+- Priority: P1
+- Status: Done
+- Module: ai-brd-frontend-state
+- Problem: Nếu chỉ hydrate cache mà không so với diagram hiện tại, user có thể đọc nhầm draft cũ như thể nó còn khớp hoàn toàn với graph mới.
+- Why it matters: Cache không có invalidation sẽ làm feature “tiện” nhưng nguy hiểm về mặt nghiệp vụ.
+- Implementation steps:
+  1. Khi lưu cache, persist cả `lastGenerateFingerprint` và `lastGeneratedRevision`.
+  2. Khi hydrate, so sánh với diagram hiện tại để xác định `fresh` / `outdated`.
+  3. Nếu outdated, panel hoặc action reopen phải hiển thị badge/warning rõ ràng.
+  4. Chốt policy khi import JSON mới hoặc reset canvas: giữ cache cũ ở trạng thái outdated hay clear hẳn.
+- Acceptance criteria:
+  - Cache cũ không bao giờ được trình bày như bản còn khớp tuyệt đối với diagram mới.
+  - User luôn được báo rõ khi đang mở lại draft outdated.
+- Dependencies: TASK-052, TASK-053
+- Verification: unit test fingerprint compare + E2E cho mutate diagram sau hydrate
+- Progress update:
+  - Cache snapshot lưu cả `lastGenerateFingerprint` và `lastGeneratedRevision`.
+  - Reopen sau reset/import/reload giờ tính `Outdated` theo fingerprint/revision thay vì coi cache luôn là fresh.
+  - Policy Phase 1 được chốt là giữ cache cũ ở trạng thái `Outdated` cho đến khi user regenerate hoặc discard.
+
+#### TASK-055 - Thêm hành động xóa cache BRD thủ công và dọn lifecycle khi reset/import
+- Priority: P2
+- Status: Done
+- Module: ai-brd-ui
+- Problem: Sau khi có cache, hệ thống cũng cần cách cho user bỏ bản cũ đi khi nó không còn giá trị hoặc sau các hành động phá ngữ cảnh như reset/import hoàn toàn diagram khác.
+- Why it matters: Cache mà không có clear path sẽ sớm trở thành nguồn nhầm lẫn.
+- Implementation steps:
+  1. Thêm action `Discard cached BRD` hoặc tương đương.
+  2. Xác định các event nên prompt/auto-clear cache: reset canvas, import diagram khác, load sample khác.
+  3. Clear cả in-memory BRD state và `localStorage` khi user xác nhận discard.
+  4. Update status text/UX copy cho rõ.
+- Acceptance criteria:
+  - User có cách chủ động bỏ BRD cache cũ.
+  - Các thao tác thay đổi diagram mang tính “context switch” không để lại cached draft mơ hồ.
+- Dependencies: TASK-052, TASK-053
+- Verification: manual test reset/import/discard
+- Progress update:
+  - Toolbar có action `Discard cached BRD` để clear cả in-memory state lẫn `localStorage`.
+  - Reset/import/clear hiện giữ cache ở trạng thái outdated và update status copy để user biết draft cũ không còn khớp hoàn toàn.
+
+#### TASK-056 - Khóa frontend cache behavior bằng unit + E2E tests
+- Priority: P2
+- Status: Done
+- Module: ai-brd-tests
+- Problem: Cache UI/state rất dễ regress: save thiếu field, hydrate sai tab, close/reopen không ổn, outdated badge biến mất.
+- Why it matters: Không có test, tính năng cache sẽ mong manh hơn chính feature generate.
+- Implementation steps:
+  1. Thêm unit test cho serialize/deserialize cache entry và version guard.
+  2. Mở rộng Playwright flow cho:
+     - generate -> close -> reopen
+     - generate -> edit draft -> reload -> reopen
+     - generate -> mutate diagram -> reopen cached draft -> thấy outdated
+  3. Thêm test discard cache.
+  4. Nếu cần, mock `localStorage` trong Vitest cho component-level test.
+- Acceptance criteria:
+  - Có automated coverage cho save, hydrate, reopen, outdated, discard.
+  - Cache behavior không chỉ dựa vào manual test.
+- Dependencies: TASK-052, TASK-053, TASK-054, TASK-055
+- Verification: `npm run test:brd-mock` + Playwright E2E
+- Progress update:
+  - Đã thêm `src/brd/cache.test.ts` cho save/load/clear/version guard.
+  - Playwright flow đã mở rộng để cover `generate -> close -> reopen -> reload -> outdated -> discard`.
+
+#### TASK-057 - Chốt draw.io XML interchange contract và supported subset
+- Priority: P1
+- Status: Done
+- Module: file-interchange
+- Problem: Repo hiện chỉ có contract file thao tác trực tiếp ở mức JSON/SVG, trong khi yêu cầu mới là import/export draw.io XML theo format `mxfile > diagram > mxGraphModel` giống [examples/bomb.drawio.xml](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/examples/bomb.drawio.xml:1).
+- Why it matters: Nếu không chốt subset hỗ trợ trước, parser và serializer sẽ dễ lệch nhau, dẫn tới import được một kiểu nhưng export ra một kiểu khác hoặc mất semantic lane/node.
+- Implementation steps:
+  1. Tạo doc contract ngắn cho draw.io XML support trong repo docs hoặc README kỹ thuật: outer swimlane container, lane columns, start/end/activity/decision/sync-bar/note, edges có label.
+  2. Chốt field mapping giữa LogicFlow graph và draw.io `mxCell`:
+     - lane root container
+     - lane parent cell
+     - node `type -> style`
+     - edge `source/target/value/style`
+  3. Chốt policy text: decode HTML-rich `value` khi import và encode subset ổn định khi export.
+  4. Chốt policy Phase 1: tạm ẩn `Mở JSON`, `Lưu JSON`, `Export SVG` khỏi toolbar, nhưng không xóa code path nền ngay.
+- Acceptance criteria:
+  - Có supported subset rõ ràng cho import/export XML.
+  - Dev có thể implement parser/serializer mà không phải đoán format draw.io được support.
+- Dependencies: None
+- Verification: Review chéo contract với [examples/bomb.drawio.xml](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/examples/bomb.drawio.xml:1)
+- Progress update:
+  - Supported subset đã được chốt trong [docs/use-cases/UC-05-import-export.md](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/docs/use-cases/UC-05-import-export.md:1).
+  - Contract text/style/geometry đã được encode thành adapter helpers tại `src/io/drawio-shared.ts`.
+
+#### TASK-058 - Tách XML adapter layer khỏi `App.tsx`
+- Priority: P1
+- Status: Done
+- Module: editor-toolbar-runtime
+- Problem: Import/export hiện đang được xử lý inline trong [src/App.tsx](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/src/App.tsx:1798), không phù hợp để nhét thêm parse/serialize draw.io XML.
+- Why it matters: Nếu xử lý XML trực tiếp trong `App.tsx`, file này sẽ phình thêm và rất khó test unit cho file-interchange logic.
+- Implementation steps:
+  1. Tạo module mới, ví dụ `src/io/drawio-import.ts` và `src/io/drawio-export.ts`.
+  2. Giữ `App.tsx` chỉ làm việc với `FileReader`, download, và call adapter.
+  3. Nếu cần, thêm `src/io/drawio-types.ts` cho các shape trung gian như `MxCell`, `MxGeometry`, `DrawioDocument`.
+  4. Chuẩn bị helper text decode/encode dùng chung thay vì lặp lại logic trong import/export.
+- Acceptance criteria:
+  - `App.tsx` không tự parse XML string hoặc build `mxCell` string thủ công.
+  - XML mapping logic nằm trong module có thể unit test độc lập.
+- Dependencies: TASK-057
+- Verification: Typecheck + code review entrypoint flow
+- Progress update:
+  - Đã tách parser/serializer sang `src/io/drawio-import.ts`, `src/io/drawio-export.ts`, `src/io/drawio-shared.ts`, `src/io/drawio-types.ts`.
+  - `App.tsx` chỉ còn giữ file-picker/download orchestration.
+
+#### TASK-059 - Implement import XML draw.io -> LogicFlow graph normalization
+- Priority: P1
+- Status: Done
+- Module: file-interchange
+- Problem: Editor chưa thể đọc file draw.io XML kiểu [examples/bomb.drawio.xml](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/examples/bomb.drawio.xml:1), dù đây là format interchange người dùng muốn dùng.
+- Why it matters: Không có import path thì user không thể đưa các sơ đồ hiện có từ draw.io vào editor để tiếp tục chỉnh hoặc generate BRD.
+- Implementation steps:
+  1. Parse XML bằng `DOMParser` và validate sơ bộ cấu trúc `mxfile/diagram/mxGraphModel/root`.
+  2. Đọc outer swimlane container và lane children để reconstruct `LaneConfig[]`.
+  3. Map `mxCell` vertex styles sang node types:
+     - `shape=startState` -> `start`
+     - `shape=endState` -> `end`
+     - `shape=mxgraph.bpmn.task2` -> `activity` hoặc `note` theo heuristics contract
+     - `rhombus` -> `decision`
+     - `shape=line` -> `sync-bar`
+  4. Map edge cells sang LogicFlow edges, giữ label nếu có.
+  5. Normalize text từ HTML-rich `value` về plain text editor-facing.
+  6. Trả ra graph data + lane metadata tương thích với flow hydrate hiện tại.
+- Acceptance criteria:
+  - Import được `examples/bomb.drawio.xml` vào canvas mà không crash.
+  - Lane/node/edge topology chính được giữ đúng ở mức dùng được cho editor và BRD pipeline.
+  - Các node import xong vẫn bám lane hợp lệ.
+- Dependencies: TASK-057, TASK-058
+- Verification: fixture import test với `examples/bomb.drawio.xml` + browser smoke import
+- Progress update:
+  - Import path hiện parse được `mxfile/diagram/mxGraphModel/root`, reconstruct lane columns, map node/edge types, và normalize text draw.io HTML về plain text editor-facing.
+  - Playwright smoke đã cover import fixture từ toolbar.
+
+#### TASK-060 - Implement export LogicFlow graph -> draw.io XML serializer
+- Priority: P1
+- Status: Done
+- Module: file-interchange
+- Problem: Sau khi chỉnh diagram trong editor, user cần xuất ra draw.io XML tương thích để dùng lại ở diagrams.net hoặc lưu trữ theo format yêu cầu.
+- Why it matters: Import-only sẽ làm feature bị cụt; export là nửa còn lại của interchange contract.
+- Implementation steps:
+  1. Build serializer tạo `mxfile > diagram > mxGraphModel > root`.
+  2. Sinh outer swimlane container + lane child cells tương đương contract đã chốt.
+  3. Map node types sang draw.io styles/geometry:
+     - lane
+     - start/end ellipse
+     - activity/note task-like blocks
+     - decision rhombus
+     - sync-bar line
+  4. Map edges sang `mxCell edge="1"` với `source`, `target`, `value`, và style mặc định ổn định.
+  5. Encode text thành HTML-safe `value` nhất quán để re-import không vỡ nội dung.
+- Acceptance criteria:
+  - Export XML mở được ở draw.io/diagrams.net.
+  - File export có cấu trúc cùng họ với `examples/bomb.drawio.xml`.
+  - Re-import file vừa export lại vào app cho ra topology tương đương.
+- Dependencies: TASK-057, TASK-058
+- Verification: golden XML export test + manual open in draw.io
+- Progress update:
+  - Export path sinh outer swimlane container, lane cells, node cells, edge cells, và edge-label cells.
+  - Exported XML đã pass round-trip test `graph -> XML -> graph`.
+
+#### TASK-061 - Đổi toolbar sang XML-first và tạm ẩn JSON/SVG
+- Priority: P2
+- Status: Done
+- Module: editor-toolbar-runtime
+- Problem: Toolbar hiện vẫn lộ các action cũ `Mở JSON…`, `Lưu JSON`, `Export SVG` ở [src/App.tsx](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/src/App.tsx:1798), trong khi user muốn XML là interchange chính.
+- Why it matters: UX phải phản ánh đúng workflow đang được khuyến nghị; nếu không user sẽ bị kéo theo hai cơ chế file song song.
+- Implementation steps:
+  1. Tạm ẩn khỏi toolbar các action:
+     - `Mở JSON…`
+     - `Lưu JSON`
+     - `Export SVG`
+  2. Thêm action mới:
+     - `Import XML…`
+     - `Export XML`
+  3. Giữ `Export PNG` nếu vẫn hữu ích cho snapshot hình ảnh.
+  4. Update status copy và error copy cho XML-specific failures.
+  5. Không xóa code JSON/SVG adapter nền ngay; chỉ hạ khỏi surface UI trong Phase 1 của XML rollout.
+- Acceptance criteria:
+  - Toolbar không còn hiển thị JSON/SVG actions cũ.
+  - User thấy rõ XML là file format chính cho interchange.
+- Dependencies: TASK-059, TASK-060
+- Verification: browser smoke toolbar flow
+- Progress update:
+  - Toolbar hiện hiển thị `Import XML…`, `Export XML`, `Export PNG`.
+  - `Mở JSON…`, `Lưu JSON`, `Export SVG` vẫn còn code path nền nhưng đã bị hạ khỏi surface UI.
+
+#### TASK-062 - Harden lane/node geometry mapping cho import XML
+- Priority: P2
+- Status: Done
+- Module: logicflow-canvas-model
+- Problem: draw.io XML dùng nested parent geometry và absolute offsets rất khác với layout nội bộ hiện tại; import dễ làm node lệch lane hoặc `sync-bar` span sai.
+- Why it matters: Nếu import topology không chắc, BRD generation sau import sẽ cho output sai hoặc khó hiểu.
+- Implementation steps:
+  1. Xử lý đúng parent-child coordinates của lane và node khi convert từ `mxGeometry`.
+  2. Backfill metadata nội bộ như `laneId`, `laneOffsetX`/binding hiện tại, `nodeSize`, `syncBar` span.
+  3. Chốt heuristic note-vs-activity nếu draw.io task shape được dùng cho cả sticky context note.
+  4. Add warning/fallback path cho unsupported style hoặc cell orphan.
+- Acceptance criteria:
+  - Diagram import từ XML không làm node “rơi khỏi lane”.
+  - `sync-bar`, decision, start/end giữ semantics đủ để editor và BRD pipeline tiếp tục dùng được.
+- Dependencies: TASK-059
+- Verification: import fixture + generate BRD smoke from imported XML
+- Progress update:
+  - Import đã normalize lane geometry về layout nội bộ, backfill `laneId`/`nodeSize`, và dùng heuristic `note` vs `activity` an toàn hơn cho draw.io task shape.
+  - False-positive swimlane detection và draw.io multiline text encoding đã được harden bằng regression tests.
+
+#### TASK-063 - Update docs và user workflow cho XML import/export
+- Priority: P2
+- Status: Done
+- Module: docs-and-tests
+- Problem: README và workflow hiện vẫn mô tả JSON/SVG là thao tác file chính ở [README.md](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/README.md:18).
+- Why it matters: Nếu code đã chuyển sang XML-first mà docs không đổi, user sẽ đi sai luồng ngay từ README.
+- Implementation steps:
+  1. Cập nhật README feature list và local test flow.
+  2. Cập nhật use case/import-export doc hiện có nếu repo đã có doc owner phù hợp.
+  3. Nếu cần, thêm note rằng JSON/SVG đang bị ẩn khỏi toolbar chứ chưa bị loại hẳn khỏi codebase.
+  4. Ghi changelog cho behavior change này.
+- Acceptance criteria:
+  - Docs user-facing mô tả đúng toolbar và file format mới.
+  - Không còn chỗ nào nói JSON/SVG là hành động toolbar mặc định nếu UI đã đổi.
+- Dependencies: TASK-061
+- Verification: review chéo README + UI
+- Progress update:
+  - README, UC-05, và architecture overview đã được sync sang XML-first workflow.
+  - Changelog và activity log đã ghi nhận behavior change.
+
+#### TASK-064 - Thêm golden + E2E tests cho XML interchange
+- Priority: P2
+- Status: Done
+- Module: docs-and-tests
+- Problem: Import/export XML là feature dễ regress vì vừa có parser vừa có serializer, lại phụ thuộc style/text/geometry contract.
+- Why it matters: Không có test, mỗi lần chỉnh layout/node style sẽ có nguy cơ làm XML round-trip hỏng âm thầm.
+- Implementation steps:
+  1. Thêm unit tests cho parser với fixture `examples/bomb.drawio.xml`.
+  2. Thêm unit tests cho serializer để assert cấu trúc `mxfile`, `diagram`, `mxGraphModel`, `mxCell`.
+  3. Thêm round-trip test `XML -> graph -> XML` ở mức supported subset.
+  4. Nếu khả thi, thêm Playwright/browser smoke cho `Import XML…` và `Export XML`.
+- Acceptance criteria:
+  - Có automated coverage cho import fixture, export structure, và ít nhất một round-trip.
+  - Regression ở XML adapter sẽ fail test thay vì chỉ lộ khi user mở file ngoài draw.io.
+- Dependencies: TASK-059, TASK-060, TASK-061
+- Verification: `npm run test:ui-mock` + browser/E2E smoke
+- Progress update:
+  - Đã thêm `src/io/drawio-xml.test.ts` cho fixture import, export structure, và round-trip.
+  - Đã thêm Playwright flow `Import XML fixture and export XML from toolbar`.

@@ -3,93 +3,113 @@
 | Field | Value |
 |---|---|
 | **Mã** | UC-05 |
-| **Tên** | Import / Export diagram (JSON, SVG, PNG) |
+| **Tên** | Import / Export diagram (draw.io XML, PNG) |
 | **Actor** | BA / Dev / Stakeholder |
-| **Mục tiêu** | Chia sẻ diagram, lưu trữ, hoặc commit vào git. |
+| **Mục tiêu** | Trao đổi diagram với draw.io/diagrams.net, tiếp tục chỉnh sửa trong editor, hoặc xuất ảnh để chia sẻ. |
 | **Trigger** | User bấm nút trên toolbar. |
 
 ## Tiền điều kiện
 
-- Có ít nhất 1 lane (luôn đúng theo bảo vệ UC-03).
+- Có ít nhất 1 lane.
+- Toolbar Phase 1 hiển thị `Import XML…`, `Export XML`, `Export PNG`.
+- Các action `Mở JSON…`, `Lưu JSON`, `Export SVG` đã được ẩn khỏi UI nhưng code path nền chưa bị xoá hẳn.
 
 ---
 
-## A. Lưu JSON
+## Supported subset cho draw.io XML
 
-1. User bấm **Lưu JSON**.
-2. Handler:
-   - Gọi `lf.getGraphData()` → object với `nodes[]`, `edges[]`.
-   - Đóng gói: `{ lanes: lanesRef.current, graph: data }`.
-   - `JSON.stringify(payload, null, 2)`.
-   - Tạo `Blob` + URL + `<a download>` → trigger download `diagram-YYYYMMDD-HHmmss.json`.
-3. File JSON tải về máy user.
-4. Status bar: `N lane · Đã lưu JSON`.
+Phase 1 chỉ cam kết import/export ổn định cho subset sau:
 
-### Cấu trúc file JSON
+- Outer container: `mxfile > diagram > mxGraphModel > root > mxCell` với swimlane gốc dùng `childLayout=stackLayout`.
+- Lane columns: mỗi lane là một `mxCell` swimlane con của outer container.
+- Node types:
+  - `start`
+  - `end`
+  - `activity`
+  - `decision`
+  - `sync-bar`
+  - `note`
+- Edge:
+  - `source`, `target`
+  - edge label qua child `mxCell` có style `edgeLabel`
+- Text:
+  - decode HTML-rich draw.io text về plain text nội bộ
+  - export plain text nội bộ sang markup draw.io tối giản
 
-```json
-{
-  "lanes": [
-    { "id": "lane-1", "title": "Nguồn phát hiện đầu tiên", "x": 200, "width": 320 },
-    ...
-  ],
-  "graph": {
-    "nodes": [
-      { "id": "lane-1", "type": "lane", "x": 200, "y": 580, ... },
-      { "id": "n-001", "type": "start", "x": 200, "y": 90, ... },
-      ...
-    ],
-    "edges": [
-      { "id": "e-001", "type": "polyline", "sourceNodeId": "n-001", "targetNodeId": "n-002", ... }
-    ]
-  }
-}
-```
+### Mapping contract
+
+| LogicFlow | draw.io XML |
+|---|---|
+| Lane | `mxCell` swimlane con của outer container |
+| Start | `shape=startState` |
+| End | `shape=endState` |
+| Activity | `shape=mxgraph.bpmn.task2` + `lfType=activity` khi export |
+| Note | `shape=mxgraph.bpmn.task2` + `lfType=note` khi export |
+| Decision | `rhombus` |
+| Sync bar | `shape=line` |
+| Edge label | child `mxCell` với `edgeLabel` |
+
+### Policy geometry
+
+- Import XML sẽ **normalize lại lane layout** về hệ toạ độ nội bộ của editor, không giữ nguyên tuyệt đối mọi offset draw.io.
+- Node vẫn phải rơi đúng lane logic sau import.
+- Export XML dùng geometry ổn định và re-importable, ưu tiên round-trip hơn là pixel-perfect clone.
 
 ---
 
-## B. Mở JSON (Import)
+## A. Import XML
 
-1. User bấm **Mở JSON…** (label trên `<input type="file">` ẩn).
-2. Hệ thống mở file picker.
-3. User chọn file `.json` → `onChange` handler đọc text bằng `FileReader`.
-4. `JSON.parse(text)` → kiểm tra cấu trúc `{ lanes, graph }`.
-5. Cập nhật state `lanes = payload.lanes`.
-6. `lf.render(payload.graph)`.
-7. `lf.fitView(20, 20)`.
-8. Status bar: `N lane · Đã import diagram từ JSON`.
+1. User bấm **Import XML…**.
+2. Hệ thống mở file picker cho `.xml`.
+3. User chọn file draw.io XML.
+4. Handler đọc text bằng `FileReader`.
+5. Adapter parse XML bằng `DOMParser`.
+6. Validate sơ bộ:
+   - có `mxfile/diagram/mxGraphModel/root`
+   - có outer swimlane container
+   - có ít nhất 1 lane con
+7. Adapter map `mxCell[]` sang:
+   - `lanes`
+   - `graph.nodes`
+   - `graph.edges`
+8. Editor render graph mới, hydrate lane bindings, fit view.
+9. Status bar: `Đã import XML: <file-name>`.
 
 ### Validation hiện có
 
-- Nếu file không phải JSON hợp lệ → `alert('File không hợp lệ')`.
-- Nếu thiếu `lanes` hoặc `graph` → vẫn render được phần có, log warning.
-- **Backlog**: schema validation chặt chẽ với Zod.
+- XML không hợp lệ → `Lỗi import XML: File XML không hợp lệ.`
+- Thiếu cấu trúc draw.io cốt lõi → báo lỗi cấu trúc tương ứng.
+- File ngoài supported subset có thể import partial; Phase 1 ưu tiên fail rõ hơn là silent corruption.
 
 ---
 
-## C. Export SVG
+## B. Export XML
 
-1. User bấm **Export SVG**.
-2. Handler lấy node `<svg name="canvas-overlay">` từ DOM container.
-3. Serialize bằng `XMLSerializer`.
-4. Wrap trong `<svg xmlns="http://www.w3.org/2000/svg">...</svg>`.
-5. Tạo Blob `image/svg+xml` → download.
-6. Status bar: `N lane · Đã export SVG`.
+1. User bấm **Export XML**.
+2. Handler lấy graph hiện tại từ `lf.getGraphData()`.
+3. XML adapter serialize graph nội bộ thành draw.io XML:
+   - outer swimlane container
+   - lane cells
+   - node cells
+   - edge cells
+   - edge label cells nếu có
+4. Tạo file `diagram.drawio.xml`.
+5. Trigger download.
+6. Status bar: `Đã tải diagram.drawio.xml`.
+
+### Kết quả mong đợi
+
+- File mở lại được trong draw.io / diagrams.net.
+- File export từ app import lại vào app không mất lane/node type cốt lõi trong supported subset.
 
 ---
 
-## D. Export PNG
+## C. Export PNG
 
 1. User bấm **Export PNG**.
-2. Handler dùng plugin `Snapshot` của LogicFlow:
-   - `lf.extension.snapshot.getSnapshot()` hoặc `lf.getSnapshot()` (API tuỳ version).
-3. Plugin chuyển SVG → canvas → `toDataURL('image/png')` → download.
-4. Status bar: `N lane · Đã export PNG`.
-
-### Lưu ý
-
-- PNG xuất ra theo kích thước **thực** của diagram (không phải kích thước viewport hiện tại) — đảm bảo không bị crop.
-- Nền PNG mặc định trắng.
+2. Handler dùng plugin `Snapshot` của LogicFlow.
+3. SVG được render sang canvas và tải về dạng `.png`.
+4. Status bar: `Đã tải swimlane.png`.
 
 ---
 
@@ -97,24 +117,26 @@
 
 | Action | File output | Dùng cho |
 |---|---|---|
-| Lưu JSON | `.json` | Diagram-as-code, commit vào git, diff được. |
-| Mở JSON | (load lại) | Tiếp tục chỉnh sửa diagram đã lưu. |
-| Export SVG | `.svg` | Nhúng vào tài liệu vector, in chất lượng cao. |
-| Export PNG | `.png` | Báo cáo, slide, chia sẻ qua chat. |
+| Import XML | load lại vào editor | Tiếp tục chỉnh sửa diagram từ draw.io |
+| Export XML | `.drawio.xml` | Trao đổi với draw.io / diagrams.net |
+| Export PNG | `.png` | Slide, chat, báo cáo |
 
 ## Use case mở rộng
 
-### UC-05a — Import file JSON từ version cũ
-- Hiện tại không có migration tool — nếu format đổi, file cũ có thể không load đúng.
-- Backlog: thêm trường `version` vào JSON và viết migration.
+### UC-05a — Import XML có custom style ngoài supported subset
+- Phase 1 có thể degrade về style nhưng vẫn cố giữ semantics lane/node/edge.
+- Backlog: map thêm nhiều draw.io shape/style hơn nếu user dùng file phong phú hơn.
 
-### UC-05b — Drag & drop file JSON vào canvas
-- Backlog: chấp nhận `dragover` trên canvas, parse JSON.
+### UC-05b — Export profile
+- Backlog: cho user chọn `reader-facing export` vs `debug-compatible export`.
 
-### UC-05c — Lưu URL state
-- Backlog: encode JSON vào URL hash để share quick link.
+### UC-05c — Bring back JSON/SVG dưới menu nâng cao
+- Backlog: nếu team vẫn cần artifact nội bộ `diagram-as-code`, có thể đưa JSON/SVG vào menu phụ thay vì toolbar chính.
 
 ## Source liên quan
 
-- `src/App.tsx` — `saveJson()`, `openJsonFile()`, `exportSvg()`, `exportPng()`.
-- `src/lf-config.ts` — `getLogicFlowOptions()` đăng ký plugin `Snapshot`.
+- `src/App.tsx` — toolbar handlers cho import/export.
+- `src/io/drawio-import.ts` — XML parser + normalization.
+- `src/io/drawio-export.ts` — XML serializer.
+- `src/io/drawio-shared.ts` — text/style helpers.
+- `examples/bomb.drawio.xml` — fixture contract cho supported subset Phase 1.

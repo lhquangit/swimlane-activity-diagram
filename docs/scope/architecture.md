@@ -49,7 +49,7 @@
 | File | Trách nhiệm |
 |---|---|
 | `src/main.tsx` | Bootstrap React, mount `<App />` vào `#root`. |
-| `src/App.tsx` | Editor shell: toolbar, sidebar, khởi tạo LogicFlow, đăng ký event handler, lưu/import JSON. |
+| `src/App.tsx` | Editor shell: toolbar, sidebar, khởi tạo LogicFlow, đăng ký event handler, cache BRD frontend, import/export XML draw.io, và gọi backend BRD. |
 | `src/DndPanel.tsx` | Palette sidebar (render các shape có thể kéo vào canvas). |
 | `src/nodes.ts` | Định nghĩa custom node types: `lane`, `start`, `end`, `activity`, `decision`, `sync-bar`, `note`. Bao gồm model (data + behavior) và view (SVG). |
 | `src/lf-config.ts` | Initial diagram data (`buildInitialData`), build lane node config (`buildLaneNodes`), snap-to-lane helper (`snapToLane`), LogicFlow options (`getLogicFlowOptions`). |

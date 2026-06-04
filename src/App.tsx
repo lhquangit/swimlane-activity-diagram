@@ -20,6 +20,28 @@ import {
   snapToLane,
 } from './lf-config';
 import DndPanel, { DndPaletteItem } from './DndPanel';
+import BrdPanel from './brd/BrdPanel';
+import {
+  BRD_WORKSPACE_CACHE_VERSION,
+  clearBrdWorkspaceCache,
+  loadBrdWorkspaceCache,
+  saveBrdWorkspaceCache,
+} from './brd/cache';
+import { generateBrd, validateDiagram } from './brd/client';
+import { buildGenerateRequest, buildRequestFingerprint, buildSemanticRequest } from './brd/normalize';
+import { runLocalPreValidation } from './brd/prevalidate';
+import {
+  BrdPanelPhase,
+  BrdSpec,
+  BrdTabId,
+  ErrorObject,
+  GenerateResult,
+  ResponseMetadata,
+  WarningItem,
+} from './brd/types';
+import { exportDrawioXml } from './io/drawio-export';
+import { importDrawioXml } from './io/drawio-import';
+import type { EditorGraphData } from './io/drawio-types';
 
 LogicFlow.use(Snapshot);
 LogicFlow.use(SelectionSelect);
@@ -104,6 +126,17 @@ function downloadBlob(blob: Blob, filename: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+
+function downloadTextFile(contents: string, filename: string, contentType = 'text/plain;charset=utf-8') {
+  downloadBlob(new Blob([contents], { type: contentType }), filename);
+}
+
+function makeIdempotencyKey() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `brd-${crypto.randomUUID()}`;
+  }
+  return `brd-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 const INITIAL_LANES = withPositions(DEFAULT_LANES);
@@ -651,11 +684,125 @@ export default function App() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [viewportTick, setViewportTick] = useState(0);
   const [status, setStatus] = useState('Đang khởi tạo…');
+  const [diagramRevision, setDiagramRevision] = useState(0);
+  const [lastGeneratedRevision, setLastGeneratedRevision] = useState<number | null>(null);
+  const [brdPanelOpen, setBrdPanelOpen] = useState(false);
+  const [brdPhase, setBrdPhase] = useState<BrdPanelPhase>('idle');
+  const [brdTab, setBrdTab] = useState<BrdTabId>('warnings');
+  const [brdWarnings, setBrdWarnings] = useState<WarningItem[]>([]);
+  const [brdBlockingIssues, setBrdBlockingIssues] = useState<WarningItem[]>([]);
+  const [brdSpec, setBrdSpec] = useState<BrdSpec | null>(null);
+  const [brdDraft, setBrdDraft] = useState('');
+  const [brdError, setBrdError] = useState<ErrorObject | null>(null);
+  const [brdMetadata, setBrdMetadata] = useState<ResponseMetadata | null>(null);
+  const [brdRequestId, setBrdRequestId] = useState<string | null>(null);
+  const [brdRuntimeStatus, setBrdRuntimeStatus] = useState<string | null>(null);
+  const [lastGenerateFingerprint, setLastGenerateFingerprint] = useState<string | null>(null);
+  const [lastIdempotencyKey, setLastIdempotencyKey] = useState<string | null>(null);
+
+  const markDiagramChanged = () => {
+    setDiagramRevision((revision) => revision + 1);
+  };
+
+  const hasCachedBrdSnapshot = Boolean(brdDraft || brdSpec);
+  const currentBrdFingerprint = (() => {
+    void diagramRevision;
+    const lf = lfRef.current;
+    if (!lf) return null;
+    try {
+      const graphData = lf.getGraphData() as Parameters<typeof buildGenerateRequest>[0];
+      return buildRequestFingerprint(buildGenerateRequest(graphData, lanesRef.current));
+    } catch {
+      return null;
+    }
+  })();
+
+  const isBrdOutdated =
+    hasCachedBrdSnapshot &&
+    ((lastGeneratedRevision !== null && diagramRevision !== lastGeneratedRevision) ||
+      (lastGenerateFingerprint !== null &&
+        currentBrdFingerprint !== null &&
+        lastGenerateFingerprint !== currentBrdFingerprint));
+
+  const resetBrdState = () => {
+    setBrdPanelOpen(false);
+    setBrdPhase('idle');
+    setBrdTab('warnings');
+    setBrdWarnings([]);
+    setBrdBlockingIssues([]);
+    setBrdSpec(null);
+    setBrdDraft('');
+    setBrdError(null);
+    setBrdMetadata(null);
+    setBrdRequestId(null);
+    setBrdRuntimeStatus(null);
+    setLastGenerateFingerprint(null);
+    setLastGeneratedRevision(null);
+    setLastIdempotencyKey(null);
+  };
+
+  const formatContextSwitchStatus = (base: string) =>
+    hasCachedBrdSnapshot ? `${base} — BRD draft đã cache được giữ và sẽ hiển thị là outdated.` : base;
 
   // Keep ref in sync so event handlers (registered once) always see current value
   useEffect(() => {
     lanesRef.current = lanes;
   }, [lanes]);
+
+  useEffect(() => {
+    const cached = loadBrdWorkspaceCache();
+    if (!cached) return;
+    setBrdPhase(cached.phase);
+    setBrdTab(cached.activeTab);
+    setBrdWarnings(cached.warnings);
+    setBrdBlockingIssues(cached.blockingIssues);
+    setBrdSpec(cached.spec);
+    setBrdDraft(cached.draft);
+    setBrdError(cached.error);
+    setBrdMetadata(cached.metadata);
+    setBrdRequestId(cached.requestId);
+    setBrdRuntimeStatus(cached.runtimeStatus);
+    setLastGenerateFingerprint(cached.lastGenerateFingerprint);
+    setLastGeneratedRevision(cached.lastGeneratedRevision);
+    setLastIdempotencyKey(cached.idempotencyKey);
+    setBrdPanelOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!hasCachedBrdSnapshot) return;
+    saveBrdWorkspaceCache({
+      version: BRD_WORKSPACE_CACHE_VERSION,
+      draft: brdDraft,
+      spec: brdSpec,
+      warnings: brdWarnings,
+      blockingIssues: brdBlockingIssues,
+      metadata: brdMetadata,
+      requestId: brdRequestId,
+      runtimeStatus: brdRuntimeStatus,
+      phase: brdPhase,
+      activeTab: brdTab,
+      error: brdError,
+      lastGenerateFingerprint,
+      lastGeneratedRevision,
+      idempotencyKey: lastIdempotencyKey,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [
+    brdBlockingIssues,
+    brdDraft,
+    brdError,
+    brdMetadata,
+    brdPhase,
+    brdRequestId,
+    brdRuntimeStatus,
+    brdSpec,
+    brdTab,
+    brdWarnings,
+    hasCachedBrdSnapshot,
+    lastGenerateFingerprint,
+    lastGeneratedRevision,
+    lastIdempotencyKey,
+  ]);
 
   const bumpViewportTick = () => setViewportTick((tick) => tick + 1);
 
@@ -819,6 +966,7 @@ export default function App() {
       refreshLaneHeight();
       setActiveLaneId(null);
       setActiveNodeId(isUserResizableNode(data.type) ? data.id : null);
+      markDiagramChanged();
       bumpViewportTick();
     });
 
@@ -845,6 +993,7 @@ export default function App() {
       refreshLaneHeight();
       setActiveLaneId(null);
       setActiveNodeId(isUserResizableNode(data.type) ? data.id : null);
+      markDiagramChanged();
       bumpViewportTick();
     });
 
@@ -855,6 +1004,7 @@ export default function App() {
       if (!model || model.type === 'lane') return;
       resizeNodeToText(model, text);
       refreshLaneHeight();
+      markDiagramChanged();
       bumpViewportTick();
     });
 
@@ -905,6 +1055,7 @@ export default function App() {
       }
       syncConnectedEdges(lf, model);
       refreshLaneHeight();
+      markDiagramChanged();
       bumpViewportTick();
     });
 
@@ -962,6 +1113,7 @@ export default function App() {
       );
       commitLaneLayout(updated, { status: `Đã đổi tên lane → "${trimmed}"` });
       setActiveLaneId(data.id);
+      markDiagramChanged();
     });
 
     // Right-click on lane → confirm delete
@@ -983,6 +1135,7 @@ export default function App() {
       );
       commitLaneLayout(updated, { status: `Đã xoá lane "${current.title}"` });
       setActiveLaneId(updated[0]?.id ?? null);
+      markDiagramChanged();
     });
 
     lfRef.current = lf;
@@ -1019,6 +1172,7 @@ export default function App() {
     commitLaneLayout(updated, { status: `Đã thêm lane "${trimmed}"` });
     setActiveLaneId(newLane.id);
     setActiveNodeId(null);
+    markDiagramChanged();
   };
 
   const handleRenameLane = (laneId: string) => {
@@ -1033,6 +1187,7 @@ export default function App() {
     );
     commitLaneLayout(updated, { status: `Đã đổi tên lane → "${trimmed}"` });
     setActiveLaneId(laneId);
+    markDiagramChanged();
   };
 
   const handleDeleteLane = (laneId: string) => {
@@ -1049,6 +1204,7 @@ export default function App() {
     const updated = withPositions(toLaneDrafts(lanesRef.current.filter((lane) => lane.id !== laneId)));
     commitLaneLayout(updated, { status: `Đã xoá lane "${current.title}"` });
     setActiveLaneId(updated[0]?.id ?? null);
+    markDiagramChanged();
   };
 
   const handleMoveLane = (laneId: string, direction: -1 | 1) => {
@@ -1062,6 +1218,7 @@ export default function App() {
     const updated = withPositions(drafts);
     commitLaneLayout(updated, { status: `Đã đổi vị trí lane "${lane.title}"` });
     setActiveLaneId(laneId);
+    markDiagramChanged();
   };
 
   const handleExportPNG = async () => {
@@ -1104,6 +1261,184 @@ export default function App() {
     setStatus('Đã tải swimlane.json');
   };
 
+  const applyImportedGraph = ({
+    graph,
+    importedLanes,
+    importedLaneHeight,
+    statusMessage,
+  }: {
+    graph: EditorGraphData;
+    importedLanes: LaneConfig[];
+    importedLaneHeight?: number;
+    statusMessage: string;
+  }) => {
+    const lf = lfRef.current;
+    if (!lf) return;
+    lf.render(graph as Parameters<typeof lf.render>[0]);
+    if (importedLanes.length > 0) {
+      updateLaneState(importedLanes);
+      hydrateNodeLaneBindings(importedLanes, importedLanes);
+      hydrateSyncBarBindings(importedLanes, importedLanes);
+      const nextLaneHeight = Math.max(
+        importedLaneHeight ?? MIN_LANE_HEIGHT,
+        getRequiredLaneHeight(lf, MIN_LANE_HEIGHT),
+      );
+      laneHeightRef.current = nextLaneHeight;
+      applyLaneModels(importedLanes, laneHeightRef.current);
+      setActiveLaneId(importedLanes[0]?.id ?? null);
+    }
+    setActiveNodeId(null);
+    lf.fitView(20, 20);
+    markDiagramChanged();
+    setStatus(formatContextSwitchStatus(statusMessage));
+  };
+
+  const handleCopyBrdDraft = async () => {
+    if (!brdDraft) return;
+    await navigator.clipboard.writeText(brdDraft);
+    setStatus('Đã copy BRD draft vào clipboard');
+  };
+
+  const handleExportBrdDraft = () => {
+    if (!brdDraft) return;
+    downloadTextFile(brdDraft, 'diagram-brd-draft.md', 'text/markdown;charset=utf-8');
+    setStatus('Đã tải diagram-brd-draft.md');
+  };
+
+  const handleAcknowledgeOutdatedDraft = () => {
+    setLastGeneratedRevision(diagramRevision);
+    setStatus('Đã giữ BRD draft hiện tại dù diagram đã thay đổi');
+  };
+
+  const handleOpenCachedBrd = () => {
+    if (!hasCachedBrdSnapshot) return;
+    setBrdPanelOpen(true);
+    setStatus(
+      isBrdOutdated ? 'Đã mở lại BRD draft đã cache (outdated).' : 'Đã mở lại BRD draft đã cache.',
+    );
+  };
+
+  const handleDiscardCachedBrd = () => {
+    if (!hasCachedBrdSnapshot) return;
+    const confirmed = window.confirm('Xoá BRD draft đã cache khỏi trình duyệt này?');
+    if (!confirmed) return;
+    clearBrdWorkspaceCache();
+    resetBrdState();
+    setStatus('Đã xoá BRD draft đã cache');
+  };
+
+  const executeGenerateBrd = async (options?: { reuseIdempotencyKey?: boolean }) => {
+    const lf = lfRef.current;
+    if (!lf) return;
+    const graphData = lf.getGraphData() as Parameters<typeof buildGenerateRequest>[0];
+    const validationRequest = buildSemanticRequest(graphData, lanesRef.current);
+    const generateRequest = buildGenerateRequest(graphData, lanesRef.current);
+    const requestFingerprint = buildRequestFingerprint(generateRequest);
+    const shouldReuseIdempotencyKey =
+      options?.reuseIdempotencyKey &&
+      lastGenerateFingerprint === requestFingerprint &&
+      lastIdempotencyKey;
+    const idempotencyKey = shouldReuseIdempotencyKey ? lastIdempotencyKey! : makeIdempotencyKey();
+
+    setBrdPanelOpen(true);
+    setBrdPhase('validating');
+    setBrdTab('warnings');
+    setBrdError(null);
+    setBrdWarnings([]);
+    setBrdBlockingIssues([]);
+    setBrdRuntimeStatus('validating');
+    setStatus('Đang validate diagram cho AI BRD…');
+
+    try {
+      const localBlockingIssues = runLocalPreValidation(validationRequest);
+      if (localBlockingIssues.length > 0) {
+        setBrdPhase('blocking');
+        setBrdRuntimeStatus('blocking');
+        setBrdWarnings([]);
+        setBrdBlockingIssues(localBlockingIssues);
+        setBrdError({
+          code: 'VALIDATION_BLOCKING',
+          message: 'Diagram còn blocking issue cơ bản; hãy sửa trước khi generate.',
+          retryable: false,
+          related_node_ids: localBlockingIssues.flatMap((item) => item.related_node_ids),
+        });
+        setStatus('Không thể generate BRD: diagram còn blocking issue cơ bản');
+        return;
+      }
+
+      const validationEnvelope = await validateDiagram(validationRequest);
+      setBrdRequestId(validationEnvelope.request_id);
+      setBrdMetadata(validationEnvelope.metadata);
+      setBrdWarnings(validationEnvelope.warnings);
+      setBrdBlockingIssues(validationEnvelope.blocking_issues);
+      if (
+        validationEnvelope.status === 'blocking' ||
+        validationEnvelope.blocking_issues.length > 0
+      ) {
+        setBrdPhase('blocking');
+        setBrdRuntimeStatus(validationEnvelope.status);
+        setBrdError({
+          code: 'VALIDATION_BLOCKING',
+          message: 'Diagram còn blocking issue; hãy sửa trước khi generate.',
+          retryable: false,
+          related_node_ids: validationEnvelope.blocking_issues.flatMap((item) => item.related_node_ids),
+        });
+        setStatus('Không thể generate BRD: diagram còn blocking issue');
+        return;
+      }
+
+      setBrdPhase('generating');
+      setBrdRuntimeStatus('generating');
+      setStatus('Đang sinh BRD draft…');
+      const { statusCode, payload } = await generateBrd(generateRequest, idempotencyKey);
+      setBrdRequestId(payload.request_id);
+      setBrdMetadata(payload.metadata);
+      setBrdWarnings(payload.warnings);
+      setBrdBlockingIssues(payload.blocking_issues);
+      setBrdRuntimeStatus(payload.status);
+      setLastIdempotencyKey(idempotencyKey);
+      setLastGenerateFingerprint(requestFingerprint);
+
+      if (statusCode === 202 || payload.status === 'in_progress') {
+        setBrdPhase('in-progress');
+        setBrdError(null);
+        setStatus('Generate đang được xử lý…');
+        return;
+      }
+
+      if (statusCode >= 400 || payload.error) {
+        setBrdPhase(payload.status === 'blocking' ? 'blocking' : 'failed');
+        setBrdError(payload.error);
+        setStatus(payload.error?.message ?? 'Sinh BRD thất bại');
+        return;
+      }
+
+      const result = payload.result as GenerateResult;
+      setBrdSpec(result.spec);
+      setBrdDraft(result.brd_markdown);
+      setBrdPhase('ready');
+      setBrdTab('draft');
+      setBrdError(null);
+      setLastGeneratedRevision(diagramRevision);
+      setStatus(
+        payload.status === 'replayed'
+          ? 'Đã dùng lại kết quả generate trước đó'
+          : 'Đã sinh BRD draft thành công',
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Không thể gọi backend AI BRD';
+      setBrdPhase('failed');
+      setBrdError({
+        code: 'BACKEND_REQUEST_FAILED',
+        message,
+        retryable: true,
+        related_node_ids: [],
+      });
+      setBrdRuntimeStatus('failed');
+      setStatus(message);
+    }
+  };
+
   const handleImportJSON = (ev: React.ChangeEvent<HTMLInputElement>) => {
     const file = ev.target.files?.[0];
     if (!file) return;
@@ -1120,10 +1455,6 @@ export default function App() {
             text?: { value: string };
           }>;
         };
-        const lf = lfRef.current;
-        if (!lf) return;
-        lf.render(data);
-        // Rebuild lane state from imported lanes (if any)
         const importedLanes: LaneConfig[] = (data.nodes ?? [])
           .filter((n) => n.type === 'lane')
           .map((n) => ({
@@ -1133,31 +1464,54 @@ export default function App() {
             width: n.properties?.width ?? 320,
           }))
           .sort((a, b) => a.x - b.x);
-        if (importedLanes.length > 0) {
-          updateLaneState(importedLanes);
-          hydrateNodeLaneBindings(importedLanes, importedLanes);
-          hydrateSyncBarBindings(importedLanes, importedLanes);
-          const importedLaneHeight = Math.max(
-            ...((data.nodes ?? [])
-              .filter((node) => node.type === 'lane')
-              .map((node) => node.properties?.height ?? MIN_LANE_HEIGHT)),
-            MIN_LANE_HEIGHT,
-          );
-          laneHeightRef.current = Math.max(
-            importedLaneHeight,
-            getRequiredLaneHeight(lf, MIN_LANE_HEIGHT),
-          );
-          applyLaneModels(importedLanes, laneHeightRef.current);
-          setActiveLaneId(importedLanes[0]?.id ?? null);
-        }
-        setActiveNodeId(null);
-        setStatus(`Đã load: ${file.name}`);
+        const importedLaneHeight = Math.max(
+          ...((data.nodes ?? [])
+            .filter((node) => node.type === 'lane')
+            .map((node) => node.properties?.height ?? MIN_LANE_HEIGHT)),
+          MIN_LANE_HEIGHT,
+        );
+        applyImportedGraph({
+          graph: data,
+          importedLanes,
+          importedLaneHeight,
+          statusMessage: `Đã load: ${file.name}`,
+        });
       } catch (e) {
         setStatus(`Lỗi parse JSON: ${(e as Error).message}`);
       }
     };
     reader.readAsText(file);
     ev.target.value = '';
+  };
+
+  const handleImportXML = (ev: React.ChangeEvent<HTMLInputElement>) => {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const result = importDrawioXml(String(reader.result));
+        applyImportedGraph({
+          graph: result.graph,
+          importedLanes: result.lanes,
+          importedLaneHeight: result.laneHeight,
+          statusMessage: `Đã import XML: ${file.name}`,
+        });
+      } catch (e) {
+        setStatus(`Lỗi import XML: ${(e as Error).message}`);
+      }
+    };
+    reader.readAsText(file);
+    ev.target.value = '';
+  };
+
+  const handleExportXML = () => {
+    const lf = lfRef.current;
+    if (!lf) return;
+    const graphData = lf.getGraphData() as Parameters<typeof exportDrawioXml>[0];
+    const xml = exportDrawioXml(graphData, lanesRef.current, laneHeightRef.current);
+    downloadTextFile(xml, 'diagram.drawio.xml', 'application/xml;charset=utf-8');
+    setStatus('Đã tải diagram.drawio.xml');
   };
 
   const handleResetSample = () => {
@@ -1173,7 +1527,8 @@ export default function App() {
     setActiveLaneId(seeded[0]?.id ?? null);
     setActiveNodeId(null);
     lfRef.current?.fitView(20, 20);
-    setStatus('Đã reset về diagram mẫu');
+    markDiagramChanged();
+    setStatus(formatContextSwitchStatus('Đã reset về diagram mẫu'));
   };
 
   const handleClear = () => {
@@ -1188,7 +1543,8 @@ export default function App() {
     applyLaneModels(lanesRef.current, laneHeightRef.current);
     setActiveLaneId(lanesRef.current[0]?.id ?? null);
     setActiveNodeId(null);
-    setStatus('Đã xoá nội dung (giữ lại lane)');
+    markDiagramChanged();
+    setStatus(formatContextSwitchStatus('Đã xoá nội dung (giữ lại lane)'));
   };
 
   const handleUndo = () => lfRef.current?.undo();
@@ -1340,6 +1696,7 @@ export default function App() {
         }
       }
       setStatus('Đã cập nhật kích thước lane');
+      markDiagramChanged();
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
@@ -1449,6 +1806,7 @@ export default function App() {
     const handleMouseUp = () => {
       shapeResizeSessionRef.current = null;
       setStatus('Đã cập nhật kích thước shape');
+      markDiagramChanged();
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
@@ -1491,19 +1849,33 @@ export default function App() {
           Xoá nội dung
         </button>
         <label className="toolbar-btn" style={{ cursor: 'pointer' }}>
-          Mở JSON…
+          Import XML…
           <input
             type="file"
-            accept="application/json"
+            accept=".xml,text/xml,application/xml"
             style={{ display: 'none' }}
-            onChange={handleImportJSON}
+            onChange={handleImportXML}
           />
         </label>
-        <button className="toolbar-btn" onClick={handleExportJSON}>
-          Lưu JSON
+        <button className="toolbar-btn" onClick={handleExportXML}>
+          Export XML
         </button>
-        <button className="toolbar-btn" onClick={handleExportSVG}>
-          Export SVG
+        <button className="toolbar-btn primary" onClick={() => void executeGenerateBrd()}>
+          Generate BRD
+        </button>
+        <button
+          className="toolbar-btn"
+          onClick={handleOpenCachedBrd}
+          disabled={!hasCachedBrdSnapshot}
+        >
+          Open last BRD draft
+        </button>
+        <button
+          className="toolbar-btn"
+          onClick={handleDiscardCachedBrd}
+          disabled={!hasCachedBrdSnapshot}
+        >
+          Discard cached BRD
         </button>
         <button className="toolbar-btn primary" onClick={handleExportPNG}>
           Export PNG
@@ -1592,6 +1964,33 @@ export default function App() {
             }
           />
         ) : null}
+        <BrdPanel
+          open={brdPanelOpen}
+          phase={brdPhase}
+          activeTab={brdTab}
+          onTabChange={setBrdTab}
+          warnings={brdWarnings}
+          blockingIssues={brdBlockingIssues}
+          spec={brdSpec}
+          draft={brdDraft}
+          onDraftChange={setBrdDraft}
+          onClose={() => setBrdPanelOpen(false)}
+          onCopy={() => void handleCopyBrdDraft()}
+          onExport={handleExportBrdDraft}
+          onRetry={
+            brdError?.retryable
+              ? () => {
+                  void executeGenerateBrd({ reuseIdempotencyKey: true });
+                }
+              : null
+          }
+          onAcknowledgeOutdated={isBrdOutdated ? handleAcknowledgeOutdatedDraft : null}
+          metadata={brdMetadata}
+          requestId={brdRequestId}
+          runtimeStatus={brdRuntimeStatus}
+          error={brdError}
+          isOutdated={isBrdOutdated}
+        />
       </div>
     </div>
   );

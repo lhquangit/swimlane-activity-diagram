@@ -45,3 +45,16 @@ tsconfig.tsbuildinfo
 coverage
 *.lcov
 .nyc_output
+examples/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+
+# Browser / local automation artifacts
+.playwright-mcp/
+playwright-report/
+test-results/

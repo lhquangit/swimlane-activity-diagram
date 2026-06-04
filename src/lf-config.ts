@@ -1,5 +1,5 @@
 import LogicFlow, { GraphConfigData } from '@logicflow/core';
-import { LANES, LaneConfig, LANE_HEIGHT, LANE_TOP } from './nodes';
+import { LANES, type LaneConfig, LANE_HEIGHT, LANE_TOP } from './lane-config';
 
 /** Build node data entries for the given lanes. */
 export function buildLaneNodes(lanes: LaneConfig[], laneHeight = LANE_HEIGHT) {
@@ -149,6 +149,12 @@ export function buildInitialData(): GraphConfigData {
       },
       properties: { width: 280, height: 60 },
     },
+    {
+      id: 'n-end',
+      type: 'end',
+      x: LANES[2].x,
+      y: 1020,
+    },
   );
 
   const edges: any[] = [
@@ -190,6 +196,8 @@ export function buildInitialData(): GraphConfigData {
       text: { value: 'Không' },
     },
     { id: 'e14', sourceNodeId: 'n-b2', targetNodeId: 'n-b3', type: 'polyline' },
+    { id: 'e15', sourceNodeId: 'n-c3', targetNodeId: 'n-end', type: 'polyline' },
+    { id: 'e16', sourceNodeId: 'n-b3', targetNodeId: 'n-end', type: 'polyline' },
   ];
 
   return { nodes, edges };
