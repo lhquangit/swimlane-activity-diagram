@@ -1,0 +1,31 @@
+{
+  "project_spec": {
+    "project_name": "V-PetSafe",
+    "project_summary": "Nền tảng quản lý cư dân và dịch vụ nội khu.",
+    "business_context": "Ban quản lý cần xử lý yêu cầu GPS cho thú nuôi.",
+    "target_users": ["Ban quản lý", "Cư dân"],
+    "business_rules": [
+      "Chỉ cấp phát thiết bị khi có GPS Device khả dụng.",
+      "Phải lưu lịch sử thay đổi trạng thái."
+    ],
+    "glossary": ["GPS Device", "Portal", "V-app"]
+  },
+  "feature_intent": {
+    "feature_name": "Cấp phát GPS Device",
+    "function_name": "gps-device-issue",
+    "feature_summary": "Xử lý yêu cầu cấp phát và lắp đặt GPS cho thú nuôi.",
+    "primary_actor": "Ban quản lý",
+    "trigger": "Có yêu cầu đăng ký GPS hợp lệ từ cư dân.",
+    "inputs": ["Yêu cầu GPS", "Danh sách GPS Device trong kho"],
+    "outputs": ["Trạng thái yêu cầu", "Trạng thái GPS Device", "Thông báo cư dân"],
+    "constraints": ["Thiết bị phải ở trạng thái Trong kho trước khi giữ chỗ."],
+    "assumptions": ["Portal là hệ thống thao tác chính của BQL."],
+    "systems_involved": ["Portal", "V-app"],
+    "success_outcome": "Yêu cầu GPS được cấp phát thành công và cư dân nhận được thông báo."
+  },
+  "expected": {
+    "count": 4,
+    "primary_actor": "Ban quản lý",
+    "kinds": ["intake", "execution", "coordination", "exception"]
+  }
+}

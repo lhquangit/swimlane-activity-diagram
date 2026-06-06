@@ -1484,3 +1484,1355 @@
 - Progress update:
   - Đã thêm `src/io/drawio-xml.test.ts` cho fixture import, export structure, và round-trip.
   - Đã thêm Playwright flow `Import XML fixture and export XML from toolbar`.
+
+#### TASK-065 - Chốt `formal_brd` document contract theo mẫu `examples/BRD.docx.md`
+- Priority: P1
+- Status: Pending
+- Module: ai-brd-schema
+- Problem: Output hiện tại là một process-summary draft 10 section, trong khi mục tiêu mới là một formal BRD/use-case document giống [examples/BRD.docx.md](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/examples/BRD.docx.md:1).
+- Why it matters: Nếu không chốt contract mới trước, team sẽ tiếp tục polish sai lớp và không bao giờ đạt cảm giác “BRD thật”.
+- Implementation steps:
+  1. Định nghĩa output profile mới, ví dụ `template=formal_brd`, tách khỏi template reader-facing hiện tại.
+  2. Chốt section contract tối thiểu cho `formal_brd`:
+     - Mục đích tài liệu
+     - Phạm vi nghiệp vụ
+     - Actor
+     - Danh sách user case sau khi gộp
+     - Trạng thái nghiệp vụ
+     - Các section UC chi tiết
+  3. Chốt format table-first thay vì bullet-first cho các phần actor, scope, UC list, state catalog, preconditions, main flow, exceptions.
+  4. Chốt policy Appendix/debug: không render mặc định trong `formal_brd`.
+- Acceptance criteria:
+  - Có contract `formal_brd` rõ ràng, đối chiếu được từng phần với mẫu `BRD.docx.md`.
+  - Team biết chính xác output nào thuộc `summary_brd`, output nào thuộc `formal_brd`.
+- Dependencies: None
+- Verification: Review chéo contract với [examples/BRD.docx.md](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/examples/BRD.docx.md:5)
+
+#### TASK-066 - Mở rộng schema từ process summary sang formal BRD document model
+- Priority: P1
+- Status: Pending
+- Module: ai-brd-schema
+- Problem: `DiagramBRDSpec` hiện không có các khái niệm first-class như business scope groups, actor role rows, UC catalog, business states, preconditions, step tables, exception tables.
+- Why it matters: Renderer không thể sinh đúng format mẫu nếu schema chưa mang được các cấu trúc tài liệu đó.
+- Implementation steps:
+  1. Thiết kế các model mới hoặc sub-model mới cho:
+     - `DocumentPurpose`
+     - `BusinessScopeItem`
+     - `ActorRoleItem`
+     - `UseCaseCatalogItem`
+     - `BusinessStateCatalog`
+     - `FormalUseCaseSection`
+     - `PreconditionRow`
+     - `MainFlowRow`
+     - `ExceptionRow`
+     - `StateFlowSummary`
+  2. Quyết định giữ `DiagramBRDSpec` rồi thêm nhánh `formal_brd`, hoặc tạo schema `FormalBRDDocument` riêng.
+  3. Thêm support cho metadata document-level như project/module header nếu xác định được.
+  4. Update validation + typings tương ứng.
+- Acceptance criteria:
+  - Schema mới biểu đạt được cấu trúc của mẫu BRD mà không cần hack ở renderer.
+  - Type definitions frontend/backend đồng bộ với document model mới.
+- Dependencies: TASK-065
+- Verification: schema review + typecheck
+
+#### TASK-067 - Xây UC segmentation layer từ semantic graph
+- Priority: P1
+- Status: Pending
+- Module: ai-brd-spec-builder
+- Problem: Builder hiện giả định một main spine duy nhất, trong khi mẫu BRD tổ chức nội dung thành danh sách UC và nhiều section UC chi tiết.
+- Why it matters: Nếu không tách được các UC, output sẽ mãi chỉ là “một flow dài”, không thành formal BRD.
+- Implementation steps:
+  1. Thiết kế heuristic tách use case từ diagram:
+     - cụm hành vi chính
+     - nhánh quyết định lớn
+     - end-state families
+     - actor/domain transitions
+  2. Build `use_case_catalog` từ các cụm đó.
+  3. Với mỗi UC, derive:
+     - objective
+     - preconditions
+     - main flow rows
+     - exception rows
+     - state transitions liên quan
+  4. Giữ traceability ngược từ từng UC item về node/edge ids.
+- Acceptance criteria:
+  - Từ một semantic graph có thể sinh ra nhiều UC section thay vì chỉ một main workflow duy nhất.
+  - Các UC sinh ra có mục tiêu và phạm vi khác nhau, không phải copy/paste cùng một flow.
+- Dependencies: TASK-066
+- Verification: golden review trên 2-3 diagram domain thực
+
+#### TASK-068 - Suy business state catalog và state-flow từ diagram/spec
+- Priority: P1
+- Status: Pending
+- Module: ai-brd-spec-builder
+- Problem: Mẫu BRD dành riêng một phần lớn cho trạng thái nghiệp vụ và state transitions, còn output hiện tại chỉ có warnings/branches mà không có state catalog first-class.
+- Why it matters: Với BRD nghiệp vụ thật, phần trạng thái là xương sống cho BA/Dev/QA cùng hiểu lifecycle.
+- Implementation steps:
+  1. Thiết kế cách suy state từ node text, decision labels, và domain heuristics.
+  2. Tách tối thiểu 2 nhóm state khi phù hợp:
+     - state của request/process
+     - state của entity phụ (device, hồ sơ, ticket, v.v.)
+  3. Sinh state catalog table + state flow summary cho từng UC liên quan.
+  4. Gắn open question khi không đủ dữ kiện để chốt state chính xác.
+- Acceptance criteria:
+  - `formal_brd` có section `Trạng thái nghiệp vụ` và `Luồng trạng thái` dùng được.
+  - State flow không chỉ là prose, mà đọc ra được lifecycle rõ ràng.
+- Dependencies: TASK-066, TASK-067
+- Verification: golden tests cho domain có lifecycle rõ như GPS/device, approval, incident
+
+#### TASK-069 - Render `formal_brd` theo table-first template gần mẫu thật
+- Priority: P1
+- Status: Pending
+- Module: ai-brd-renderer
+- Problem: Renderer hiện chỉ biết sinh heading + bullet/numbered list; chưa render được format table-heavy và multi-UC structure của mẫu.
+- Why it matters: Dù schema tốt hơn, nếu renderer vẫn bullet-first thì output vẫn không giống BRD mục tiêu.
+- Implementation steps:
+  1. Thêm renderer profile mới `formal_brd`.
+  2. Render các phần table-first:
+     - actor/role
+     - business scope
+     - use case catalog
+     - preconditions
+     - main flow rows
+     - exception rows
+     - state catalogs
+  3. Render section numbering kiểu hierarchical như `6.1`, `6.2`, `6.3` cho mỗi UC.
+  4. Ẩn Appendix/debug ở mode này, hoặc chỉ cho qua `template=formal_brd_debug`.
+- Acceptance criteria:
+  - Output `formal_brd` nhìn gần với [examples/BRD.docx.md](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/examples/BRD.docx.md:61) hơn rõ rệt so với draft hiện tại.
+  - `summary_brd` hiện tại vẫn hoạt động, không bị regression.
+- Dependencies: TASK-065, TASK-066, TASK-067, TASK-068
+- Verification: golden markdown snapshot review
+
+#### TASK-070 - Thêm system actor inference cho formal BRD
+- Priority: P2
+- Status: Pending
+- Module: ai-brd-spec-builder
+- Problem: Actor hiện chủ yếu bám lane, trong khi mẫu BRD có thêm actor hệ thống như `Portal`, `V-app` không nhất thiết là lane riêng.
+- Why it matters: Formal BRD thực tế thường phải thể hiện cả con người lẫn hệ thống tham gia để tránh hiểu sai boundary trách nhiệm.
+- Implementation steps:
+  1. Thiết kế rule infer system actors từ:
+     - keywords trong step title/action/result
+     - event gửi thông báo
+     - cập nhật trạng thái hệ thống
+  2. Tách `business actor` và `system actor` trong actor-role table nếu cần.
+  3. Cho phép một main-flow row có actor là system actor ngay cả khi lane gốc là con người.
+  4. Gắn warning khi inference system actor còn mơ hồ.
+- Acceptance criteria:
+  - Formal BRD có thể biểu diễn actor hệ thống kiểu `Portal`, `V-app` khi logic diagram ngụ ý rõ.
+  - Actor table không còn bị giới hạn cứng bởi lane list.
+- Dependencies: TASK-066, TASK-067
+- Verification: fixture review với mẫu GPS trong [examples/BRD.docx.md](/Users/quanliver/Projects/AI_Sys/swimlane-activity-diagram/examples/BRD.docx.md:22)
+
+#### TASK-071 - Thêm golden acceptance suite cho tiêu chí “gần BRD thật”
+- Priority: P2
+- Status: Pending
+- Module: docs-and-tests
+- Problem: Nếu không có golden tests cho `formal_brd`, team sẽ lại regress về format mỗi lần sửa semantic hoặc prose.
+- Why it matters: Mục tiêu bây giờ không chỉ là đúng logic, mà là đúng **document shape** và đủ gần mẫu BRD thật.
+- Implementation steps:
+  1. Tạo fixtures/snapshots cho `formal_brd` output.
+  2. Assert presence và structure của:
+     - document purpose
+     - business scope table
+     - actor table
+     - use case catalog
+     - business states
+     - UC subsections
+     - step tables
+     - exception tables
+  3. Thêm một acceptance checklist “không còn appendix debug trong export mặc định formal”.
+  4. Nếu phù hợp, thêm example-based comparison test với subset shape của `examples/BRD.docx.md`.
+- Acceptance criteria:
+  - Regression về format formal BRD sẽ fail tự động.
+  - Team có baseline rõ cho tiêu chí “gần BRD thật”.
+- Dependencies: TASK-069, TASK-070
+- Verification: backend pytest + snapshot review
+
+#### TASK-072 - Chốt canonical artifact chain cho target `spec -> use case -> diagram -> BRD`
+- Priority: P1
+- Status: Done
+- Module: product-architecture
+- Problem: Target mới không còn là `diagram -> BRD` đơn lẻ. Hệ thống cần đi qua ít nhất 5 artifact loại khác nhau nhưng hiện chưa có canonical chain rõ ràng.
+- Why it matters: Nếu không chốt chain này trước, mỗi feature mới sẽ tự chọn source of truth khác nhau và traceability sẽ đứt.
+- Implementation steps:
+  1. Định nghĩa artifact chain chuẩn:
+     - `ProjectSpec`
+     - `FeatureIntent`
+     - `UseCaseDraft`
+     - `DiagramDraft`
+     - `FormalBRDDraft`
+  2. Chốt field tối thiểu và quan hệ trace giữa các artifact.
+  3. Chốt artifact nào là human-editable, artifact nào là generated, artifact nào là derived-only.
+  4. Cập nhật docs kiến trúc/scope cho chain mới.
+- Acceptance criteria:
+  - Có một source-of-truth chain rõ ràng cho toàn pipeline.
+  - Mọi task sau đó đều bám được vào artifact chain này.
+- Dependencies: None
+- Verification: review chéo roadmap với docs kiến trúc
+- Progress update:
+  - Đã chốt chain chuẩn `ProjectSpec -> FeatureIntent -> UseCaseDraft -> DiagramDraft -> FormalBRDDraft`.
+  - Đã ghi canonical contract tại `docs/scope/artifact-chain.md` và sync lại `docs/scope/architecture.md`.
+
+#### TASK-073 - Thiết kế và implement `ProjectSpec` + `FeatureIntent` ingestion contract
+- Priority: P1
+- Status: Done
+- Module: spec-ingestion
+- Problem: User target bắt đầu từ “input spec dự án và function muốn build”, nhưng repo hiện chưa có contract hoặc UI/backend flow cho đầu vào này.
+- Why it matters: Không có ingress layer chuẩn thì use case generator sẽ phải đọc free-text thô, dễ drift và khó test.
+- Implementation steps:
+  1. Định nghĩa schema cho `ProjectSpec` và `FeatureIntent`.
+  2. Chốt field tối thiểu:
+     - project name
+     - module/function name
+     - business context
+     - actor candidates
+     - business rules / constraints
+     - input/output expectations
+  3. Thêm API/frontend form hoặc import file path cho ingestion.
+  4. Thêm validation + normalization layer trước khi gọi AI.
+- Acceptance criteria:
+  - Hệ thống nhận được input spec/function dưới dạng schema ổn định, không chỉ raw text.
+  - Có fixture/spec examples để test đường vào.
+- Dependencies: TASK-072
+- Verification: schema tests + request/response mock
+- Progress update:
+  - Đã thêm backend schema `ProjectSpec`, `FeatureIntent`, `UseCaseGenerationRequest`, `UseCaseGenerationResult`.
+  - Đã thêm panel frontend cho ingestion với form edit trực tiếp và fixture mặc định usable ngay.
+  - Đã có route `POST /api/usecases/generate` và backend tests tương ứng.
+
+#### TASK-074 - Xây pipeline `spec -> use case list` và UI review cho use case draft
+- Priority: P1
+- Status: Done
+- Module: use-case-generation
+- Problem: Đây là lớp trung gian quan trọng nhất của target workflow nhưng hiện chưa tồn tại.
+- Why it matters: Nếu không có use-case layer rõ ràng, diagram generation và formal BRD generation sẽ luôn thiếu trục tổ chức.
+- Implementation steps:
+  1. Thiết kế schema `UseCaseDraft` gồm:
+     - UC id
+     - title
+     - objective
+     - actors
+     - preconditions
+     - happy path summary
+     - key exceptions
+     - success outcome
+  2. Implement generation service từ `ProjectSpec + FeatureIntent`.
+  3. Thêm UI để review/edit/approve danh sách use case trước khi generate diagram.
+  4. Gắn status `draft / reviewed / approved`.
+- Acceptance criteria:
+  - Từ một project spec có thể sinh ra list use case reviewable.
+  - User có thể chỉnh/sắp/approve use case trước khi đi tiếp.
+- Dependencies: TASK-073
+- Verification: golden examples + UI smoke
+- Progress update:
+  - Đã implement `usecase_builder` deterministic sinh 2-3 `UseCaseDraft` từ `ProjectSpec + FeatureIntent`.
+  - Đã nối `Use case drafts` panel vào editor shell với flow generate, edit, approve từng item, và `Approve all`.
+  - Đã thêm unit test panel, backend route tests, và browser smoke cho flow generate/reopen panel.
+
+#### TASK-080 - Siết validation và normalization cho `ProjectSpec` + `FeatureIntent`
+- Priority: P1
+- Status: Done
+- Module: spec-ingestion
+- Problem: Ingestion layer hiện đã có schema hình thức nhưng vẫn cho qua payload rỗng hoặc rất nghèo thông tin, dẫn tới việc hệ thống generate use case JSON hợp lệ nhưng vô nghĩa về nghiệp vụ.
+- Why it matters: Nếu đầu vào không bị chặn từ sớm, `UseCaseDraft` sẽ trở thành rác có định dạng đẹp, và mọi bước downstream (`diagram`, `formal_brd`) sẽ drift ngay từ gốc.
+- Implementation steps:
+  1. Thêm server-side validation tối thiểu cho `project_name`, `project_summary`, `feature_name`, `feature_summary`.
+  2. Thêm normalization trim/collapse whitespace và reject giá trị rỗng sau normalize.
+  3. Thêm frontend pre-validation/disable-state cho nút `Generate use cases`.
+  4. Trả lỗi user-facing rõ ràng khi thiếu dữ liệu cốt lõi.
+- Acceptance criteria:
+  - Không thể generate use case khi thiếu tên dự án, summary dự án, tên feature, hoặc summary feature.
+  - Payload chỉ chứa whitespace bị reject nhất quán ở cả frontend và backend.
+  - Có regression tests cho invalid ingestion path.
+- Dependencies: TASK-073
+- Verification: backend pytest + UI test cho generate button disabled/error state
+- Progress update:
+  - Đã thêm normalization/trim/dedup cho scalar fields và list fields ở backend schema.
+  - Đã thêm local pre-validation ở frontend và disable `Generate use cases` khi thiếu field cốt lõi.
+  - Đã thêm backend route test cho invalid request và unit test cho pre-validation helpers.
+
+#### TASK-081 - Bảo vệ review state của use case draft khi generate lại
+- Priority: P1
+- Status: Done
+- Module: use-case-generation
+- Problem: Generate lại hiện đang overwrite thẳng `UseCaseDraft[]`, làm user mất toàn bộ edit/review/approve state mà không có cảnh báo hay recovery path.
+- Why it matters: Đây là bug workflow trực tiếp trong lớp review use case; nếu không xử lý, panel mới chỉ phù hợp demo chứ chưa đáng tin để dùng thật.
+- Implementation steps:
+  1. Thêm dirty-state cho `UseCaseDraft` sau khi user edit hoặc đổi review status.
+  2. Khi user generate lại trong lúc có dirty-state, hiển thị confirm rõ ràng hoặc cho phép duplicate/replace.
+  3. Cân nhắc cache local frontend cho `ProjectSpec`, `FeatureIntent`, và last generated `UseCaseDraft[]`.
+  4. Thêm E2E regression cho flow edit -> regenerate.
+- Acceptance criteria:
+  - User không thể vô tình mất use case draft đã chỉnh mà không được cảnh báo.
+  - Có ít nhất một recovery path rõ ràng: confirm replace hoặc reopen cache cũ.
+- Dependencies: TASK-074
+- Verification: browser E2E cho overwrite warning/recovery
+- Progress update:
+  - Đã thêm dirty-state cho edit/review use case và outdated detection theo fingerprint của spec hiện tại.
+  - Generate lại khi draft đã review hoặc spec đã đổi giờ sẽ hiện confirm replace trước khi overwrite.
+  - Đã thêm browser E2E cho flow cancel/accept regenerate.
+
+#### TASK-082 - Thay heuristic 2+1 use case bằng segmentation strategy linh hoạt hơn
+- Priority: P2
+- Status: Done
+- Module: use-case-generation
+- Problem: Builder hiện luôn sinh hai use case nền (`intake`, `execution`) và một use case ngoại lệ tùy điều kiện, nên chưa thật sự phản ánh list use case theo domain/spec thực.
+- Why it matters: Nếu segmentation quá cơ học, các bước `UseCaseDraft -> DiagramDraft` và `FormalBRDDraft` sau này sẽ kế thừa một cấu trúc UC méo ngay từ đầu.
+- Implementation steps:
+  1. Chốt heuristic segmentation dựa trên feature intent, actor boundary, outcome family, và business rule clusters.
+  2. Cho phép feature đơn giản chỉ sinh 1 use case nếu phù hợp.
+  3. Cho phép feature nhiều capability sinh >3 use case khi spec thật sự gợi ý.
+  4. Thêm golden fixtures cho ít nhất 3 loại feature: simple, branch-heavy, exception-heavy.
+- Acceptance criteria:
+  - Số lượng/use-case boundary không còn bị hard-code thành 2 hoặc 3.
+  - Fixture domain thật cho ra UC list có vẻ “đúng bài” hơn, không còn tách/gộp cơ học.
+- Dependencies: TASK-074
+- Verification: golden review + pytest fixtures
+- Progress update:
+  - `usecase_builder` giờ có thể sinh từ 1 đến 4 use case dựa trên intake/coordination/exception signals thay vì cố định `2 + 1`.
+  - Đã thêm builder tests cho case đơn giản, case giàu phối hợp, và case ngoại lệ-heavy.
+
+#### TASK-083 - Suy lại `useCaseDirty` từ fingerprint/snapshot thay vì sticky boolean
+- Priority: P1
+- Status: Done
+- Module: use-case-generation
+- Problem: Review state protection hiện hoạt động được, nhưng `useCaseDirty` đang là cờ sticky nên có thể tạo cảnh báo overwrite giả ngay cả khi user đã hoàn tác spec/intent về đúng bản đã generate.
+- Why it matters: Prompt cảnh báo nếu quá “ồn” sẽ nhanh chóng mất giá trị; đây là chỗ dễ làm user bỏ qua đúng lúc đáng ra cần dừng lại.
+- Implementation steps:
+  1. Lưu snapshot hoặc fingerprint canonical của lần generate gần nhất.
+  2. Tách `draftEdited` khỏi `specChanged`, và derive từng cờ từ diff thực thay vì chỉ set `true`.
+  3. Chỉ hiện confirm replace khi có khác biệt thực sự với snapshot gần nhất hoặc draft đã bị chỉnh/review.
+  4. Thêm regression test cho flow edit rồi hoàn tác về trạng thái cũ.
+- Acceptance criteria:
+  - Nếu user sửa rồi hoàn tác spec/intent về đúng bản đã generate, cảnh báo overwrite không còn xuất hiện sai.
+  - Dirty-state phản ánh đúng hai loại thay đổi: spec thay đổi và draft đã bị chỉnh/review.
+- Dependencies: TASK-081
+- Verification: UI unit test + browser E2E
+- Progress update:
+  - Đã bỏ `useCaseDirty` kiểu sticky boolean và chuyển sang derive state từ hai fingerprint: spec/intent snapshot và `UseCaseDraft[]` snapshot.
+  - Đã thêm E2E cho case user sửa spec rồi hoàn tác về đúng snapshot cũ thì generate lại không còn hiện confirm oan.
+
+#### TASK-084 - Chốt shared validation contract giữa frontend quick-guard và backend canonical validation
+- Priority: P2
+- Status: Done
+- Module: spec-ingestion
+- Problem: Frontend hiện mới chặn required-field path, còn backend mới là nơi canonical normalize/dedup nhiều field hơn. Nếu không chốt ranh giới rõ, hai phía sẽ rất dễ drift.
+- Why it matters: Đây là lớp entrypoint của toàn pipeline `spec -> UC -> diagram -> BRD`; lệch contract ở đây sẽ làm lỗi xuất hiện muộn và khó giải thích.
+- Implementation steps:
+  1. Ghi rõ rule nào thuộc frontend quick-guard, rule nào thuộc backend canonical validation.
+  2. Thêm UI coverage cho disabled/error state theo contract đã chốt.
+  3. Bổ sung backend tests cho các path normalize/dedup quan trọng nếu chưa có.
+  4. Sync lại UC/documentation để tránh hiểu nhầm “frontend và backend validate giống hệt nhau”.
+- Acceptance criteria:
+  - User-facing validation flow nhất quán với contract đã ghi trong docs.
+  - Frontend quick-guard và backend canonical validation không drift âm thầm khi mở rộng schema.
+- Dependencies: TASK-080
+- Verification: route tests + UI tests + doc review
+- Progress update:
+  - Đã export contract constants ở frontend để chốt rõ quick-guard chỉ cover 4 field bắt buộc, còn canonical normalization ở backend bao phủ thêm text/list fields.
+  - Đã thêm route test xác nhận payload trả về được normalize/dedup canonically, cùng UI test cho disabled/error state của quick-guard.
+  - Đã sync UC-07 để ghi rõ ranh giới giữa frontend quick-guard và backend canonical validation.
+
+#### TASK-085 - Thêm domain-grade golden fixtures cho segmentation `spec -> use case`
+- Priority: P2
+- Status: Done
+- Module: use-case-generation
+- Problem: Segmentation hiện đã linh hoạt hơn về số lượng, nhưng acceptance “fixture domain thật cho ra UC list đúng bài hơn” vẫn chưa được khóa bằng bộ fixture thực tế.
+- Why it matters: Trước khi dùng `UseCaseDraft` làm nguồn generate diagram, mình cần biết boundaries của use case đủ tin cậy ở các domain thật chứ không chỉ ở fixture tổng hợp nhỏ.
+- Implementation steps:
+  1. Thu thập ít nhất 3 fixture domain thật từ backlog hiện có.
+  2. Chốt expected boundaries hoặc review rubric cho từng fixture.
+  3. Thêm golden tests hoặc review snapshots để khóa segmentation quality.
+  4. Chỉ sau đó mới coi heuristic hiện tại đủ chín để đi tiếp sang `UseCaseDraft -> DiagramDraft`.
+- Acceptance criteria:
+  - Có bộ fixture domain thật cho lane `spec -> use case`.
+  - Segmentation được kiểm tra theo quality expectation, không chỉ theo số lượng UC.
+- Dependencies: TASK-082
+- Verification: golden review + pytest fixtures
+- Progress update:
+  - Đã thêm fixture domain thật cho các case `GPS Device issuance`, `fire incident response`, và `swimlane theme update`.
+  - Đã thêm pytest lane đọc fixture JSON và khóa expected segmentation boundary theo các kind `intake / execution / coordination / exception`.
+
+#### TASK-086 - Thêm drift guard cho validation contract giữa frontend và backend
+- Priority: P2
+- Status: Pending
+- Module: spec-ingestion
+- Problem: Frontend hiện đã expose contract constants cho quick-guard/canonical fields, nhưng chúng vẫn là bản copy tay của backend schema validators.
+- Why it matters: Nếu field coverage thay đổi ở backend mà frontend constants/docs không đổi theo, contract sẽ lệch ngay tại entrypoint của toàn pipeline.
+- Implementation steps:
+  1. Chọn một source of truth khả thi cho field coverage (shared artifact, generated snapshot, hoặc sync test).
+  2. Thêm regression để fail khi frontend contract constants drift khỏi backend schema coverage đã chốt.
+  3. Sync docs nếu contract representation thay đổi.
+- Acceptance criteria:
+  - Repo có cơ chế tự động phát hiện drift giữa frontend validation contract và backend canonical coverage.
+  - Không còn phụ thuộc hoàn toàn vào việc developer nhớ cập nhật hai nơi bằng tay.
+- Dependencies: TASK-084
+- Verification: automated contract drift test
+
+#### TASK-087 - Nâng domain fixtures thành segmentation goldens giàu nghĩa hơn
+- Priority: P2
+- Status: Pending
+- Module: use-case-generation
+- Problem: Fixture lane mới hiện chủ yếu khóa `count`, `primary_actor`, và `kind`, nên vẫn chưa đủ sâu để bảo vệ chất lượng boundary của `UseCaseDraft`.
+- Why it matters: Downstream `UseCaseDraft -> DiagramDraft` cần nhiều hơn việc “đủ số lượng UC”; nó cần các UC đúng ranh giới và đủ nghĩa nghiệp vụ.
+- Implementation steps:
+  1. Với mỗi fixture domain, bổ sung expected signals cho title/objective/preconditions/success outcome hoặc boundary notes.
+  2. Giảm phụ thuộc vào template phrase exact-match trong phân loại kind nếu có thể.
+  3. Thêm review rubric ngắn cho các fixture khó như `fire incident response`.
+- Acceptance criteria:
+  - Golden fixtures khóa được nhiều hơn số lượng UC và label family.
+  - Regression segmentation chất lượng thấp sẽ fail trước khi chảy xuống diagram generation.
+- Dependencies: TASK-085
+- Verification: pytest goldens + review snapshots
+
+#### TASK-088 - Thêm regression cho flow “edit draft -> revert draft -> regenerate”
+- Priority: P3
+- Status: Pending
+- Module: use-case-generation
+- Problem: Dirty-state mới đã được test cho case revert spec, nhưng chưa có test riêng cho case revert chính `UseCaseDraft[]` về snapshot generate cũ.
+- Why it matters: Đây là nhánh logic còn chưa được khóa, trong khi warning overwrite là UX guard quan trọng của panel review.
+- Implementation steps:
+  1. Thêm một test mô phỏng user sửa title/objective hoặc review status của draft.
+  2. Hoàn tác chính sửa đó về đúng snapshot ban đầu.
+  3. Verify generate lại không hiện confirm replace.
+- Acceptance criteria:
+  - Flow revert draft được khóa bằng regression test rõ ràng.
+- Dependencies: TASK-083
+- Verification: UI/E2E regression
+
+#### TASK-089 - Tách `Use case drafts` thành workspace 3 lớp: `Input` / `Use cases` / `Diagrams`
+- Priority: P1
+- Status: Done
+- Module: usecase-frontend-review
+- Problem: UI hiện trộn form nhập liệu, trạng thái hệ thống, `Artifact chain`, và danh sách use case vào một panel dài duy nhất, khiến mental model của người dùng bị rối.
+- Why it matters: User đang nghĩ theo workflow rất đơn giản: “tôi nhập spec + function intent”, “tôi nhận danh sách use case”, “mỗi use case dẫn tới một diagram”. Nếu UI không phản ánh đúng mô hình này, mọi bước sau sẽ đều cảm thấy khó dùng dù logic backend đúng.
+- Implementation steps:
+  1. Thiết kế lại shell thành 3 vùng rõ ràng:
+     - `Input`
+     - `Use cases`
+     - `Diagrams`
+  2. Quyết định layout phù hợp:
+     - tabbed workspace
+     - split pane
+     - hoặc stepper 3 pha
+  3. Giữ route/state hiện có nhưng đổi cấu trúc hiển thị trước, chưa cần build full persistence.
+  4. Thêm empty state và transition copy rõ ràng giữa 3 vùng.
+- Acceptance criteria:
+  - User nhìn vào UI là phân biệt ngay đâu là input, đâu là output use case, đâu là nơi quản lý diagram.
+  - Không còn phải cuộn một panel dài để hiểu workflow.
+- Dependencies: TASK-074
+- Verification: UX review + Playwright smoke
+
+#### TASK-090 - Đổi tên và copy của workspace để phản ánh đúng job-to-be-done
+- Priority: P2
+- Status: Done
+- Module: usecase-frontend-review
+- Problem: Tên `Use case drafts` đang gây hiểu nhầm vì nó bao gồm cả form nhập liệu lẫn output generated.
+- Why it matters: Naming sai làm user hiểu sai artifact model ngay từ đầu, rồi kéo theo confusion ở các bước review/generate tiếp theo.
+- Implementation steps:
+  1. Đổi tên toolbar entry và panel title sang một label rõ hơn như `Use case builder`, `Spec -> Use cases`, hoặc tương đương.
+  2. Viết lại microcopy cho:
+     - input section
+     - generate action
+     - review/approve state
+  3. Kiểm tra lại labels/aria names trong tests.
+- Acceptance criteria:
+  - Tên màn hình và copy mới phản ánh rõ đây là nơi nhập spec và sinh ra use case.
+  - User không còn nhầm `UseCaseDraft` là input gốc.
+- Dependencies: TASK-089
+- Verification: UI tests + UX review
+
+#### TASK-091 - Ẩn `Artifact chain` khỏi primary flow và chuyển sang advanced disclosure
+- Priority: P2
+- Status: Done
+- Module: artifact-chain-ux
+- Problem: `Artifact chain` hiện nằm giữa luồng chính của panel và làm tăng cognitive load cho người dùng bình thường.
+- Why it matters: Đây là thông tin hữu ích cho dev/BA nâng cao, nhưng không nên chen vào giữa input form và danh sách use case trong primary UX.
+- Implementation steps:
+  1. Chuyển `Artifact chain` vào:
+     - collapsible `Advanced`
+     - info drawer
+     - hoặc help/inspector riêng
+  2. Giữ nguyên dữ liệu và traceability, chỉ đổi vị trí và mức độ lộ ra.
+  3. Cập nhật docs/screenshots nếu có.
+- Acceptance criteria:
+  - Primary flow không còn bị chặn giữa chừng bởi `Artifact chain`.
+  - Người cần traceability vẫn mở được nó khi muốn.
+- Dependencies: TASK-089
+- Verification: UX review
+
+#### TASK-092 - Thêm danh sách diagram gắn theo từng use case
+- Priority: P1
+- Status: Done
+- Module: diagram-generation-entrypoint
+- Problem: UI hiện chưa có surface nào hiển thị “mỗi use case có diagram nào, trạng thái ra sao, mở ở đâu”.
+- Why it matters: Đây là mắt xích user-facing còn thiếu rõ nhất giữa `UseCaseDraft` và `DiagramDraft`.
+- Implementation steps:
+  1. Định nghĩa frontend state cho `diagram inventory` gắn với `use_case_id`.
+  2. Hiển thị một list/table cho mỗi use case:
+     - chưa có diagram
+     - có draft
+     - outdated/diverged (về sau)
+  3. Thêm chỗ giữ action placeholder hoặc real action:
+     - `Generate diagram`
+     - `Open diagram`
+  4. Nếu `TASK-075` chưa xong, ít nhất vẫn phải có UI contract rõ cho inventory này.
+- Acceptance criteria:
+  - User thấy được list diagram tương ứng với từng use case, kể cả khi trạng thái ban đầu là “chưa có”.
+  - Approved use case không còn là dead end trong UI.
+- Dependencies: TASK-075
+- Verification: UI state tests + workflow review
+
+#### TASK-093 - Thêm lifecycle action rõ ràng trên từng use case card/row
+- Priority: P1
+- Status: Done
+- Module: usecase-frontend-review
+- Problem: Card hiện hỗ trợ edit/review nhưng chưa cho thấy bước tiếp theo sau khi approve.
+- Why it matters: Với workflow này, mỗi item cần có next action hiển nhiên để đi sang diagram, thay vì buộc user tự suy ra bước sau.
+- Implementation steps:
+  1. Thiết kế lại mỗi use case card hoặc row thành lifecycle item:
+     - edit
+     - review
+     - approve
+     - generate/open diagram
+  2. Tách metadata, nội dung chỉnh sửa, và action cluster cho dễ scan.
+  3. Đồng bộ labels/status với diagram inventory.
+- Acceptance criteria:
+  - Approved use case có next action rõ ràng.
+  - User nhìn list là biết item nào còn chỉnh, item nào đã sẵn sàng sinh diagram.
+- Dependencies: TASK-089, TASK-092
+- Verification: UX review + component tests
+
+#### TASK-094 - Cập nhật UC-07 và roadmap theo UI contract mới kiểu `Input -> Use cases -> Diagrams`
+- Priority: P2
+- Status: Done
+- Module: workflow-docs
+- Problem: Docs hiện mô tả đúng implementation cũ, nhưng chưa phản ánh mental model mới mà user đang hướng tới.
+- Why it matters: Nếu code và docs lệch nhau ở giai đoạn redesign, team sẽ rất dễ tranh luận lại từ đầu khi implement `DiagramDraft`.
+- Implementation steps:
+  1. Sửa UC-07 để mô tả workspace mới.
+  2. Nếu cần, tách hoặc thêm UC riêng cho `use case -> diagram workspace`.
+  3. Sync lại roadmap/architecture note để diagram inventory trở thành artifact UI first-class.
+- Acceptance criteria:
+  - Docs mô tả đúng trải nghiệm mới.
+  - Không còn ambiguity về chỗ nhập input, chỗ review use case, và chỗ quản lý diagram.
+- Dependencies: TASK-089, TASK-092
+- Verification: doc review
+
+#### TASK-095 - Tự động invalid `approved` khi nội dung use case bị sửa sau review
+- Priority: P1
+- Status: Done
+- Module: usecase-frontend-review
+- Problem: Một item đã `approved` hiện vẫn cho phép sửa trực tiếp title/objective/actors/preconditions/outcome mà không làm mất trạng thái sẵn sàng đi sang diagram.
+- Why it matters: Approval không còn đáng tin nếu nội dung có thể thay đổi sau đó mà UI vẫn coi item là `ready for diagram`.
+- Implementation steps:
+  1. Chặn hoặc intercept `onUseCaseChange` cho item đang `approved`.
+  2. Quyết định policy rõ:
+     - `approved -> reviewed`
+     - hoặc `approved -> draft`
+     - hoặc `approved + needs_re_review`
+  3. Đồng bộ policy đó với button/action trên card và diagram inventory.
+  4. Thêm copy giải thích ngắn khi item bị kéo về trạng thái cần review lại.
+- Acceptance criteria:
+  - Sửa nội dung một item đã `approved` không còn giữ nguyên trạng thái “sẵn sàng đi sang diagram”.
+  - Diagram inventory phản ánh đúng việc item cần review lại.
+- Dependencies: TASK-089, TASK-093
+- Verification: component tests + E2E flow edit-after-approve
+- Result: Implemented `approved -> reviewed` on content edit, with diagram inventory falling back to `needs_review` until the item is phê duyệt again.
+
+#### TASK-096 - Hiển thị persistent active-use-case context khi mở canvas từ vùng `Diagrams`
+- Priority: P1
+- Status: Done
+- Module: diagram-generation-entrypoint
+- Problem: Sau khi user bấm `Open canvas`, workspace đóng lại và editor hiện chưa có dấu hiệu bền vững nào cho biết canvas đang gắn với use case nào.
+- Why it matters: Đây là mắt xích chuyển từ `UseCaseDraft` sang `DiagramDraft`; nếu mất context ở chỗ này, user rất dễ chỉnh nhầm canvas mà không biết đang làm việc cho item nào.
+- Implementation steps:
+  1. Thêm một context chip hoặc inspector block trên editor shell.
+  2. Hiển thị tối thiểu:
+     - `use_case_id`
+     - title
+     - review / diagram state hiện tại
+  3. Cho phép reopen nhanh vùng `Diagrams` từ context này.
+  4. Chuẩn bị chỗ cắm thêm `outdated/diverged` khi `TASK-076` đến.
+- Acceptance criteria:
+  - Sau `Open canvas`, user luôn thấy canvas đang gắn với use case nào.
+  - Từ editor shell có đường quay lại diagram inventory rõ ràng.
+- Dependencies: TASK-092, TASK-093
+- Verification: Playwright flow `Open in Diagrams -> Open canvas`
+- Result: Added a persistent editor-shell context chip for the active canvas use case with `use_case_id`, title, review/diagram state, and a quick action back to the diagram inventory.
+
+#### TASK-097 - Chuẩn hóa copy workspace theo VN-first UI
+- Priority: P2
+- Status: Done
+- Module: usecase-frontend-review
+- Problem: Workspace mới hiện trộn mạnh tiếng Việt và tiếng Anh (`Use Case Workspace`, `Input`, `Use cases`, `Diagrams`, `Open canvas`, `Needs approval`, ...).
+- Why it matters: Flow này đang hướng tới BA / Solution Engineer Việt ngữ; copy nửa Việt nửa Anh làm UX kém tự nhiên và lệch với định hướng VN-first của repo.
+- Implementation steps:
+  1. Chốt glossary UI cho workspace:
+     - label toolbar
+     - tab labels
+     - empty states
+     - action buttons
+     - status pills
+  2. Giữ English chỉ ở nơi thật sự cần cho artifact/dev trace.
+  3. Cập nhật lại tests và docs bị ảnh hưởng.
+- Acceptance criteria:
+  - Primary UX copy của workspace nhất quán theo một ngôn ngữ chính.
+  - Không còn các label/action trạng thái lẫn Việt/Anh trong cùng luồng chính.
+- Dependencies: TASK-089, TASK-090
+- Verification: UI review + component/E2E selector update
+- Result: Normalized the primary workspace headings, tabs, actions, statuses, empty states, and toolbar entry to Vietnamese-first copy while keeping artifact names in technical trace surfaces.
+
+#### TASK-098 - Tách inventory focus khỏi active canvas use-case binding
+- Priority: P1
+- Status: Done
+- Module: diagram-generation-entrypoint
+- Problem: `selectedUseCaseIdForDiagram` và `activeCanvasUseCaseId` là hai state khác nhau, nhưng inventory đang render selected ID như use case đã được chọn trên canvas.
+- Why it matters: User có thể đang làm canvas cho use case A nhưng inventory lại nói use case B đang selected, tạo nguy cơ mở/sinh diagram sai khi `TASK-075` được implement.
+- Implementation steps:
+  1. Đổi tên `selectedUseCaseIdForDiagram` thành state thể hiện đúng nghĩa focus/highlight trong inventory, hoặc bỏ state này nếu không cần.
+  2. Chỉ derive trạng thái “đang active trên canvas” từ `activeCanvasUseCaseId`.
+  3. Nếu cần focus B trong inventory khi canvas vẫn active A, dùng style/highlight trung tính, không dùng lifecycle status `selected`.
+  4. Viết lại note/copy để phân biệt “đang xem trong inventory” và “canvas đang gắn với”.
+  5. Thêm E2E: mở canvas A, mở inventory từ B, xác nhận context vẫn A và B chưa được coi là active; chỉ đổi sang B sau `Mở canvas`.
+- Acceptance criteria:
+  - Tại mọi thời điểm chỉ có tối đa một use case được mô tả là active trên canvas.
+  - Context shell và diagram inventory không thể hiển thị hai active use case khác nhau.
+- Dependencies: TASK-096
+- Verification: unit test lifecycle derivation + Playwright A-active/B-focused/B-active transition
+- Result: Renamed the navigation state to `focusedUseCaseId`, removed `selected` from diagram lifecycle, derived active inventory state only from `activeCanvasUseCaseId`, added a neutral `Đang xem trong danh sách` marker, and covered the A-active/B-focused/B-active transition in Playwright.
+
+#### TASK-099 - Chốt một source of truth cho diagram status và quyền `Mở canvas`
+- Priority: P1
+- Status: Done
+- Module: usecase-lifecycle-contract
+- Problem: UI hiển thị label theo `diagram_status` nhưng cho phép `Mở canvas` theo `review_status`, trong khi type hiện cho phép hai field tạo tổ hợp mâu thuẫn.
+- Why it matters: Khi thêm `outdated / diverged / generating / failed` ở `TASK-075` và `TASK-076`, item có thể trông bị block nhưng vẫn mở canvas được.
+- Implementation steps:
+  1. Định nghĩa helper hoặc discriminated contract cho diagram lifecycle.
+  2. Derive `canOpenCanvas` từ diagram lifecycle thay vì check trực tiếp `review_status`.
+  3. Dùng `diagram_status` cho cả label, style, note, và action permission.
+  4. Thêm test cho tổ hợp blocked/outdated nhưng review đã approved.
+  5. Document invariant trong `src/usecases/types.ts` hoặc UC-07.
+- Acceptance criteria:
+  - Không có item nào hiển thị trạng thái blocked nhưng vẫn expose `Mở canvas`.
+  - Mọi lifecycle combination được type/helper kiểm soát và có test.
+- Dependencies: TASK-098; phải hoàn tất trước TASK-075/TASK-076
+- Verification: unit tests cho lifecycle matrix + component tests cho action visibility
+- Result: Added a pure diagram lifecycle contract supporting current and upcoming states, with label, note, styling, and `canOpenCanvas` derived from `diagram_status`; approved-but-outdated/diverged states remain blocked by unit and component regressions.
+
+#### TASK-100 - Hoàn tất glossary VN-first cho primary use-case workspace
+- Priority: P2
+- Status: Pending
+- Module: usecase-frontend-review
+- Problem: TASK-097 đã Việt hóa phần lớn heading/action/status, nhưng primary form vẫn trộn `intent`, `feature`, `function`, `actor`, `trigger`, `input/output`, `Request`, và `activity diagram`.
+- Why it matters: Không có glossary rõ ràng thì mỗi lần thêm field hoặc lifecycle state, copy sẽ quay lại trạng thái nửa Việt nửa Anh.
+- Implementation steps:
+  1. Chốt danh sách term được giữ nguyên có chủ đích, ví dụ `use case`, `BRD`, và tên artifact kỹ thuật.
+  2. Việt hóa các label còn lại trong primary flow; giữ raw type names trong `Trace kỹ thuật`.
+  3. Đồng bộ validation copy từ `prevalidate.ts` với glossary mới.
+  4. Cập nhật component/E2E selectors và UC-07.
+- Acceptance criteria:
+  - Primary form, actions, status, empty states, và validation messages dùng một glossary VN-first nhất quán.
+  - English ngoài glossary chỉ xuất hiện trong technical disclosure.
+- Dependencies: TASK-097
+- Verification: UI copy audit + component/E2E tests
+
+#### TASK-101 - Extract và test pure use-case lifecycle derivation
+- Priority: P2
+- Status: Done
+- Module: usecase-frontend-review
+- Problem: Component test hiện copy lại logic `approved -> reviewed`, còn production lifecycle derivation nằm private trong `App.tsx`.
+- Why it matters: Test có thể xanh dù production handler regress; các state mới của TASK-075/TASK-076 sẽ làm duplication này khó bảo trì hơn.
+- Implementation steps:
+  1. Tách content-change detection và approval invalidation sang helper thuần trong `src/usecases/`.
+  2. Tách diagram inventory/lifecycle derivation khỏi `App.tsx`.
+  3. Cho production handler và test harness dùng cùng helper.
+  4. Thêm unit tests cho title, objective, actors, preconditions, happy path, exceptions, outcome, và review-only changes.
+  5. Thêm regression cho active-vs-focused transition từ TASK-098.
+- Acceptance criteria:
+  - Test không còn reimplement lifecycle policy.
+  - Mọi field nghiệp vụ edit sau approve đều demote đúng; đổi review status đơn thuần không bị coi là content edit.
+- Dependencies: TASK-098, TASK-099
+- Verification: focused Vitest lifecycle suite + existing E2E
+- Result: Extracted content-change detection, approval invalidation, diagram lifecycle, and inventory derivation into `src/usecases/lifecycle.ts`; production and component harness now share the helpers, with field-by-field lifecycle tests and active-vs-focused coverage.
+
+#### TASK-102 - Nâng `UseCaseDraft` thành contract chi tiết đủ để sinh diagram
+- Priority: P1
+- Status: Done
+- Module: use-case-generation-contract
+- Problem: `UseCaseDraft` hiện chỉ có `happy_path_summary` và `key_exceptions` dạng chuỗi, không có actor theo step, branch condition, target/rejoin, hoặc stable trace IDs.
+- Why it matters: Diagram generator sẽ phải đoán lane và decision từ prose, tạo graph generic và làm TASK-076 round-trip traceability khó sửa về sau.
+- Implementation steps:
+  1. Bổ sung structured main-flow step với tối thiểu:
+     - `step_id`
+     - `actor_ref`
+     - `action`
+     - optional `input_or_trigger`
+     - `expected_result`
+  2. Bổ sung alternate/exception flow với:
+     - stable ID
+     - source step
+     - condition
+     - ordered steps
+     - target/rejoin hoặc terminal outcome
+  3. Giữ summary fields hiện tại làm reader-facing projection hoặc compatibility layer.
+  4. Cập nhật backend schema, frontend type, builder, fixtures, form editor, và normalization.
+  5. Thêm validation để mọi actor/step/branch reference đều resolve được.
+- Acceptance criteria:
+  - Mỗi bước nghiệp vụ có actor và stable trace ID.
+  - Mỗi exception/alternate path có điểm rẽ và outcome rõ ràng.
+  - Contract đủ để map deterministically sang lane/node/edge mà không parse prose tự do.
+- Dependencies: TASK-074, TASK-087
+- Verification: backend/frontend contract tests + domain goldens + editor component tests
+- Result: Added stable main-flow steps and alternate flows with actor/source/rejoin validation across backend and frontend contracts. The editor now exposes the structured flow while keeping summary fields synchronized for reader-facing compatibility.
+
+#### TASK-103 - Sửa CTA diagram để phân biệt `Tạo` với `Mở`
+- Priority: P1
+- Status: Done
+- Module: diagram-generation-entrypoint
+- Problem: Item `ready_to_generate` hiện expose `Mở canvas`, nhưng handler chỉ bind use case vào canvas hiện có và giữ nguyên sample graph.
+- Why it matters: User tưởng diagram đã được tạo hoặc nạp; sample graph có thể bị hiểu nhầm là diagram của use case vừa chọn.
+- Implementation steps:
+  1. Tách lifecycle `not_started/ready_to_generate` khỏi `ready_to_open`.
+  2. Với diagram chưa tồn tại, hiển thị `Tạo sơ đồ`; không expose `Mở canvas`.
+  3. Chỉ hiển thị `Mở canvas` khi inventory có `DiagramDraft` thật.
+  4. Trước khi TASK-075 hoàn tất, disable `Tạo sơ đồ` với copy minh bạch hoặc cung cấp action riêng `Dựng thủ công trên canvas`.
+  5. Nếu dựng thủ công, khởi tạo canvas trống với lane theo actor và hỏi trước khi thay graph hiện tại.
+  6. Thêm E2E xác nhận sample graph không được trình bày như diagram của use case.
+- Acceptance criteria:
+  - Diagram chưa tồn tại không có action `Mở canvas`.
+  - Bấm action manual/generate không giữ sample không liên quan dưới context của use case.
+  - CTA phản ánh đúng artifact state tại mọi thời điểm.
+- Dependencies: TASK-099; tích hợp hoàn chỉnh cùng TASK-075
+- Verification: lifecycle matrix + component tests + Playwright handoff regression
+- Result: `not_started` now exposes `Tạo sơ đồ`; only an existing ready draft exposes `Mở canvas`. E2E verifies that generation replaces the initial sample instead of rebinding it to a use case.
+
+#### TASK-075 - Implement `UseCaseDraft -> DiagramDraft` generation
+- Priority: P1
+- Status: Done
+- Module: diagram-generation
+- Problem: Editor hiện mạnh ở chỉnh tay, nhưng chưa có bước sinh diagram graph từ use case đã approved.
+- Why it matters: Đây là mắt xích trực tiếp để đạt mục tiêu “mỗi use case có activity diagram tương ứng”.
+- Implementation steps:
+  1. Định nghĩa graph-generation contract từ `UseCaseDraft`.
+  2. Sinh lane candidates từ actor list.
+  3. Sinh node/edge skeleton cho:
+     - start/end
+     - activity chain
+     - decision branches
+     - note/context blocks
+  4. Render diagram draft vào editor với trace link ngược về UC.
+- Acceptance criteria:
+  - Một use case approved có thể generate ra diagram draft mở được trong editor.
+  - Diagram sinh ra vẫn chỉnh tay tiếp được.
+- Dependencies: TASK-074, TASK-102, TASK-103
+- Verification: fixture generation + editor smoke
+- Result: Added deterministic `POST /api/diagrams/generate`, actor lanes, start/end, activities, decisions, alternate paths, traceable edges, and frontend conversion/rendering into LogicFlow. Generated drafts remain fully editable.
+
+#### TASK-076 - Thêm round-trip contract giữa `UseCaseDraft` và `DiagramDraft`
+- Priority: P1
+- Status: Done
+- Module: diagram-editor-and-roundtrip
+- Problem: Sau khi diagram được generate, user chắc chắn sẽ sửa tay. Nếu không có round-trip contract, link giữa UC và diagram sẽ gãy.
+- Why it matters: Formal BRD cuối cùng phải dựa trên artifact đã được user review, không phải chỉ draft generated ban đầu.
+- Implementation steps:
+  1. Gắn trace metadata từ node/edge về UC step/exception/source block.
+  2. Thiết kế policy khi user sửa diagram:
+     - minor layout change
+     - semantic step rename
+     - branch thêm/bớt
+  3. Hiển thị `outdated / diverged` khi UC và diagram không còn khớp.
+  4. Cho phép regenerate có kiểm soát.
+- Acceptance criteria:
+  - Diagram edit không làm mất trace về UC.
+  - Hệ thống biết khi nào UC/diagram lệch nhau đáng kể.
+- Dependencies: TASK-075
+- Verification: integration tests + UX review
+- Result: Node/edge trace metadata survives editor snapshots. Layout-only edits preserve readiness, semantic edits mark the draft `diverged`, use-case edits mark it `outdated`, and controlled regeneration asks before replacing a semantically edited graph. Draft workspaces are retained per `use_case_id` for the current frontend session.
+
+#### TASK-077 - Synthesize `formal_brd` từ use-case portfolio đã approved
+- Priority: P1
+- Status: Pending
+- Module: formal-brd-generation
+- Problem: Formal BRD nên được build từ tập use case + diagrams đã được review, không phải trực tiếp từ một diagram đơn lẻ như hiện nay.
+- Why it matters: Đây mới là pipeline đúng với target end-state của bạn.
+- Implementation steps:
+  1. Đổi source input của `formal_brd` từ `single diagram` sang:
+     - `ProjectSpec`
+     - approved `UseCaseDraft[]`
+     - linked `DiagramDraft[]`
+  2. Map use-case portfolio sang:
+     - purpose
+     - business scope
+     - actor table
+     - UC catalog
+     - business state catalog
+     - per-UC sections
+  3. Giữ `diagram -> summary_brd` cũ như mode phụ nếu cần.
+  4. Thêm acceptance rules cho multi-UC compilation.
+- Acceptance criteria:
+  - Formal BRD không còn phụ thuộc vào một diagram đơn lẻ.
+  - Output gần với mẫu BRD thật ở mức portfolio/use-case document.
+- Dependencies: TASK-065, TASK-066, TASK-067, TASK-068, TASK-069, TASK-074, TASK-075, TASK-076
+- Verification: golden document snapshots
+
+#### TASK-078 - Thêm persistence/versioning cho project spec, use case, diagram, BRD
+- Priority: P2
+- Status: Pending
+- Module: persistence-versioning
+- Problem: Khi pipeline có nhiều artifact nối tiếp, local/frontend-only state sẽ trở thành bottleneck rất sớm.
+- Why it matters: Không có persistence thì review, diff, approve, regenerate sẽ không đáng tin cậy.
+- Implementation steps:
+  1. Thiết kế storage model cho 5 artifact chính.
+  2. Thêm revision/versioning cho từng artifact.
+  3. Giữ trace links và approval status.
+  4. Chuẩn bị API đọc/ghi tối thiểu trước khi mở rộng multi-user.
+- Acceptance criteria:
+  - Có thể lưu và nạp lại trọn chain `spec -> UC -> diagram -> BRD`.
+  - Có version history đủ để so sánh/review/regenerate.
+- Dependencies: TASK-072, TASK-073, TASK-074, TASK-075, TASK-077
+- Verification: CRUD + reload consistency tests
+
+#### TASK-079 - Xây eval lane cho toàn pipeline AI
+- Priority: P2
+- Status: Pending
+- Module: eval-and-qa
+- Problem: Mỗi lớp AI mới (spec -> UC, UC -> diagram, diagram/usecases -> BRD) sẽ nhân bội khả năng regress.
+- Why it matters: Nếu không có eval lane từ sớm, bạn sẽ rất khó biết lỗi nằm ở tầng nào.
+- Implementation steps:
+  1. Tạo dataset nhỏ cho từng stage:
+     - project spec -> use case
+     - use case -> diagram
+     - portfolio -> formal BRD
+  2. Chốt tiêu chí chấm điểm/acceptance cho từng stage.
+  3. Tách smoke tests và goldens cho từng layer thay vì chỉ end-to-end.
+  4. Ghi log kết quả eval cho mỗi lần đổi heuristic/prompt/schema.
+- Acceptance criteria:
+  - Có baseline chất lượng cho từng tầng pipeline.
+  - Regression có thể khoanh vùng theo stage thay vì chỉ fail E2E.
+- Dependencies: TASK-074, TASK-075, TASK-077
+- Verification: eval reports + CI lane
+
+#### TASK-104 - Chặn phê duyệt use case có detailed contract không hợp lệ
+- Priority: P1
+- Status: Done
+- Module: use-case-editor-contract
+- Problem: Edit actor hoặc danh sách bước có thể để lại `actor_ref`, `source_step_id`, hoặc `rejoin_step_id` không còn resolve, nhưng UI vẫn cho approve.
+- Why it matters: Trạng thái `approved` không còn bảo đảm use case thực sự diagram-ready; lỗi chỉ xuất hiện khi gọi API tạo sơ đồ.
+- Implementation steps:
+  1. Tạo pure validator cho toàn bộ `UseCaseDraft` chi tiết ở frontend.
+  2. Validate actor references, stable IDs, branch source/rejoin, outcome mode, và text bắt buộc.
+  3. Khi đổi actor, tự migrate reference chỉ khi mapping rõ ràng; trường hợp mơ hồ phải báo lỗi.
+  4. Khi thêm/xóa/reorder main step, reconcile hoặc yêu cầu user sửa branch reference.
+  5. Disable `Phê duyệt`, `Phê duyệt tất cả`, và `Tạo sơ đồ` khi contract còn lỗi.
+  6. Hiển thị lỗi sát field/flow liên quan.
+- Acceptance criteria:
+  - Không thể đưa use case có dangling reference sang `approved`.
+  - Mọi use case approved từ UI đều được backend schema chấp nhận.
+  - Edit actor và xóa step có regression tests.
+- Dependencies: TASK-102
+- Verification: focused Vitest/component tests + Playwright actor/step edit flow
+- Result: Frontend có pure contract validator, migrate primary actor khi mapping rõ ràng, hiển thị dangling-reference errors và chặn review/approve/generate khi contract chưa diagram-ready.
+
+#### TASK-105 - Siết invariant backend cho use-case và diagram IDs
+- Priority: P1
+- Status: Done
+- Module: use-case-generation-contract
+- Problem: Backend chấp nhận main flow rỗng, duplicate alternate-step IDs, outcome mơ hồ, và graph ID collision sau slug.
+- Why it matters: API có thể trả graph thiếu nghiệp vụ hoặc duplicate node IDs làm LogicFlow hoạt động không xác định.
+- Implementation steps:
+  1. Yêu cầu `main_flow_steps` có ít nhất một bước.
+  2. Normalize và validate text bắt buộc của use case, step, flow, condition, và outcome.
+  3. Enforce uniqueness toàn cục cho main-step IDs, alternate-step IDs, và flow IDs.
+  4. Yêu cầu alternate flow có đúng một hướng kết thúc hợp lệ: rejoin hoặc terminal outcome.
+  5. Detect collision sau khi chuyển source ID sang graph node/edge ID.
+  6. Trả lỗi validation có path cụ thể và thêm route regression.
+- Acceptance criteria:
+  - Empty main flow và duplicate/colliding IDs bị reject 422.
+  - Không có `DiagramDraft` nào chứa duplicate node/edge ID.
+  - Alternate flow luôn có outcome xác định.
+- Dependencies: TASK-102
+- Verification: Pydantic contract tests + diagram-builder property/golden tests
+- Result: Pydantic schema đã enforce main flow, required text, global stable-ID uniqueness, alternate outcome mode và projected graph-ID collision; builder kiểm tra duplicate node/edge IDs trước khi trả draft.
+
+#### TASK-106 - Bảo vệ diagram workspace trước các thao tác regenerate
+- Priority: P1
+- Status: Done
+- Module: artifact-workspace-lifecycle
+- Problem: Sinh lại use case xóa toàn bộ diagram workspace dù confirm chỉ nói thay danh sách use case; diagram regenerate thất bại lại che bản hiện tại.
+- Why it matters: User có thể mất diagram đã chỉnh tay hoặc không truy cập được bản còn nguyên sau lỗi mạng/backend.
+- Implementation steps:
+  1. Trước khi regenerate use case, thống kê workspace ready/outdated/diverged bị ảnh hưởng.
+  2. Đổi confirm copy để nêu rõ diagram nào sẽ bị orphan/xóa.
+  3. Cho phép cancel hoặc giữ orphan workspace cho tới khi user discard có chủ đích.
+  4. Tách operation state khỏi artifact availability.
+  5. Khi diagram regenerate fail mà có workspace cũ, hiển thị `Mở bản hiện tại` cùng `Thử lại`.
+  6. Thêm E2E cho cả use-case regenerate và diagram regenerate failure.
+- Acceptance criteria:
+  - Không có diagram workspace bị xóa mà không có cảnh báo cụ thể.
+  - Failed regeneration không làm mất đường mở bản hiện tại.
+  - Diverged workspace vẫn nguyên vẹn sau cancel/failure.
+- Dependencies: TASK-076
+- Verification: lifecycle unit tests + Playwright destructive-flow regressions
+- Result: Regenerate use case giữ workspace không còn khớp dưới dạng orphan draft; operation failure không che artifact hiện tại, và orphan chỉ bị bỏ sau confirm discard riêng.
+
+#### TASK-107 - Gom mọi canvas mutation vào một workspace commit path
+- Priority: P1
+- Status: Done
+- Module: diagram-editor-and-roundtrip
+- Problem: Snapshot logic nằm rải rác theo event; lane resize, custom shape resize, và sync-bar move chưa được capture.
+- Why it matters: Layout edit có thể biến mất sau khi đổi sang use case khác rồi mở lại.
+- Implementation steps:
+  1. Tạo helper/hook commit workspace nhận change kind `layout | semantic`.
+  2. Chuyển node/edge add-delete-text-move-resize, lane add-delete-rename-reorder-resize, sync-bar move/resize, import/reset/clear, undo/redo sang helper này.
+  3. Bảo đảm commit đọc graph sau khi LogicFlow hoàn tất mutation.
+  4. Loại các call `markDiagramChanged`/`captureActiveUseCaseDiagram` trùng hoặc thiếu.
+  5. Thêm switch-away/switch-back tests cho lane resize, shape resize, normal node move, và sync-bar move.
+- Acceptance criteria:
+  - Mọi mutation được lưu vào đúng workspace trước khi switch.
+  - Layout-only mutation không đánh dấu `diverged`.
+  - Semantic mutation luôn đánh dấu `diverged`.
+- Dependencies: TASK-076
+- Verification: focused integration tests + Playwright multi-use-case switch tests
+- Result: Canvas mutation đi qua commit path phân biệt `layout` và `semantic`; lane/shape resize, sync-bar, edge text và các event graph chính đều capture lại đúng workspace.
+
+#### TASK-108 - Render terminal alternate flow thành outcome riêng
+- Priority: P1
+- Status: Done
+- Module: diagram-generation
+- Problem: Alternate flow không rejoin đang nối vào success end chung và bỏ qua `terminal_outcome`.
+- Why it matters: Nhánh từ chối/hủy/lỗi có thể bị biểu diễn như hoàn tất thành công, làm sai nghĩa nghiệp vụ.
+- Implementation steps:
+  1. Với terminal flow, tạo end/outcome node riêng.
+  2. Render `terminal_outcome` thành text đọc được.
+  3. Gắn trace node/edge về alternate flow và terminal source.
+  4. Chỉ main success path được nối vào success end chung.
+  5. Xử lý nhiều terminal flow không overlap và có stable IDs.
+  6. Thêm golden tests cho rejoin, terminal, và mixed flows.
+- Acceptance criteria:
+  - Terminal branch không bao giờ kết thúc ở success end chung.
+  - Outcome text và trace xuất hiện trong `DiagramDraft`.
+  - Graph mixed branch giữ đúng topology.
+- Dependencies: TASK-075, TASK-105
+- Verification: diagram-builder goldens + Browser visual smoke
+- Result: Terminal alternate flow tạo activity outcome và end riêng có trace `terminal_outcome`; chỉ success path nối vào success end chung.
+
+#### TASK-109 - Chuẩn hóa provenance và giữ trace qua manual edit/import-export
+- Priority: P2
+- Status: Done
+- Module: diagram-traceability
+- Problem: Trace hiện chỉ tồn tại trên generated graph trong memory; Draw.io round-trip bỏ trace và element tạo tay không có provenance.
+- Why it matters: Không thể audit/merge chắc chắn hoặc tổng hợp formal BRD có trace sau workflow chỉnh sửa thực tế.
+- Implementation steps:
+  1. Định nghĩa provenance envelope versioned cho node/edge: generated source, manual, modified-from.
+  2. Gắn provenance `manual` khi DnD node hoặc tạo edge mới.
+  3. Giữ source trace khi rename/move/resize generated element.
+  4. Serialize provenance trong Draw.io XML bằng namespaced attributes hoặc metadata cell tương thích.
+  5. Parse/validate provenance khi import; dữ liệu ngoài hệ thống mặc định là manual/untrusted.
+  6. Thêm trace coverage report cho workspace.
+- Acceptance criteria:
+  - Export rồi import lại diagram generated vẫn giữ source trace.
+  - Element tạo tay có provenance rõ ràng.
+  - Invalid provenance không được tin cậy âm thầm.
+- Dependencies: TASK-076, TASK-107
+- Verification: XML round-trip tests + editor integration tests + trace coverage assertions
+- Result: Node/edge dùng provenance envelope versioned cho generated/manual/imported, Draw.io round-trip giữ trace, invalid metadata trở thành imported-untrusted, và canvas context báo trace coverage.
+
+#### TASK-110 - Tinh gọn đầu vào use case theo essential-first
+- Priority: P2
+- Status: Done
+- Module: use-case-input-ux
+- Problem: Primary form hiển thị `Bối cảnh nghiệp vụ`, `Rule nghiệp vụ`, và `Thuật ngữ` như các input ngang hàng dù chúng optional, trùng semantic hoặc chưa được builder sử dụng.
+- Why it matters: User phải hoàn thiện một form dài và phân biệt các khái niệm nội bộ trước khi có thể thử workflow sinh use case; điều này làm tăng cognitive load và giảm niềm tin vào output.
+- Implementation steps:
+  1. Tách project context khỏi form generate; tên/mô tả dự án được chọn hoặc thiết lập một lần.
+  2. Giữ primary generate form gồm tên chức năng, mô tả chức năng, actor chính và kết quả mong muốn optional.
+  3. Gộp `project_summary` và UX của `business_context` thành một field project description; giữ compatibility mapping ở request layer nếu cần.
+  4. Gộp UX của `business_rules` và `feature_intent.constraints` thành `Quy tắc và ràng buộc` trong vùng optional.
+  5. Gộp target users và systems thành `Bên tham gia`; đưa trigger và input/output vào `Thông tin bổ sung` đóng mặc định.
+  6. Bỏ `Thuật ngữ` và `Tên function` khỏi UI; chỉ giữ schema field tạm thời cho backward compatibility.
+  7. Xóa dữ liệu mẫu dài khiến form trông như template bắt buộc; dùng ví dụ ngắn hoặc empty defaults phù hợp.
+  8. Thêm component/E2E tests chứng minh user có thể sinh use case chỉ với primary fields.
+- Acceptance criteria:
+  - User hoàn thành flow generate đầu tiên mà không nhìn thấy hoặc điền các field advanced.
+  - Không còn hai field UI khác nhau cho cùng khái niệm bối cảnh hoặc rule/ràng buộc.
+  - `glossary` không xuất hiện trong primary workspace khi chưa có consumer.
+  - Payload tối thiểu vẫn được backend chấp nhận và sinh diagram-ready use case.
+- Dependencies: None
+- Verification: focused component tests + API minimal-payload test + Playwright minimal-input flow
+- Result: Primary flow chỉ còn tên/mô tả chức năng, actor chính và kết quả mong muốn; project context và enrichment được đưa vào disclosure, field dead bị bỏ khỏi UI và request adapter giữ backward compatibility.
+
+#### TASK-111 - Làm rõ contract giữa input enrichment và use-case output
+- Priority: P2
+- Status: Done
+- Module: use-case-generation-contract
+- Problem: Một số optional input có tác động heuristic không minh bạch, trong khi `glossary` được thu thập nhưng không ảnh hưởng output.
+- Why it matters: Product không thể giải thích vì sao cần một field hoặc đánh giá regression khi builder thay đổi.
+- Implementation steps:
+  1. Lập mapping canonical giữa từng optional input và phần output được phép ảnh hưởng.
+  2. Quyết định deprecate `glossary` hoặc implement terminology-preservation behavior có trace/test.
+  3. Chốt boundary giữa project-level rules và feature-level constraints; nếu không có consumer khác nhau, hợp nhất contract ở version tiếp theo.
+  4. Thêm paired tests so sánh output khi có/không có từng enrichment signal.
+  5. Document mapping trong UC-07 và artifact-chain contract.
+- Acceptance criteria:
+  - Mọi field còn hiển thị đều có consumer và observable behavior.
+  - Không có input được thu thập chỉ để pass-through.
+  - Tests mô tả rõ field nào thay đổi segmentation, exception hoặc terminology.
+- Dependencies: TASK-110
+- Verification: builder contract tests + UC-07 review
+- Result: Đã chốt consumer map cho project context, participants, trigger, input/output, constraints và success outcome; `function_name`, `glossary`, `assumptions` được deprecate khỏi generation flow và có paired backend tests.
+
+#### TASK-112 - Chọn structured flow làm nguồn chỉnh sửa canonical
+- Priority: P1
+- Status: Done
+- Module: use-case-review-editor
+- Problem: `happy_path_summary/main_flow_steps` và `key_exceptions/alternate_flows` đều editable, tạo hai nguồn dữ liệu cho cùng một flow và rebuild theo index.
+- Why it matters: User có thể vô tình làm expected result, branch source/rejoin hoặc stable IDs mang nghĩa cũ sau khi sửa summary; contract vẫn có thể hợp lệ về cấu trúc nhưng sai nghiệp vụ.
+- Implementation steps:
+  1. Chọn `main_flow_steps` và `alternate_flows` làm canonical editable model.
+  2. Bỏ textarea editable `Luồng chính tóm tắt` và `Ngoại lệ chính`.
+  3. Derive `happy_path_summary` và `key_exceptions` trước serialization hoặc hiển thị read-only khi cần.
+  4. Thêm thao tác add/remove/reorder main step giữ stable ID và reconcile branch references.
+  5. Xây alternate-flow editor cho condition, ordered steps, source step và đúng một outcome mode rejoin/terminal.
+  6. Giữ technical IDs ẩn khỏi primary surface nhưng không tái tạo khi chỉ reorder.
+  7. Thêm migration cho draft in-memory hiện có và regression tests cho reorder/delete/branch references.
+- Acceptance criteria:
+  - Mỗi business concept chỉ có một editable source.
+  - User sửa đầy đủ main/alternate flow mà không cần chạm raw IDs.
+  - Reorder không đổi stable IDs; delete step có branch reference phải được reconcile hoặc block rõ ràng.
+  - Diagram generation dùng trực tiếp canonical structured flow.
+- Dependencies: TASK-104, TASK-105
+- Verification: pure editor-model tests + component tests + Playwright edit-to-diagram flow
+- Result: `main_flow_steps` và `alternate_flows` là nguồn chỉnh sửa duy nhất; summary được derive, editor giữ stable ID, block xóa reference, hỗ trợ add/reorder và outcome rejoin/terminal, diagram sinh trực tiếp từ structured flow.
+
+#### TASK-113 - Thiết kế progressive disclosure cho use-case review
+- Priority: P2
+- Status: Done
+- Module: use-case-review-ux
+- Problem: Mục tiêu, preconditions, expected result từng bước và technical IDs cùng chiếm primary hierarchy với actor/action dù tần suất chỉnh thấp hơn.
+- Why it matters: Một use case bốn bước đã tạo ra form rất dài; review hàng loạt trở nên khó scan và approval dễ biến thành thao tác bỏ qua.
+- Implementation steps:
+  1. Giữ title, actors, step actor/action, alternate topology và success outcome ở primary surface.
+  2. Đưa objective/preconditions vào `Thông tin chung` có thể collapse.
+  3. Đưa input/trigger và expected result vào details của từng step.
+  4. Đưa request ID, use-case ID, step/flow IDs và trace metadata vào disclosure kỹ thuật.
+  5. Thêm summary header cho số bước, số nhánh và số lỗi contract để review nhanh.
+  6. Kiểm tra keyboard/accessibility cho các vùng collapse.
+- Acceptance criteria:
+  - User scan được title, actors và topology mà không cuộn qua toàn bộ metadata.
+  - Technical IDs không nằm trong visual hierarchy chính.
+  - Không field canonical nào bị ẩn đến mức không thể sửa khi cần.
+- Dependencies: TASK-112
+- Verification: component accessibility tests + Browser desktop/mobile review
+- Result: Primary hierarchy tập trung vào title, actors, topology và success outcome; metadata chung, chi tiết bước và trace kỹ thuật được collapse. Mobile panel dùng full viewport, một cột và không tràn ngang.
+
+#### TASK-114 - Hiển thị trung thực nguồn sinh use case
+- Priority: P1
+- Status: Done
+- Module: use-case-generation-ux
+- Problem: UI dùng ngôn ngữ “Sinh use case” trong một sản phẩm AI nhưng không cho biết kết quả hiện đến từ builder deterministic.
+- Why it matters: User kỳ vọng AI hiểu nghiệp vụ và đánh giá output generic như một lỗi AI, trong khi hệ thống chưa gọi model.
+- Implementation steps:
+  1. Mở rộng generation result với `generation_source: ai | deterministic_fallback`.
+  2. Hiển thị badge `AI draft` hoặc `Bản nháp theo rule` trong workspace.
+  3. Khi fallback xảy ra, giải thích ngắn rằng user cần rà soát chi tiết nghiệp vụ.
+  4. Thêm component/E2E coverage cho cả hai source.
+- Acceptance criteria:
+  - User luôn biết use case được sinh bởi AI hay fallback.
+  - Không có copy nào ngụ ý AI đã phân tích khi provider chưa được gọi.
+- Dependencies: None
+- Verification: Component tests + Playwright source-label assertions
+- Result: Workspace hiển thị `Bản nháp AI` hoặc `Bản nháp theo rule`, kèm lý do fallback và prompt version khi có.
+
+#### TASK-115 - Tách shared structured-generation provider khỏi BRD
+- Priority: P1
+- Status: Done
+- Module: ai-provider-platform
+- Problem: OpenRouter provider hiện được cấu hình và đặt tên theo `BRD_*`, chưa có boundary dùng chung cho use-case synthesis.
+- Why it matters: Nối use case trực tiếp vào provider BRD sẽ tạo coupling cấu hình, retry và observability khó duy trì.
+- Implementation steps:
+  1. Chuyển provider primitives sang package trung lập `app/ai/providers`.
+  2. Tách config dùng chung (`AI_PROVIDER`, base URL, API key) khỏi config theo capability (`BRD_MODEL_*`, `USECASE_MODEL_*`), giữ compatibility alias cho env cũ.
+  3. Tách factory chọn `mock/openrouter` khỏi route.
+  4. Giữ strict JSON schema, bounded retry, usage/cost metadata và error mapping.
+  5. Chuyển BRD path sang shared adapter mà không đổi response contract.
+  6. Thêm provider contract tests.
+- Acceptance criteria:
+  - BRD và use case dùng cùng transport boundary nhưng schema/prompt riêng.
+  - Mock và OpenRouter đều thực thi được qua interface chung.
+- Dependencies: None
+- Verification: Existing BRD suite + provider adapter unit tests
+- Result: Provider primitives/factory nằm dưới `app/ai/providers`; BRD và use case dùng chung transport, config `AI_*` có alias tương thích `BRD_*`.
+
+#### TASK-116 - Sinh UseCaseDraft bằng AI structured output có fallback
+- Priority: P1
+- Status: Done
+- Module: ai-usecase-generation
+- Problem: Sau khi có provider, prompt và synthesis contract, hệ thống vẫn cần một orchestration path đáng tin để chọn AI, retry, validate và fallback.
+- Why it matters: Diagram sinh sau đó có thể đúng kỹ thuật nhưng chỉ trực quan hóa một use case chung chung.
+- Implementation steps:
+  1. Implement `UseCaseGenerationService` nhận canonical input và generation policy.
+  2. Render prompt version đã pin, gọi shared provider bằng strict structured output.
+  3. Hydrate output semantic thành canonical `UseCaseDraft[]`.
+  4. Chạy structural validator, grounding guard và quality precheck.
+  5. Retry tối đa một lần với validation feedback đã sanitize.
+  6. Fallback về deterministic builder khi provider unavailable, timeout hoặc output không đạt contract.
+  7. Trả source, fallback reason, prompt version, model, latency, attempt, token và cost metadata.
+  8. Giữ route mỏng: rate limit, request envelope và mapping HTTP error.
+- Acceptance criteria:
+  - Hai domain khác nhau tạo ra luồng nghiệp vụ khác nhau, không chỉ thay tên feature trong cùng template.
+  - Output luôn qua cùng contract validator trước khi đến frontend.
+  - Provider failure không làm mất khả năng tạo draft fallback.
+- Dependencies: TASK-114, TASK-115, TASK-118, TASK-119, TASK-120, TASK-121
+- Verification: Mock provider tests + live smoke có guard cost + API fallback tests
+- Result: `UseCaseGenerationService` gọi strict structured output, retry tối đa một lần, hydrate/validate và fallback rule không làm gián đoạn workflow.
+
+#### TASK-117 - Thêm quality gate cho AI-generated use cases
+- Priority: P1
+- Status: Done
+- Module: use-case-quality-eval
+- Problem: Schema hợp lệ không bảo đảm use case cụ thể, đầy đủ hoặc bám input.
+- Why it matters: Model có thể trả flow trôi chảy nhưng generic, trùng lặp, bịa rule hoặc thiếu decision quan trọng.
+- Implementation steps:
+  1. Tạo golden fixtures cho ít nhất GPS issuance, fire incident và một feature CRUD đơn giản.
+  2. Định nghĩa rubric: input trace coverage, specificity, actor correctness, step completeness, branch quality, duplication và unsupported claims.
+  3. Thêm deterministic post-check cho generic filler phrases và duplicate flows.
+  4. Thêm eval so sánh AI path với deterministic baseline.
+  5. Chặn rollout mặc định nếu quality threshold chưa đạt.
+- Acceptance criteria:
+  - Suite fail khi output chỉ lặp template generic hiện tại.
+  - Mỗi step/exception quan trọng trace được về input hoặc được đánh dấu assumption cần review.
+  - Có báo cáo quality theo fixture và model.
+- Dependencies: TASK-116, TASK-122
+- Verification: Golden eval suite + reviewed snapshots + bounded live evaluation
+- Result: Quality gate chặn filler generic, flow trùng và flow quá ngắn; golden domains GPS, fire incident và CRUD có regression coverage.
+
+#### TASK-118 - Tách use-case generation thành pipeline có ownership rõ
+- Priority: P1
+- Status: Done
+- Module: use-case-generation-architecture
+- Problem: Route, deterministic segmentation, schema output và provider integration chuẩn bị bị gom vào cùng module, trong khi `usecase_builder.py` hiện đã sở hữu quá nhiều trách nhiệm.
+- Why it matters: Thêm AI trực tiếp vào route/builder sẽ làm fallback, validation và test setup khó hiểu; mỗi lần đổi prompt có thể vô tình đổi ID hoặc contract diagram.
+- Implementation steps:
+  1. Tạo package `app/usecases` hoặc tương đương cho generation domain.
+  2. Di chuyển deterministic builder thành `deterministic_builder.py` nhưng giữ public compatibility import tạm thời.
+  3. Tạo interface `UseCaseGenerator` nhận canonical `ProjectSpec + FeatureIntent` và trả semantic result cùng metadata.
+  4. Tạo `generation_service.py` làm orchestration owner; route không được chứa prompt/provider/domain logic.
+  5. Tách structural validation và ID hydration thành module độc lập.
+  6. Thêm architecture tests hoặc import-boundary tests để route chỉ phụ thuộc generation service.
+- Acceptance criteria:
+  - Route use case không import trực tiếp OpenRouter hoặc prompt builder.
+  - Deterministic fallback chạy độc lập qua cùng generator/service contract.
+  - Existing API contract và 58 backend tests không regress trong refactor-only PR.
+- Dependencies: TASK-115
+- Verification: Full API suite + import-boundary/unit tests + unchanged deterministic golden fixtures
+- Result: Domain generation nằm dưới `app/usecases`; route chỉ điều phối HTTP và gọi service, import cũ được giữ qua compatibility module.
+
+#### TASK-119 - Chuẩn hóa prompt thành artifact có version và registry
+- Priority: P1
+- Status: Done
+- Module: ai-prompt-engineering
+- Problem: Prompt BRD hiện là chuỗi inline không có ID/version; use-case prompt chưa tồn tại và nếu thêm cùng kiểu này sẽ không audit hoặc rollback được.
+- Why it matters: Không thể biết output được sinh bởi prompt nào, review diff prompt độc lập, chạy eval theo version hoặc rollback khi chất lượng giảm.
+- Implementation steps:
+  1. Định nghĩa `PromptDefinition` gồm `id`, `version`, `capability`, system template, input schema/version và changelog ngắn.
+  2. Tạo prompt registry bằng code/file local version-controlled; chưa cần database hoặc Langfuse để hoàn thành Phase 1.
+  3. Di chuyển prompt BRD hiện tại sang registry mà không đổi nội dung/runtime behavior.
+  4. Tạo `usecase_synthesis_v1` bằng tiếng Việt rõ ràng: nhiệm vụ, input authority, output constraints, grounding, segmentation, actors, main/alternate flow, terminal/rejoin semantics.
+  5. Dùng delimiter/JSON envelope để mọi user text được coi là data, không phải instruction.
+  6. Không nhúng JSON schema hai lần nếu provider đã gửi strict `response_format`; user content chỉ chứa canonical business input và generation hints cần thiết.
+  7. Viết snapshot tests cho rendered system/user messages và prompt metadata.
+- Acceptance criteria:
+  - Mỗi model call có prompt ID/version xác định.
+  - Prompt không còn nằm inline trong route.
+  - Prompt diff có thể review độc lập và snapshot test phát hiện thay đổi ngoài ý muốn.
+  - BRD path vẫn tạo cùng prompt semantics sau migration.
+- Dependencies: TASK-115, TASK-118
+- Verification: Prompt snapshot tests + BRD regression suite + manual prompt review
+- Result: Registry local có prompt ID/version/fingerprint cho BRD và use case; business input nằm trong envelope untrusted và schema không bị nhúng hai lần.
+
+#### TASK-120 - Tạo semantic synthesis schema và deterministic ID hydrator
+- Priority: P1
+- Status: Done
+- Module: use-case-generation-contract
+- Problem: `UseCaseDraft` chứa stable technical IDs và cross-reference; yêu cầu model tạo trực tiếp các ID này làm tăng lỗi dangling reference và nondeterminism.
+- Why it matters: AI nên chịu trách nhiệm nội dung nghiệp vụ, còn hệ thống phải sở hữu identity, compatibility fields và graph-safe references.
+- Implementation steps:
+  1. Tạo `UseCaseSynthesisResult`/`SynthesizedUseCase` không chứa `use_case_id`, `step_id`, `flow_id`.
+  2. Cho alternate flow tham chiếu main step bằng ordinal/key semantic giới hạn trong cùng output.
+  3. Yêu cầu đúng một outcome mode: rejoin ordinal hoặc terminal outcome.
+  4. Implement hydrator sinh stable IDs từ project/feature/use-case order và map references sang canonical IDs.
+  5. Derive `happy_path_summary` và `key_exceptions` từ structured flow.
+  6. Validate hydrated output bằng canonical `UseCaseDraft` Pydantic model.
+  7. Thêm property/unit tests cho duplicate title, reorder, invalid ordinal, terminal/rejoin và graph slug collision.
+- Acceptance criteria:
+  - Model không tạo technical IDs.
+  - Cùng semantic result luôn hydrate thành cùng canonical IDs.
+  - Invalid references bị reject trước khi response tới frontend.
+- Dependencies: TASK-118
+- Verification: Hydrator unit/property tests + existing diagram contract tests
+- Result: Model chỉ trả semantic content/evidence; hydrator sở hữu stable use-case/step/flow IDs, cross-reference và summary compatibility.
+
+#### TASK-121 - Thêm grounding và prompt-injection guard cho use-case AI
+- Priority: P1
+- Status: Done
+- Module: ai-usecase-safety
+- Problem: Project/feature text là dữ liệu user-controlled có thể chứa instruction giả hoặc khiến model bịa actor/rule không có nguồn.
+- Why it matters: Use case bịa nghiệp vụ sau đó sẽ được phê duyệt và chuyển thành diagram, làm sai artifact chain ở tầng đầu.
+- Implementation steps:
+  1. Gắn rõ trust boundary: mọi project/feature field là untrusted business data.
+  2. Prompt cấm thực thi instruction nằm trong input và cấm bịa rule, actor, system hoặc approval không có căn cứ.
+  3. Yêu cầu synthesized use case trả `evidence_refs` hoặc source keys cho title, actor, step/branch quan trọng.
+  4. Post-check actor phải thuộc input participants hoặc generic system actor được policy cho phép.
+  5. Post-check rule/constraint claim phải trace tới canonical input; unsupported claim trở thành review warning hoặc reject theo severity.
+  6. Tạo adversarial fixtures chứa prompt injection, fake system instruction và conflicting rules.
+- Acceptance criteria:
+  - Input kiểu “ignore previous instructions” không thay đổi task/schema.
+  - Actor/rule không có nguồn không được đi qua âm thầm.
+  - Warning/evidence không chứa raw secret hoặc prompt body.
+- Dependencies: TASK-119, TASK-120
+- Verification: Adversarial unit/API tests + prompt-injection fixture suite
+- Result: Prompt đặt trust boundary rõ, evidence refs được kiểm tra theo canonical catalog và actor/evidence không có nguồn bị reject.
+
+#### TASK-122 - Gắn observability cho model, prompt và fallback
+- Priority: P2
+- Status: Done
+- Module: ai-generation-observability
+- Problem: Metadata hiện chỉ có provider/model/cost cơ bản; không có prompt version, generation source, fallback reason hoặc quality result cho use case.
+- Why it matters: Khi output giảm chất lượng, team không thể phân biệt lỗi prompt, model, provider, hydrator hay fallback.
+- Implementation steps:
+  1. Mở rộng response metadata với capability, generation source, prompt ID/version, model, attempts, latency, token/cost và fallback reason.
+  2. Thêm structured logs chỉ chứa IDs/counts/status, không log prompt body hoặc business payload mặc định.
+  3. Wire `AI_LOG_PROMPT_BODY` chỉ cho local debug và bảo đảm production default false; ghi cảnh báo startup nếu bật.
+  4. Thêm counters cho AI success, validation retry, fallback và quality rejection.
+  5. Chuẩn bị adapter interface cho Langfuse nhưng không bắt buộc connector trong Phase 1.
+- Acceptance criteria:
+  - Một response đủ dữ liệu để xác định prompt/model/source đã sinh artifact.
+  - Không có prompt hoặc payload nhạy cảm trong production logs mặc định.
+  - Fallback rate và validation failure có thể đo được.
+- Dependencies: TASK-115, TASK-116, TASK-119
+- Verification: Metadata/log redaction tests + API assertions
+- Result: Response chứa capability/source/mode/prompt/model/attempt/token/cost/quality/fallback; structured counters/logs loại prompt body và payload.
+
+#### TASK-123 - Rollout AI use-case generation theo feature flag
+- Priority: P1
+- Status: Done
+- Module: ai-usecase-rollout
+- Problem: Chuyển thẳng từ deterministic sang AI mặc định có thể gây drift chất lượng, tăng latency/cost và làm hỏng flow ổn định.
+- Why it matters: Artifact đầu nguồn kém sẽ lan sang diagram và formal BRD; cần rollback tức thì mà không deploy lại.
+- Implementation steps:
+  1. Thêm mode `deterministic | ai_shadow | ai_opt_in | ai_default` qua config.
+  2. Ở shadow mode, chạy AI cho eval nhưng không trả output AI cho user và không lưu raw payload.
+  3. Ở opt-in mode, cho user chọn `Tạo bằng AI`; fallback vẫn tự động.
+  4. Chỉ bật default khi TASK-117 đạt threshold về quality, latency và fallback rate.
+  5. Thêm kill switch về deterministic không cần đổi frontend contract.
+  6. Document cost budget, timeout và rollback criteria.
+- Acceptance criteria:
+  - Có thể bật/tắt AI runtime mà không deploy code mới.
+  - Shadow/opt-in/default đều được test.
+  - Deterministic fallback luôn còn hoạt động.
+- Dependencies: TASK-114, TASK-116, TASK-117, TASK-122
+- Verification: Config matrix tests + Playwright source badge + controlled live smoke
+- Result: Runtime hỗ trợ deterministic, shadow, opt-in và default; UI có lựa chọn ưu tiên AI/theo rule, kill switch mặc định vẫn là deterministic.
+
+#### TASK-124 - Enforce claim-to-evidence grounding cho use-case AI
+- Priority: P1
+- Status: Todo
+- Module: ai-usecase-safety
+- Problem: `validate_grounding()` chỉ kiểm evidence ref tồn tại, chưa kiểm claim nghiệp vụ quan trọng có thật sự được hỗ trợ bởi source được cite.
+- Why it matters: Model có thể bịa rule/approval/outcome, cite một source key hợp lệ nhưng không liên quan, rồi đi qua quality gate và hydrate thành `UseCaseDraft`.
+- Implementation steps:
+  1. Mở rộng `apps/api/app/usecases/grounding.py` với policy field-type: actor phải trace tới participant/system, constraint/rule phải trace tới business rule hoặc constraint, input/output claim phải trace tới input/output tương ứng.
+  2. Thêm detector deterministic cho high-risk unsupported terms như approval/phê duyệt, reject/từ chối, permission/quyền, payment/thanh toán, SLA, integration/tích hợp, inventory/kho.
+  3. Khi claim high-risk không có source content tương ứng, trả `UNSUPPORTED_BUSINESS_CLAIM` thay vì chỉ warning im lặng.
+  4. Cập nhật `UseCaseGenerationService` để retry một lần với validation feedback đã sanitize và fallback nếu vẫn còn unsupported claim.
+  5. Thêm adversarial fixtures có valid evidence key nhưng unrelated source content.
+- Acceptance criteria:
+  - Payload bịa `Tự động phê duyệt yêu cầu dù thiết bị không còn trong kho` với `evidence_refs=["feature.inputs.0"]` bị reject.
+  - Payload có claim đúng và evidence đúng vẫn pass.
+  - Error/telemetry không log raw prompt body hoặc business payload.
+- Dependencies: TASK-121, TASK-117
+- Verification: `cd apps/api && python3 -m pytest tests/test_usecase_synthesis.py tests/test_usecase_generation_service.py -q`
+
+#### TASK-125 - Fallback an toàn khi prompt/provider config use-case sai
+- Priority: P1
+- Status: Todo
+- Module: ai-usecase-generation
+- Problem: `USECASE_PROMPT_VERSION` không tồn tại hiện raise `KeyError` trước fallback path; một lỗi config có thể biến `/api/usecases/generate` thành 500.
+- Why it matters: Rollout AI được thiết kế có deterministic kill switch/fallback; config prompt sai là tình huống vận hành thường gặp và không được làm user mất workflow.
+- Implementation steps:
+  1. Bọc prompt lookup trong `UseCaseGenerationService.generate()` bằng error handling trước provider call.
+  2. Map unknown prompt version thành fallback reason `prompt_unavailable` hoặc `provider_unavailable` có warning rõ.
+  3. Chuẩn hóa invalid provider name, missing key, and unknown prompt thành deterministic fallback metadata nhất quán.
+  4. Thêm route/service tests cho unknown `USECASE_PROMPT_VERSION`, invalid `USECASE_PROVIDER`, và missing OpenRouter key.
+  5. Cập nhật source-label copy nếu thêm fallback reason mới.
+- Acceptance criteria:
+  - Unknown prompt version trả HTTP 200 với `generation_source=deterministic_fallback`, không raise 500.
+  - Metadata có `fallback_reason` đủ rõ để vận hành debug.
+  - Existing deterministic/AI/shadow behavior không regress.
+- Dependencies: TASK-116, TASK-119, TASK-122
+- Verification: `cd apps/api && python3 -m pytest tests/test_usecase_generation_service.py tests/test_usecase_routes.py -q`
+
+#### TASK-126 - Thêm mock AI route path cho use-case generation
+- Priority: P2
+- Status: Todo
+- Module: ai-provider-platform
+- Problem: Default use-case service gọi `build_provider("mock")` không truyền `mock_payload_factory`, nên `USECASE_PROVIDER=mock` ở `ai_default/ai_shadow/ai_opt_in` fallback `provider_unavailable` trước khi thử AI.
+- Why it matters: Local/mock mode không kiểm được route-level AI synthesis, shadow metadata hoặc source label AI nếu không monkeypatch service trong test.
+- Implementation steps:
+  1. Tạo deterministic semantic synthesis mock payload factory cho use-case AI path.
+  2. Truyền factory này khi `UseCaseGenerationService` build provider mặc định cho capability `usecase_synthesis`.
+  3. Giữ BRD mock behavior hiện có không đổi.
+  4. Thêm route tests cho `USECASE_PROVIDER=mock` + `ai_default`, `ai_shadow`, `ai_opt_in` với preference `ai/auto/deterministic`.
+  5. Document rõ `mock` AI path dùng cho local/test, không đại diện chất lượng model thật.
+- Acceptance criteria:
+  - `USECASE_PROVIDER=mock` + `USECASE_GENERATION_MODE=ai_default` trả `generation_source=ai`.
+  - `ai_shadow` vẫn trả deterministic draft nhưng có `shadow_status=passed`.
+  - `deterministic` vẫn không attempt AI.
+- Dependencies: TASK-115, TASK-116, TASK-123
+- Verification: `cd apps/api && python3 -m pytest tests/test_usecase_routes.py tests/test_usecase_generation_service.py -q`
+
+#### TASK-127 - Biến rollout quality threshold thành eval executable
+- Priority: P2
+- Status: Todo
+- Module: use-case-quality-eval
+- Problem: Live smoke hiện chấp nhận cả `ai` lẫn `deterministic_fallback`, còn golden tests chưa tạo report threshold cho quality, fallback rate, latency và cost.
+- Why it matters: `ai_default` có thể được bật bằng config trước khi team có bằng chứng quality/cost đủ ổn định.
+- Implementation steps:
+  1. Tạo command hoặc pytest marker eval đọc golden fixtures GPS, fire incident, CRUD và các adversarial cases.
+  2. Ghi report gồm source, fallback reason, quality status/score, latency, estimated cost và attempt count theo fixture.
+  3. Fail eval nếu fallback rate, unsupported claim, quality rejection, latency hoặc cost vượt ngưỡng documented.
+  4. Cập nhật live smoke để có mode bắt buộc AI success khi chạy eval có key/model production.
+  5. Link report/checklist trong docs rollout trước khi cho phép `ai_default`.
+- Acceptance criteria:
+  - Có một verification command để chứng minh đủ điều kiện bật `ai_default`.
+  - Suite fail nếu mọi live call đều fallback nhưng smoke vẫn 200.
+  - Threshold khớp với docs `UC-07`.
+- Dependencies: TASK-117, TASK-122, TASK-123, TASK-124
+- Verification: `cd apps/api && python3 -m pytest tests/test_usecase_synthesis.py tests/test_live_smoke.py -q -rs` với env live khi cần.
+
+#### TASK-128 - Bỏ phân cấp actor chính/phụ và bỏ `Thông tin bổ sung`
+- Priority: P1
+- Status: Done
+- Module: use-case-input-ux-contract
+- Problem: Use-case input hiện bắt `Actor chính`, giấu các actor còn lại trong `Thông tin bổ sung`, rồi backend/schema tiếp tục phân biệt `primary_actor` và `supporting_actors`. Với swimlane/use-case workflow này, tất cả actor do user nhập đều là actor chính của quy trình; chia chính/phụ làm user nhập thiếu actor và khiến AI/heuristic bịa role hoặc gom trách nhiệm sai.
+- Why it matters: Actor là nền để sinh lane, step ownership, handoff và diagram. Nếu actor bị ẩn hoặc phân cấp giả, artifact đầu nguồn sai ngay từ use-case draft và lan sang diagram/BRD.
+- Implementation steps:
+  1. Thay field `Actor chính` trong `src/usecases/UseCasePanel.tsx` bằng multiline field `Actors / swimlanes` nằm ở primary input, mỗi dòng một actor.
+  2. Xóa disclosure `Thông tin bổ sung` khỏi generate input; đưa các field thật sự cần thiết còn lại lên primary flow hoặc bỏ khỏi UI nếu chưa có consumer rõ.
+  3. Cập nhật `src/usecases/prevalidate.ts`: required field là `actors` có ít nhất một dòng, không còn required `feature_intent.primary_actor` theo UI.
+  4. Cập nhật request adapter tạm thời: map danh sách actors vào canonical participant list; nếu backend contract cũ còn cần `primary_actor`, dùng actor đầu tiên chỉ như compatibility field và không hiển thị khái niệm chính/phụ trong UI.
+  5. Cập nhật backend generation/prompt/grounding để coi mọi actor trong participant list là ngang hàng; AI không được tự thêm actor ngoài danh sách user nhập.
+  6. Cập nhật `UseCaseDraft` review UI copy: hiển thị `Actors` thay vì `Actor chính` / `Actor hỗ trợ`; nếu schema cũ vẫn có `primary_actor/supporting_actors`, render chúng như một danh sách hợp nhất.
+  7. Cập nhật UC-07, artifact-chain docs, component tests, prevalidation tests, route tests, and Playwright mobile test.
+- Acceptance criteria:
+  - Vùng `Input` không còn text `Actor chính`, `Actor hỗ trợ`, hoặc `Thông tin bổ sung`.
+  - User nhập nhiều actor trực tiếp trong primary form, mỗi dòng một actor.
+  - Generated use cases/diagrams chỉ dùng actor thuộc danh sách user nhập hoặc policy system actor rõ ràng.
+  - Không có copy nào ngụ ý actor phụ là ít quan trọng hơn actor chính.
+  - Existing backend compatibility không làm UI quay lại phân cấp chính/phụ.
+- Dependencies: None
+- Verification: `npm run test:ui-mock -- --run src/usecases/UseCasePanel.test.tsx src/usecases/prevalidate.test.ts`, `cd apps/api && python3 -m pytest tests/test_usecase_routes.py tests/test_usecase_synthesis.py -q`, `npm run test:e2e-mock -- e2e/brd-flow.spec.ts`
+- Result: Use-case input dùng một danh sách `Actors / swimlanes` ngang hàng trong primary form; disclosure `Thông tin bổ sung` bị bỏ khỏi generate input; review UI gộp `primary_actor/supporting_actors` thành một field `Actors`, còn backend contract cũ chỉ là compatibility mapping.

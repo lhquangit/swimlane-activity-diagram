@@ -38,7 +38,7 @@ export default function DndPanel({ items, onStartDrag }: Props) {
           <br />• <b>Nối edge</b>: di chuột vào node, kéo từ điểm xanh ra.
           <br />• <b>Sửa text</b>: double-click vào node hoặc edge.
           <br />• <b>Xoá</b>: chọn rồi nhấn DEL.
-          <br />• Node sẽ tự snap vào lane gần nhất khi thả.
+          <br />• Node sẽ giữ vị trí ngang khi thả và chỉ được giữ gọn trong lane gần nhất.
           <br />• <b>Lane</b>: click lane để hiện thanh công cụ, kéo nút ở góc phải dưới để resize.
         </p>
       </div>

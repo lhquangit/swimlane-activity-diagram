@@ -21,6 +21,209 @@ Severity:
 
 ---
 
+## [FIXED] Kéo shape từ vùng text chỉ di chuyển label (severity: P1) {#fixed-node-text-drag-hijacks-shape}
+
+- **ID**: KI-31
+- **Phát hiện**: 2026-06-06 by Codex (user report)
+- **Severity**: P1 — vùng text chiếm phần lớn nhiều shape nên thao tác sắp xếp canvas thường xuyên kéo nhầm label thay vì kéo node.
+- **Reproduction**: Đặt chuột lên text bên trong Activity, Decision hoặc Note rồi kéo; LogicFlow nhận thao tác là kéo node text độc lập, shape không di chuyển theo.
+- **Root cause**: Cấu hình editor bật `nodeTextDraggable: true`, biến label của node thành một drag target riêng dù UX mong đợi toàn bộ nội dung shape là cùng một bề mặt kéo.
+- **Fix**: Tắt `nodeTextDraggable` ở cấu hình LogicFlow, giữ `edgeTextDraggable` và khả năng double-click sửa text; thêm unit test cấu hình và Playwright regression kéo trực tiếp từ label.
+- **Verified**: 2026-06-06 by Codex — focused Vitest, focused Playwright, production build và Browser QA kéo từ label + double-click edit text.
+
+---
+
+## [FIXED] Shape bị tự căn giữa lane khi kéo/thả gây chồng lấn (severity: P2) {#fixed-shape-auto-center-lane}
+
+- **ID**: KI-30
+- **Phát hiện**: 2026-06-06 by Codex (user report)
+- **Severity**: P2 — làm thao tác sắp xếp canvas khó dùng vì nhiều shape trong cùng lane dễ bị dồn vào một cột và chồng lấn nhau.
+- **Reproduction**: Kéo thả nhiều activity vào cùng lane ở các vị trí ngang khác nhau hoặc kéo một activity đang có sang vị trí khác trong lane; node bị đưa về giữa lane thay vì giữ vị trí người dùng chọn.
+- **Root cause**: Handler `node:dnd-add` và `node:drop` tính `snappedX = lane.x` rồi `moveTo(snappedX, y)`, tức luôn ép shape về center của lane.
+- **Fix**: Bind node vào lane theo boundary gần nhất nhưng giữ `x` hiện tại của người dùng; chỉ clamp khi shape vượt mép lane. Cập nhật hướng dẫn sidebar và thêm Playwright regression.
+- **Verified**: 2026-06-06 by Codex — focused Playwright regression, Browser QA kéo/thả 2 activity trong cùng lane có `deltaX=151`, kéo node hiện có giữ `movedX=90`, và production build.
+
+---
+
+## [FIXED] Shape text không tự wrap theo giới hạn shape (severity: P2) {#fixed-shape-text-auto-wrap}
+
+- **ID**: KI-29
+- **Phát hiện**: 2026-06-06 by Codex (user report)
+- **Severity**: P2 — text dài có thể tràn/khó đọc trong activity, decision, note dù shape có giới hạn kích thước rõ.
+- **Reproduction**: Tạo hoặc sinh activity/note/decision có mô tả dài; text không wrap ổn định theo width shape, newline thủ công cũng dễ bị render như một dòng liền.
+- **Root cause**: Các custom node chỉ set `textWidth`; chưa bật `overflowMode: autoWrap` và chưa chuẩn hóa text style cho `foreignObject` auto-wrap renderer.
+- **Fix**: Bật auto-wrap cho activity/decision/note, tính wrap width theo từng loại shape, preserve newline bằng `white-space: pre-wrap`, cho phép break-word và tách text sizing helper để test.
+- **Verified**: 2026-06-06 by Codex — focused Vitest, production build, và Browser QA xác nhận text dài render nhiều dòng, line-height đúng, không overflow width.
+
+---
+
+## [FIXED] Actor textarea không giữ dòng mới khi bấm Enter (severity: P2) {#fixed-actor-textarea-enter}
+
+- **ID**: KI-28
+- **Phát hiện**: 2026-06-06 by Codex (user report)
+- **Severity**: P2 — chặn thao tác nhập nhiều actor theo đúng hướng dẫn field, nhưng có workaround bằng paste nhiều dòng.
+- **Reproduction**: Mở `Không gian use case > Đầu vào`, focus `Actors / swimlanes (mỗi dòng một actor)`, nhập một actor rồi bấm Enter; textarea không giữ dòng mới nên không thể gõ actor tiếp theo theo cách tự nhiên.
+- **Root cause**: Textarea dùng controlled value từ `joinLines(splitLines(value))`; dòng trống tạm thời sau phím Enter bị `splitLines()` filter mất và React render lại value cũ.
+- **Fix**: Giữ raw input value riêng cho actor textarea trong khi vẫn normalize thành danh sách actor sạch cho state chính.
+- **Verified**: 2026-06-06 by Codex — focused Vitest, production build, và Browser QA nhập `Ban quản lý`, Enter, `Cư dân`, Enter, `Kỹ thuật viên`.
+
+---
+
+## [OPEN] AI use-case grounding chấp nhận claim không được source hỗ trợ (severity: P1) {#open-ai-usecase-unsupported-claim}
+
+- **ID**: KI-26
+- **Phát hiện**: 2026-06-06 by Codex (TASK-114..123 implementation review)
+- **Severity**: P1 — có thể tạo use case sai nghiệp vụ và lan lỗi sang diagram/BRD dù schema hợp lệ.
+- **Reproduction**: Cho synthesized step chứa claim kiểu `Tự động phê duyệt yêu cầu dù thiết bị không còn trong kho` nhưng cite `evidence_refs=["feature.inputs.0"]`; `validate_grounding()` không báo issue và `evaluate_synthesis()` trả `passed`.
+- **Root cause**: Grounding chỉ kiểm actor/evidence ref key tồn tại, chưa kiểm claim text có được source content hỗ trợ; quality gate chỉ bắt duplicate/generic/short-flow.
+- **Fix**: Todo — TASK-124 thêm claim-to-evidence policy và adversarial fixtures.
+- **Verified**: Pending.
+
+---
+
+## [OPEN] Prompt version sai làm use-case generation bypass fallback (severity: P1) {#open-usecase-prompt-version-hard-failure}
+
+- **ID**: KI-27
+- **Phát hiện**: 2026-06-06 by Codex (TASK-114..123 implementation review)
+- **Severity**: P1 — một lỗi config prompt có thể làm endpoint fail cứng thay vì trả deterministic fallback.
+- **Reproduction**: Khởi tạo `UseCaseGenerationService(Settings(usecase_generation_mode="ai_default", usecase_provider="mock", usecase_prompt_version="404"))` rồi gọi `generate()`; service raise `KeyError 'Unknown prompt: usecase_synthesis@404'`.
+- **Root cause**: `get_prompt()` được gọi trước provider/fallback error handling trong `UseCaseGenerationService.generate()`.
+- **Fix**: Todo — TASK-125 map unknown prompt/config errors thành deterministic fallback metadata.
+- **Verified**: Pending.
+
+---
+
+## [FIXED] Use case được kỳ vọng là AI-generated nhưng thực tế là template deterministic (severity: P1) {#fixed-usecase-generation-not-ai}
+
+- **ID**: KI-25
+- **Phát hiện**: 2026-06-06 by Codex (use-case generation quality review)
+- **Severity**: P1 — không làm hỏng contract nhưng output quá chung chung so với kỳ vọng sản phẩm và có thể dẫn tới diagram đúng cấu trúc nhưng sai/thiếu nghiệp vụ.
+- **Reproduction**: Nhập hai feature thuộc domain khác nhau rồi sinh use case; các luồng chính vẫn chủ yếu lặp template mở thông tin, xử lý, cập nhật và thông báo.
+- **Root cause**: `/api/usecases/generate` không gọi provider AI; builder chọn loại use case bằng keyword/count heuristics và điền fixed templates.
+- **Fix**: TASK-114 đến TASK-123 thêm source label, shared AI platform, versioned prompt, grounded semantic synthesis, deterministic hydrator, retry/fallback, quality gate, observability và feature-flag rollout.
+- **Verified**: API/UI suites, config mode matrix và Playwright source-label assertion ngày 2026-06-06.
+
+---
+
+## [FIXED] Form đầu vào use case phơi raw schema và thu field không tạo giá trị (severity: P2) {#fixed-usecase-input-overcollection}
+
+- **ID**: KI-24
+- **Phát hiện**: 2026-06-06 by Codex (use-case input necessity review)
+- **Severity**: P2 — không chặn chức năng nhưng tạo ma sát đáng kể ở workflow chính.
+- **Reproduction**: Mở `Không gian use case > Đầu vào`; ba field `Bối cảnh nghiệp vụ`, `Rule nghiệp vụ`, và `Thuật ngữ` xuất hiện như input chính dù đều optional.
+- **Root cause**: UI render gần như trực tiếp raw input/output contracts thay vì thiết kế theo minimum information needed; input concepts chồng lấn, `function_name/glossary` không có consumer, và use-case review giữ hai editable representations cho cùng flow.
+- **Fix**: TASK-110 đến TASK-113 đưa input về essential-first, deprecate field không có consumer, chọn structured flow làm canonical editor và dùng progressive disclosure cho metadata.
+- **Verified**: 2026-06-06 by Codex — Vitest, 58 API tests, Playwright edit-to-diagram regressions, production build và Browser QA desktop/mobile.
+
+---
+
+## [FIXED] Detailed use case có thể được approve dù reference đã hỏng (severity: P1) {#fixed-usecase-detail-dangling-references}
+
+- **ID**: KI-20
+- **Phát hiện**: 2026-06-06 by Codex (TASK-102/103/075/076 implementation review)
+- **Severity**: P1 — workflow chính bị chặn ở bước tạo sơ đồ dù UI đã báo approved.
+- **Reproduction**: Đổi primary/supporting actor hoặc xóa một dòng main flow đang được alternate flow tham chiếu, approve lại, rồi bấm `Tạo sơ đồ`.
+- **Root cause**: Editor không reconcile/validate detailed references trước approval; backend chỉ phát hiện khi parse request generate diagram.
+- **Fix**: TASK-104 thêm frontend contract validator và approval/generation guards; TASK-105 enforce cùng invariant ở Pydantic schema và diagram builder.
+- **Verified**: 2026-06-06 by Codex — Vitest contract/component tests và `54` API tests.
+
+---
+
+## [FIXED] Regenerate use case có thể xóa diagram workspace đã chỉnh tay (severity: P1) {#fixed-usecase-regenerate-drops-diagrams}
+
+- **ID**: KI-21
+- **Phát hiện**: 2026-06-06 by Codex (TASK-102/103/075/076 implementation review)
+- **Severity**: P1 — có nguy cơ mất toàn bộ diagram in-session, gồm cả bản diverged.
+- **Reproduction**: Tạo và sửa semantic một diagram, đổi spec/use case, xác nhận sinh lại use case; toàn bộ `diagramWorkspaces` bị clear.
+- **Root cause**: Confirmation chỉ mô tả replace use-case drafts, trong khi success handler reset cả diagram artifact state.
+- **Fix**: TASK-106 giữ diagram không còn khớp dưới dạng orphan workspace, tách operation failure khỏi artifact availability và yêu cầu discard có chủ đích.
+- **Verified**: 2026-06-06 by Codex — lifecycle unit tests và Playwright destructive-flow regressions.
+
+---
+
+## [FIXED] Một số layout edit không được giữ khi đổi use case (severity: P1) {#fixed-usecase-layout-edit-not-captured}
+
+- **ID**: KI-22
+- **Phát hiện**: 2026-06-06 by Codex (TASK-102/103/075/076 implementation review)
+- **Severity**: P1 — canvas hiển thị đã sửa nhưng workspace mở lại dùng snapshot cũ.
+- **Reproduction**: Resize lane/shape bằng handle hoặc move sync-bar, chuyển sang use case khác, rồi mở lại use case ban đầu.
+- **Root cause**: Các handler này không gọi workspace capture sau mutation.
+- **Fix**: TASK-107 đưa canvas mutations qua một commit path có `layout | semantic`, gồm lane/shape resize và sync-bar changes.
+- **Verified**: 2026-06-06 by Codex — Playwright switch-away/switch-back lane resize regression.
+
+---
+
+## [FIXED] Terminal alternate flow bị nối vào success end chung (severity: P1) {#fixed-terminal-flow-renders-as-success}
+
+- **ID**: KI-23
+- **Phát hiện**: 2026-06-06 by Codex (TASK-102/103/075/076 implementation review)
+- **Severity**: P1 — diagram có thể truyền đạt sai kết quả nghiệp vụ.
+- **Reproduction**: Generate diagram từ alternate flow có `terminal_outcome` và không có `rejoin_step_id`.
+- **Root cause**: Generator bỏ qua terminal outcome và nối branch vào end node mang trace `success_outcome`.
+- **Fix**: TASK-108 render terminal outcome và terminal end riêng, giữ source trace và không nối branch vào success end.
+- **Verified**: 2026-06-06 by Codex — diagram-builder golden tests và Browser visual smoke.
+
+## [FIXED] `Mở canvas` chỉ gắn context nhưng giữ nguyên diagram mẫu (severity: P1) {#fixed-open-usecase-canvas-keeps-sample}
+
+- **ID**: KI-19
+- **Phát hiện**: 2026-06-05 by Codex (current use-case-to-diagram flow review)
+- **Severity**: P1 — không mất dữ liệu, nhưng primary workflow truyền đạt sai rằng diagram của use case đã được mở.
+
+### Reproduction
+
+1. Sinh và phê duyệt một use case.
+2. Bấm `Mở ở vùng sơ đồ`, sau đó bấm `Mở canvas`.
+3. **Triệu chứng**: context shell đổi sang use case đã chọn nhưng canvas vẫn hiển thị diagram mẫu sự cố cháy từ lúc khởi tạo.
+
+### Root cause
+
+`handleOpenUseCaseDiagramCanvas()` chỉ cập nhật `focusedUseCaseId` và `activeCanvasUseCaseId`; chưa có `UseCaseDraft -> DiagramDraft` generation hoặc graph load. Canvas ban đầu luôn được render từ `buildInitialData()`.
+
+### Fix
+
+1. Không expose `Mở canvas` khi diagram chưa tồn tại; dùng trạng thái/action `Tạo sơ đồ`.
+2. Implement TASK-075 để generate và render graph thật.
+3. Nếu cho phép dựng thủ công, mở canvas trống với lane theo actor thay vì giữ sample không liên quan.
+4. Xem TASK-102 và TASK-103.
+
+### Verified
+
+- 2026-06-05 by Codex — item chưa có draft chỉ hiển thị `Tạo sơ đồ`; `Mở canvas` chỉ xuất hiện sau khi `DiagramDraft` thật đã tồn tại.
+- 2026-06-05 by Codex — Playwright và Browser QA xác nhận graph sinh từ use case thay thế sample graph, giữ workspace riêng theo `use_case_id`, và semantic edit chuyển trạng thái sang `diverged`.
+
+---
+
+## [FIXED] Diagram inventory có thể báo active use case khác với canvas context (severity: P1) {#fixed-usecase-inventory-active-context-drift}
+
+- **ID**: KI-18
+- **Phát hiện**: 2026-06-05 by Codex (TASK-095–097 implementation review)
+- **Severity**: P1 — có workaround là chỉ bấm `Mở canvas` từ đúng item, nhưng state mâu thuẫn có thể dẫn tới thao tác nhầm use case khi diagram generation được nối thật.
+
+### Reproduction
+
+1. Phê duyệt use case A và B.
+2. Từ inventory của A, bấm `Mở canvas`; shell context hiển thị canvas đang gắn với A.
+3. Mở lại danh sách use case và bấm `Mở ở vùng sơ đồ` trên B, nhưng chưa bấm `Mở canvas`.
+4. **Triệu chứng**: shell context vẫn nói canvas active A, trong khi inventory đánh dấu B là `Đang chọn cho sơ đồ` và note nói B được chọn trên canvas.
+
+### Root cause
+
+`selectedUseCaseIdForDiagram` điều khiển trạng thái `selected` trong inventory, còn `activeCanvasUseCaseId` điều khiển context shell. `handleOpenUseCaseDiagramWorkspace()` đổi selected ID nhưng không đổi active ID, dù copy của inventory diễn đạt selected như active canvas binding.
+
+### Fix
+
+1. Tách rõ inventory focus khỏi active canvas binding.
+2. Chỉ derive trạng thái active-on-canvas từ `activeCanvasUseCaseId`.
+3. Thêm E2E cho transition A active -> B focused -> B active.
+4. Xem `TASK-098`.
+
+### Verified
+
+- 2026-06-05 by Codex — `focusedUseCaseId` chỉ điều khiển highlight inventory, còn trạng thái `active_on_canvas` chỉ derive từ `activeCanvasUseCaseId`.
+- 2026-06-05 by Codex — lifecycle/component tests pass và Playwright regression `A active -> B focused -> B active` pass.
+
+---
+
 ## [FIXED] AI BRD suy main flow theo topology graph thay vì tọa độ canvas (severity: P1) {#fixed-ai-brd-main-flow-by-coordinates}
 
 - **ID**: KI-07

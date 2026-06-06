@@ -17,7 +17,6 @@ import {
   buildInitialData,
   buildLaneNodes,
   getLogicFlowOptions,
-  snapToLane,
 } from './lf-config';
 import DndPanel, { DndPaletteItem } from './DndPanel';
 import BrdPanel from './brd/BrdPanel';
@@ -42,6 +41,45 @@ import {
 import { exportDrawioXml } from './io/drawio-export';
 import { importDrawioXml } from './io/drawio-import';
 import type { EditorGraphData } from './io/drawio-types';
+import {
+  buildTraceCoverage,
+  manualProvenance,
+  markProvenanceModified,
+  normalizeImportedGraphProvenance,
+} from './io/provenance';
+import UseCasePanel from './usecases/UseCasePanel';
+import { validateUseCaseContract } from './usecases/contract';
+import { generateUseCaseDiagram, generateUseCases } from './usecases/client';
+import { canonicalizeUseCaseDraft } from './usecases/editor';
+import {
+  buildUseCaseFingerprint,
+  deriveDiagramArtifactState,
+  diagramDraftToWorkspace,
+  type DiagramWorkspaceEntry,
+} from './usecases/diagram';
+import {
+  applyUseCaseEditLifecycle,
+  buildDiagramInventory,
+  diagramStatusLabel,
+  didUseCaseContentChange,
+} from './usecases/lifecycle';
+import {
+  buildUseCaseDraftFingerprint,
+  buildUseCaseGenerationRequest,
+  buildUseCaseRequestFingerprint,
+  canonicalizeUseCaseInputs,
+  runLocalUseCasePreValidation,
+} from './usecases/prevalidate';
+import type {
+  ArtifactChainItem,
+  FeatureIntent,
+  OrphanedDiagramInventoryItem,
+  ProjectSpec,
+  UseCaseDraft,
+  UseCaseGenerationPreference,
+  UseCasePanelPhase,
+  UseCaseWorkspaceSection,
+} from './usecases/types';
 
 LogicFlow.use(Snapshot);
 LogicFlow.use(SelectionSelect);
@@ -137,6 +175,44 @@ function makeIdempotencyKey() {
     return `brd-${crypto.randomUUID()}`;
   }
   return `brd-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function buildDefaultProjectSpec(): ProjectSpec {
+  return {
+    project_name: 'Swimlane Activity Diagram',
+    project_summary: 'Công cụ mô hình hóa quy trình nghiệp vụ bằng swimlane.',
+    business_context: null,
+    target_users: [],
+    business_rules: [],
+    glossary: [],
+  };
+}
+
+function buildDefaultFeatureIntent(): FeatureIntent {
+  return {
+    feature_name: 'Sinh use case từ mô tả chức năng',
+    function_name: null,
+    feature_summary: 'Tạo use case có cấu trúc để rà soát trước khi sinh sơ đồ.',
+    primary_actor: 'BA / Solution Engineer',
+    trigger: null,
+    inputs: [],
+    outputs: [],
+    constraints: [],
+    assumptions: [],
+    systems_involved: [],
+    success_outcome: 'Có use case đủ rõ để phê duyệt và tạo sơ đồ.',
+  };
+}
+
+function reviewStatusShellLabel(status: UseCaseDraft['review_status']) {
+  switch (status) {
+    case 'approved':
+      return 'Đã phê duyệt';
+    case 'reviewed':
+      return 'Đã rà soát, cần phê duyệt lại';
+    default:
+      return 'Bản nháp, cần rà soát';
+  }
 }
 
 const INITIAL_LANES = withPositions(DEFAULT_LANES);
@@ -699,6 +775,86 @@ export default function App() {
   const [brdRuntimeStatus, setBrdRuntimeStatus] = useState<string | null>(null);
   const [lastGenerateFingerprint, setLastGenerateFingerprint] = useState<string | null>(null);
   const [lastIdempotencyKey, setLastIdempotencyKey] = useState<string | null>(null);
+  const [useCasePanelOpen, setUseCasePanelOpen] = useState(false);
+  const [useCasePhase, setUseCasePhase] = useState<UseCasePanelPhase>('idle');
+  const [useCaseWorkspaceSection, setUseCaseWorkspaceSection] =
+    useState<UseCaseWorkspaceSection>('input');
+  const [projectSpec, setProjectSpec] = useState<ProjectSpec>(buildDefaultProjectSpec);
+  const [featureIntent, setFeatureIntent] = useState<FeatureIntent>(buildDefaultFeatureIntent);
+  const [artifactChain, setArtifactChain] = useState<ArtifactChainItem[]>([]);
+  const [useCaseDrafts, setUseCaseDrafts] = useState<UseCaseDraft[]>([]);
+  const [focusedUseCaseId, setFocusedUseCaseId] = useState<string | null>(null);
+  const [activeCanvasUseCaseId, setActiveCanvasUseCaseId] = useState<string | null>(null);
+  const [diagramWorkspaces, setDiagramWorkspaces] = useState<
+    Record<string, DiagramWorkspaceEntry>
+  >({});
+  const [diagramOperationStates, setDiagramOperationStates] = useState<
+    Record<string, 'generating' | 'failed' | undefined>
+  >({});
+  const [orphanedDiagramIds, setOrphanedDiagramIds] = useState<string[]>([]);
+  const activeCanvasUseCaseIdRef = useRef<string | null>(null);
+  const isApplyingUseCaseDiagramRef = useRef(false);
+  const [useCaseRequestId, setUseCaseRequestId] = useState<string | null>(null);
+  const [useCaseMetadata, setUseCaseMetadata] = useState<ResponseMetadata | null>(null);
+  const [useCaseGenerationPreference, setUseCaseGenerationPreference] =
+    useState<UseCaseGenerationPreference>('auto');
+  const [useCaseError, setUseCaseError] = useState<string | null>(null);
+  const [lastUseCaseGenerateFingerprint, setLastUseCaseGenerateFingerprint] = useState<string | null>(
+    null,
+  );
+  const [lastUseCaseDraftFingerprint, setLastUseCaseDraftFingerprint] = useState<string | null>(null);
+
+  const useCaseValidationErrors = runLocalUseCasePreValidation(projectSpec, featureIntent);
+  const currentUseCaseFingerprint = buildUseCaseRequestFingerprint(
+    projectSpec,
+    featureIntent,
+    useCaseGenerationPreference,
+  );
+  const currentUseCaseDraftFingerprint = buildUseCaseDraftFingerprint(useCaseDrafts);
+  const isUseCaseDraftOutdated =
+    useCaseDrafts.length > 0 &&
+    lastUseCaseGenerateFingerprint !== null &&
+    lastUseCaseGenerateFingerprint !== currentUseCaseFingerprint;
+  const hasUseCaseDraftChanges =
+    useCaseDrafts.length > 0 &&
+    lastUseCaseDraftFingerprint !== null &&
+    lastUseCaseDraftFingerprint !== currentUseCaseDraftFingerprint;
+  const diagramArtifactStates = Object.fromEntries(
+    useCaseDrafts.map((useCase) => {
+      return [
+        useCase.use_case_id,
+        deriveDiagramArtifactState(useCase, diagramWorkspaces[useCase.use_case_id]),
+      ];
+    }),
+  );
+  const diagramInventory = buildDiagramInventory(useCaseDrafts, {
+    focusedUseCaseId,
+    activeCanvasUseCaseId,
+    artifactStates: diagramArtifactStates,
+    operationStates: diagramOperationStates,
+  });
+  const activeCanvasUseCase =
+    activeCanvasUseCaseId === null
+      ? null
+      : useCaseDrafts.find((useCase) => useCase.use_case_id === activeCanvasUseCaseId) ?? null;
+  const activeCanvasWorkspace =
+    activeCanvasUseCaseId === null ? null : diagramWorkspaces[activeCanvasUseCaseId] ?? null;
+  const orphanedDiagramInventory: OrphanedDiagramInventoryItem[] = orphanedDiagramIds
+    .map((useCaseId) => {
+      const workspace = diagramWorkspaces[useCaseId];
+      return workspace
+        ? {
+            use_case_id: useCaseId,
+            title: workspace.draft.title,
+            semantic_edited: workspace.semanticEdited,
+          }
+        : null;
+    })
+    .filter((item): item is OrphanedDiagramInventoryItem => item !== null);
+  const activeCanvasDiagramItem =
+    activeCanvasUseCaseId === null
+      ? null
+      : diagramInventory.find((item) => item.use_case_id === activeCanvasUseCaseId) ?? null;
 
   const markDiagramChanged = () => {
     setDiagramRevision((revision) => revision + 1);
@@ -748,6 +904,26 @@ export default function App() {
   useEffect(() => {
     lanesRef.current = lanes;
   }, [lanes]);
+
+  useEffect(() => {
+    activeCanvasUseCaseIdRef.current = activeCanvasUseCaseId;
+  }, [activeCanvasUseCaseId]);
+
+  useEffect(() => {
+    if (
+      focusedUseCaseId &&
+      !useCaseDrafts.some((useCase) => useCase.use_case_id === focusedUseCaseId)
+    ) {
+      setFocusedUseCaseId(null);
+    }
+    if (
+      activeCanvasUseCaseId &&
+      !useCaseDrafts.some((useCase) => useCase.use_case_id === activeCanvasUseCaseId) &&
+      !diagramWorkspaces[activeCanvasUseCaseId]
+    ) {
+      setActiveCanvasUseCaseId(null);
+    }
+  }, [activeCanvasUseCaseId, diagramWorkspaces, focusedUseCaseId, useCaseDrafts]);
 
   useEffect(() => {
     const cached = loadBrdWorkspaceCache();
@@ -861,6 +1037,64 @@ export default function App() {
     });
   };
 
+  const persistActiveUseCaseDiagram = (changeKind?: 'layout' | 'semantic') => {
+    const useCaseId = activeCanvasUseCaseIdRef.current;
+    const lf = lfRef.current;
+    if (!useCaseId || !lf || isApplyingUseCaseDiagramRef.current) return;
+    const graph = lf.getGraphData() as EditorGraphData;
+    setDiagramWorkspaces((current) => {
+      const entry = current[useCaseId];
+      if (!entry) return current;
+      return {
+        ...current,
+        [useCaseId]: {
+          ...entry,
+          graph,
+          lanes: lanesRef.current,
+          laneHeight: laneHeightRef.current,
+          semanticEdited: entry.semanticEdited || changeKind === 'semantic',
+          traceCoverage: buildTraceCoverage(graph),
+        },
+      };
+    });
+  };
+
+  const commitDiagramMutation = (
+    changeKind: 'layout' | 'semantic',
+    options?: { defer?: boolean },
+  ) => {
+    markDiagramChanged();
+    if (options?.defer) {
+      window.setTimeout(() => persistActiveUseCaseDiagram(changeKind), 0);
+      return;
+    }
+    persistActiveUseCaseDiagram(changeKind);
+  };
+
+  const renderUseCaseDiagram = (useCaseId: string, entry: DiagramWorkspaceEntry) => {
+    const lf = lfRef.current;
+    if (!lf) return;
+    isApplyingUseCaseDiagramRef.current = true;
+    try {
+      updateLaneState(entry.lanes);
+      laneHeightRef.current = entry.laneHeight;
+      lf.render(entry.graph as Parameters<typeof lf.render>[0]);
+      hydrateNodeLaneBindings(entry.lanes, entry.lanes);
+      hydrateSyncBarBindings(entry.lanes, entry.lanes);
+      applyLaneModels(entry.lanes, entry.laneHeight);
+      setActiveLaneId(entry.lanes[0]?.id ?? null);
+      setActiveNodeId(null);
+      lf.fitView(20, 20);
+      setFocusedUseCaseId(useCaseId);
+      setActiveCanvasUseCaseId(useCaseId);
+      activeCanvasUseCaseIdRef.current = useCaseId;
+      setUseCasePanelOpen(false);
+      markDiagramChanged();
+    } finally {
+      isApplyingUseCaseDiagramRef.current = false;
+    }
+  };
+
   const realignNodesToLaneLayout = (prevLanes: LaneConfig[], nextLanes: LaneConfig[]) => {
     const lf = lfRef.current;
     if (!lf) return;
@@ -940,7 +1174,9 @@ export default function App() {
     applyLaneModels(lanesRef.current, laneHeightRef.current);
     lf.fitView(20, 20);
 
-    // Snap newly-dropped (via dnd) nodes to nearest lane center.
+    // Bind newly-dropped (via dnd) nodes to the nearest lane while preserving
+    // the user's horizontal placement. Only clamp when a shape would exceed
+    // the lane boundary.
     // We also force the new node to the top of the stack so its DOM element
     // is appended AFTER the lane elements in the SVG canvas. Lanes render a
     // full-size white-fill rect, so any node that ends up below them in the
@@ -951,26 +1187,27 @@ export default function App() {
       const model = lf.graphModel.getNodeModelById(data.id);
       if (!model) return;
       if (data.type !== 'sync-bar') {
-        const lane = getClosestLane(data.x, lanesRef.current);
-        const snappedX = lane?.x ?? snapToLane(data.x, lanesRef.current);
-        model.moveTo(snappedX, data.y);
+        const lane = getClosestLaneByBoundaryX(data.x, lanesRef.current);
+        resizeNodeToText(model as unknown as NodeModelLike);
         if (lane) {
-          bindNodeToLane(model as unknown as NodeModelLike, lane, snappedX);
+          bindNodeToLane(model as unknown as NodeModelLike, lane, data.x);
         }
       } else {
         persistSyncBarSpan(model as unknown as NodeModelLike, lanesRef.current, lanesRef.current, undefined, true);
       }
-      resizeNodeToText(model as unknown as NodeModelLike);
+      if (data.type === 'sync-bar') {
+        resizeNodeToText(model as unknown as NodeModelLike);
+      }
       // Bring new node above any lane in the stacking order.
       lf.graphModel.setElementZIndex(data.id, 'top');
       refreshLaneHeight();
       setActiveLaneId(null);
       setActiveNodeId(isUserResizableNode(data.type) ? data.id : null);
-      markDiagramChanged();
+      commitDiagramMutation('semantic');
       bumpViewportTick();
     });
 
-    // Snap when moving an existing node (drag-end)
+    // Keep a moved node inside its nearest lane without recentering it.
     lf.on('node:drop', ({ data }) => {
       if (!data || !data.type) return;
       const model = lf.graphModel.getNodeModelById(data.id) as unknown as NodeModelLike | undefined;
@@ -980,20 +1217,19 @@ export default function App() {
         syncConnectedEdges(lf, model);
         setActiveLaneId(null);
         setActiveNodeId(data.id);
+        commitDiagramMutation('layout');
         bumpViewportTick();
         return;
       }
-      const lane = getClosestLane(data.x, lanesRef.current);
-      const snappedX = lane?.x ?? snapToLane(data.x, lanesRef.current);
-      model.moveTo?.(snappedX, data.y);
+      const lane = getClosestLaneByBoundaryX(model.x ?? data.x, lanesRef.current);
       if (lane) {
-        bindNodeToLane(model, lane, snappedX);
+        bindNodeToLane(model, lane, model.x ?? data.x);
       }
       syncConnectedEdges(lf, model);
       refreshLaneHeight();
       setActiveLaneId(null);
       setActiveNodeId(isUserResizableNode(data.type) ? data.id : null);
-      markDiagramChanged();
+      commitDiagramMutation('layout');
       bumpViewportTick();
     });
 
@@ -1001,11 +1237,24 @@ export default function App() {
       const model = lf.graphModel.getNodeModelById(id) as unknown as
         | NodeModelLike
         | undefined;
-      if (!model || model.type === 'lane') return;
-      resizeNodeToText(model, text);
-      refreshLaneHeight();
-      markDiagramChanged();
-      bumpViewportTick();
+      if (model && model.type !== 'lane') {
+        model.setProperties?.({
+          ...(model.properties ?? {}),
+          provenance: markProvenanceModified(model.properties),
+        });
+        resizeNodeToText(model, text);
+        refreshLaneHeight();
+        commitDiagramMutation('semantic');
+        bumpViewportTick();
+        return;
+      }
+      const edgeModel = lf.graphModel.getEdgeModelById(id);
+      if (!edgeModel) return;
+      edgeModel.setProperties({
+        ...(edgeModel.properties ?? {}),
+        provenance: markProvenanceModified(edgeModel.properties),
+      });
+      commitDiagramMutation('semantic');
     });
 
     lf.on('node:resize', ({ newNodeSize }) => {
@@ -1055,7 +1304,7 @@ export default function App() {
       }
       syncConnectedEdges(lf, model);
       refreshLaneHeight();
-      markDiagramChanged();
+      commitDiagramMutation('layout');
       bumpViewportTick();
     });
 
@@ -1067,7 +1316,23 @@ export default function App() {
         setActiveLaneId((current) => (current === data.id ? lanesRef.current[0]?.id ?? null : current));
       } else if (data?.id) {
         setActiveNodeId((current) => (current === data.id ? null : current));
+        commitDiagramMutation('semantic');
       }
+    });
+
+    lf.on('edge:add', ({ data }) => {
+      const edgeModel = data?.id ? lf.graphModel.getEdgeModelById(data.id) : undefined;
+      if (edgeModel && !edgeModel.properties?.provenance) {
+        edgeModel.setProperties({
+          ...(edgeModel.properties ?? {}),
+          provenance: manualProvenance(activeCanvasUseCaseIdRef.current),
+        });
+      }
+      commitDiagramMutation('semantic');
+    });
+
+    lf.on('edge:delete', () => {
+      commitDiagramMutation('semantic');
     });
 
     const syncActiveTarget = (data?: { id?: string; type?: string }) => {
@@ -1113,7 +1378,7 @@ export default function App() {
       );
       commitLaneLayout(updated, { status: `Đã đổi tên lane → "${trimmed}"` });
       setActiveLaneId(data.id);
-      markDiagramChanged();
+      commitDiagramMutation('semantic');
     });
 
     // Right-click on lane → confirm delete
@@ -1135,7 +1400,7 @@ export default function App() {
       );
       commitLaneLayout(updated, { status: `Đã xoá lane "${current.title}"` });
       setActiveLaneId(updated[0]?.id ?? null);
-      markDiagramChanged();
+      commitDiagramMutation('semantic');
     });
 
     lfRef.current = lf;
@@ -1152,7 +1417,10 @@ export default function App() {
     if (!lf) return;
     lf.dnd.startDrag({
       type: item.nodeType,
-      properties: item.properties ?? {},
+      properties: {
+        ...(item.properties ?? {}),
+        provenance: manualProvenance(activeCanvasUseCaseIdRef.current),
+      },
       text: item.text ?? '',
     });
   };
@@ -1172,7 +1440,7 @@ export default function App() {
     commitLaneLayout(updated, { status: `Đã thêm lane "${trimmed}"` });
     setActiveLaneId(newLane.id);
     setActiveNodeId(null);
-    markDiagramChanged();
+    commitDiagramMutation('semantic');
   };
 
   const handleRenameLane = (laneId: string) => {
@@ -1187,7 +1455,7 @@ export default function App() {
     );
     commitLaneLayout(updated, { status: `Đã đổi tên lane → "${trimmed}"` });
     setActiveLaneId(laneId);
-    markDiagramChanged();
+    commitDiagramMutation('semantic');
   };
 
   const handleDeleteLane = (laneId: string) => {
@@ -1204,7 +1472,7 @@ export default function App() {
     const updated = withPositions(toLaneDrafts(lanesRef.current.filter((lane) => lane.id !== laneId)));
     commitLaneLayout(updated, { status: `Đã xoá lane "${current.title}"` });
     setActiveLaneId(updated[0]?.id ?? null);
-    markDiagramChanged();
+    commitDiagramMutation('semantic');
   };
 
   const handleMoveLane = (laneId: string, direction: -1 | 1) => {
@@ -1218,7 +1486,7 @@ export default function App() {
     const updated = withPositions(drafts);
     commitLaneLayout(updated, { status: `Đã đổi vị trí lane "${lane.title}"` });
     setActiveLaneId(laneId);
-    markDiagramChanged();
+    commitDiagramMutation('layout');
   };
 
   const handleExportPNG = async () => {
@@ -1274,7 +1542,8 @@ export default function App() {
   }) => {
     const lf = lfRef.current;
     if (!lf) return;
-    lf.render(graph as Parameters<typeof lf.render>[0]);
+    const normalizedGraph = normalizeImportedGraphProvenance(graph);
+    lf.render(normalizedGraph as Parameters<typeof lf.render>[0]);
     if (importedLanes.length > 0) {
       updateLaneState(importedLanes);
       hydrateNodeLaneBindings(importedLanes, importedLanes);
@@ -1289,8 +1558,245 @@ export default function App() {
     }
     setActiveNodeId(null);
     lf.fitView(20, 20);
-    markDiagramChanged();
+    commitDiagramMutation('semantic');
     setStatus(formatContextSwitchStatus(statusMessage));
+  };
+
+  const handleOpenUseCasePanel = (section?: UseCaseWorkspaceSection) => {
+    setBrdPanelOpen(false);
+    setUseCasePanelOpen(true);
+    setUseCaseWorkspaceSection(section ?? (useCaseDrafts.length > 0 ? 'usecases' : 'input'));
+    setStatus('Đã mở không gian use case');
+  };
+
+  const handleProjectSpecChange = (next: ProjectSpec) => {
+    setProjectSpec(next);
+    if (useCaseError) {
+      setUseCaseError(null);
+    }
+  };
+
+  const handleFeatureIntentChange = (next: FeatureIntent) => {
+    setFeatureIntent(next);
+    if (useCaseError) {
+      setUseCaseError(null);
+    }
+  };
+
+  const handleGenerateUseCases = async () => {
+    setBrdPanelOpen(false);
+    setUseCasePanelOpen(true);
+    setUseCaseWorkspaceSection('input');
+
+    if (useCaseValidationErrors.length > 0) {
+      setUseCasePhase('failed');
+      setUseCaseError(useCaseValidationErrors.join(' '));
+      setStatus('Không thể sinh use case draft: thiếu thông tin bắt buộc');
+      return;
+    }
+
+    if (useCaseDrafts.length > 0 && (hasUseCaseDraftChanges || isUseCaseDraftOutdated)) {
+      const retainedDiagramCount = Object.keys(diagramWorkspaces).length;
+      const confirmed = window.confirm(
+        `Use case draft hiện tại đã được chỉnh sửa hoặc spec đã thay đổi.\n\nSinh lại sẽ thay thế danh sách draft đang có. ${retainedDiagramCount > 0 ? `${retainedDiagramCount} sơ đồ hiện tại sẽ được giữ lại; bản không còn use case nguồn sẽ chuyển sang mục lưu tạm.` : 'Hiện chưa có sơ đồ nào bị ảnh hưởng.'}\n\nBạn có muốn tiếp tục không?`,
+      );
+      if (!confirmed) {
+        setStatus('Đã giữ nguyên use case draft hiện tại');
+        return;
+      }
+    }
+
+    setUseCasePhase('generating');
+    setUseCaseError(null);
+    setStatus('Đang sinh use case draft từ project spec…');
+
+    try {
+      const request = buildUseCaseGenerationRequest(
+        projectSpec,
+        featureIntent,
+        useCaseGenerationPreference,
+      );
+      const envelope = await generateUseCases(request);
+      const result = envelope.result;
+      if (!result) {
+        throw new Error('Use case generation trả về kết quả rỗng.');
+      }
+      const canonicalInputs = canonicalizeUseCaseInputs(
+        result.project_spec,
+        result.feature_intent,
+      );
+      const canonicalUseCases = result.use_cases.map(canonicalizeUseCaseDraft);
+      setArtifactChain(result.artifact_chain);
+      setProjectSpec(canonicalInputs.projectSpec);
+      setFeatureIntent(canonicalInputs.featureIntent);
+      setUseCaseDrafts(canonicalUseCases);
+      setFocusedUseCaseId(null);
+      const nextUseCaseIds = new Set(canonicalUseCases.map((useCase) => useCase.use_case_id));
+      setOrphanedDiagramIds((current) => [
+        ...new Set([
+          ...current.filter((useCaseId) => !nextUseCaseIds.has(useCaseId)),
+          ...Object.keys(diagramWorkspaces).filter(
+            (useCaseId) => !nextUseCaseIds.has(useCaseId),
+          ),
+        ]),
+      ]);
+      setDiagramOperationStates({});
+      setUseCaseRequestId(envelope.request_id);
+      setUseCaseMetadata(envelope.metadata);
+      setUseCasePhase('ready');
+      setUseCaseWorkspaceSection('usecases');
+      setLastUseCaseGenerateFingerprint(
+        buildUseCaseRequestFingerprint(
+          canonicalInputs.projectSpec,
+          canonicalInputs.featureIntent,
+          useCaseGenerationPreference,
+        ),
+      );
+      setLastUseCaseDraftFingerprint(buildUseCaseDraftFingerprint(canonicalUseCases));
+      setStatus(`Đã sinh ${canonicalUseCases.length} use case draft để rà soát`);
+    } catch (error) {
+      setUseCasePhase('failed');
+      setUseCaseError(error instanceof Error ? error.message : 'Không thể sinh use case draft.');
+      setStatus('Sinh use case draft thất bại');
+    }
+  };
+
+  const handleUseCaseChange = (useCaseId: string, next: UseCaseDraft) => {
+    const previous = useCaseDrafts.find((useCase) => useCase.use_case_id === useCaseId);
+    const canonicalNext = canonicalizeUseCaseDraft(next);
+    const shouldInvalidateApproval =
+      previous?.review_status === 'approved' &&
+      didUseCaseContentChange(previous, canonicalNext);
+    const nextUseCase = previous
+      ? applyUseCaseEditLifecycle(previous, canonicalNext)
+      : canonicalNext;
+
+    setUseCaseDrafts((current) =>
+      current.map((useCase) => (useCase.use_case_id === useCaseId ? nextUseCase : useCase)),
+    );
+
+    if (shouldInvalidateApproval) {
+      setStatus(`Đã chuyển ${useCaseId} về trạng thái cần phê duyệt lại vì nội dung vừa được sửa.`);
+    }
+  };
+
+  const handleUseCaseReviewStatusChange = (
+    useCaseId: string,
+    nextStatus: UseCaseDraft['review_status'],
+  ) => {
+    const useCase = useCaseDrafts.find((item) => item.use_case_id === useCaseId);
+    if (
+      nextStatus === 'approved' &&
+      (!useCase || validateUseCaseContract(useCase).length > 0)
+    ) {
+      setStatus(`Không thể phê duyệt ${useCaseId}: detailed contract còn lỗi.`);
+      return;
+    }
+    setUseCaseDrafts((current) =>
+      current.map((useCase) =>
+        useCase.use_case_id === useCaseId
+          ? {
+              ...useCase,
+              review_status: nextStatus,
+            }
+          : useCase,
+      ),
+    );
+  };
+
+  const handleUseCaseApproveAll = () => {
+    const invalidUseCases = useCaseDrafts.filter(
+      (useCase) => validateUseCaseContract(useCase).length > 0,
+    );
+    if (invalidUseCases.length > 0) {
+      setStatus(
+        `Không thể phê duyệt tất cả: ${invalidUseCases.length} use case còn lỗi contract.`,
+      );
+      return;
+    }
+    setUseCaseDrafts((current) =>
+      current.map((useCase) => ({ ...useCase, review_status: 'approved' })),
+    );
+    setStatus('Đã phê duyệt toàn bộ use case draft hiện tại');
+  };
+
+  const handleOpenUseCaseDiagramWorkspace = (useCaseId: string) => {
+    setFocusedUseCaseId(useCaseId);
+    setUseCaseWorkspaceSection('diagrams');
+    setStatus(`Đang xem mục sơ đồ của ${useCaseId}; binding canvas hiện tại chưa thay đổi.`);
+  };
+
+  const handleGenerateUseCaseDiagram = async (useCaseId: string) => {
+    const useCase = useCaseDrafts.find((item) => item.use_case_id === useCaseId);
+    if (!useCase || useCase.review_status !== 'approved') {
+      setStatus('Cần phê duyệt use case trước khi tạo sơ đồ.');
+      return;
+    }
+    const contractIssues = validateUseCaseContract(useCase);
+    if (contractIssues.length > 0) {
+      setStatus(`Không thể tạo sơ đồ: ${contractIssues[0].message}`);
+      return;
+    }
+    const existing = diagramWorkspaces[useCaseId];
+    if (existing?.semanticEdited) {
+      const confirmed = window.confirm(
+        'Sơ đồ hiện tại đã được chỉnh sửa về nội dung.\n\nTạo lại sẽ thay thế graph đang có. Bạn có muốn tiếp tục không?',
+      );
+      if (!confirmed) {
+        setStatus('Đã giữ nguyên sơ đồ đang chỉnh sửa.');
+        return;
+      }
+    }
+
+    persistActiveUseCaseDiagram();
+    setDiagramOperationStates((current) => ({ ...current, [useCaseId]: 'generating' }));
+    setStatus(`Đang tạo sơ đồ cho ${useCaseId}…`);
+
+    try {
+      const envelope = await generateUseCaseDiagram(useCase);
+      const draft = envelope.result?.diagram;
+      if (!draft) {
+        throw new Error('Diagram generation trả về kết quả rỗng.');
+      }
+      const workspace = diagramDraftToWorkspace(draft, useCase);
+      setDiagramWorkspaces((current) => ({ ...current, [useCaseId]: workspace }));
+      setOrphanedDiagramIds((current) => current.filter((id) => id !== useCaseId));
+      setDiagramOperationStates((current) => ({ ...current, [useCaseId]: undefined }));
+      renderUseCaseDiagram(useCaseId, workspace);
+      setStatus(`Đã tạo và mở sơ đồ cho ${useCaseId}.`);
+    } catch (error) {
+      setDiagramOperationStates((current) => ({ ...current, [useCaseId]: 'failed' }));
+      setStatus(error instanceof Error ? error.message : 'Không thể tạo sơ đồ.');
+    }
+  };
+
+  const handleOpenUseCaseDiagramCanvas = (useCaseId: string) => {
+    const workspace = diagramWorkspaces[useCaseId];
+    if (!workspace) {
+      setStatus(`Chưa có sơ đồ cho ${useCaseId}. Hãy tạo sơ đồ trước.`);
+      return;
+    }
+    persistActiveUseCaseDiagram();
+    renderUseCaseDiagram(useCaseId, workspace);
+    setStatus(`Đã mở sơ đồ của ${useCaseId} trên canvas.`);
+  };
+
+  const handleDiscardOrphanedDiagram = (useCaseId: string) => {
+    const workspace = diagramWorkspaces[useCaseId];
+    if (!workspace || !orphanedDiagramIds.includes(useCaseId)) return;
+    const confirmed = window.confirm(`Xóa bản sơ đồ lưu tạm ${useCaseId}?`);
+    if (!confirmed) return;
+    setDiagramWorkspaces((current) => {
+      const next = { ...current };
+      delete next[useCaseId];
+      return next;
+    });
+    setOrphanedDiagramIds((current) => current.filter((id) => id !== useCaseId));
+    if (activeCanvasUseCaseIdRef.current === useCaseId) {
+      activeCanvasUseCaseIdRef.current = null;
+      setActiveCanvasUseCaseId(null);
+    }
+    setStatus(`Đã xóa bản sơ đồ lưu tạm ${useCaseId}.`);
   };
 
   const handleCopyBrdDraft = async () => {
@@ -1312,6 +1818,7 @@ export default function App() {
 
   const handleOpenCachedBrd = () => {
     if (!hasCachedBrdSnapshot) return;
+    setUseCasePanelOpen(false);
     setBrdPanelOpen(true);
     setStatus(
       isBrdOutdated ? 'Đã mở lại BRD draft đã cache (outdated).' : 'Đã mở lại BRD draft đã cache.',
@@ -1341,6 +1848,7 @@ export default function App() {
     const idempotencyKey = shouldReuseIdempotencyKey ? lastIdempotencyKey! : makeIdempotencyKey();
 
     setBrdPanelOpen(true);
+    setUseCasePanelOpen(false);
     setBrdPhase('validating');
     setBrdTab('warnings');
     setBrdError(null);
@@ -1527,7 +2035,7 @@ export default function App() {
     setActiveLaneId(seeded[0]?.id ?? null);
     setActiveNodeId(null);
     lfRef.current?.fitView(20, 20);
-    markDiagramChanged();
+    commitDiagramMutation('semantic');
     setStatus(formatContextSwitchStatus('Đã reset về diagram mẫu'));
   };
 
@@ -1543,12 +2051,18 @@ export default function App() {
     applyLaneModels(lanesRef.current, laneHeightRef.current);
     setActiveLaneId(lanesRef.current[0]?.id ?? null);
     setActiveNodeId(null);
-    markDiagramChanged();
+    commitDiagramMutation('semantic');
     setStatus(formatContextSwitchStatus('Đã xoá nội dung (giữ lại lane)'));
   };
 
-  const handleUndo = () => lfRef.current?.undo();
-  const handleRedo = () => lfRef.current?.redo();
+  const handleUndo = () => {
+    lfRef.current?.undo();
+    commitDiagramMutation('semantic', { defer: true });
+  };
+  const handleRedo = () => {
+    lfRef.current?.redo();
+    commitDiagramMutation('semantic', { defer: true });
+  };
   const handleZoomIn = () => lfRef.current?.zoom(true);
   const handleZoomOut = () => lfRef.current?.zoom(false);
   const handleFit = () => lfRef.current?.fitView(20, 20);
@@ -1696,7 +2210,7 @@ export default function App() {
         }
       }
       setStatus('Đã cập nhật kích thước lane');
-      markDiagramChanged();
+      commitDiagramMutation('layout');
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
@@ -1806,7 +2320,7 @@ export default function App() {
     const handleMouseUp = () => {
       shapeResizeSessionRef.current = null;
       setStatus('Đã cập nhật kích thước shape');
-      markDiagramChanged();
+      commitDiagramMutation('layout');
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
@@ -1860,6 +2374,9 @@ export default function App() {
         <button className="toolbar-btn" onClick={handleExportXML}>
           Export XML
         </button>
+        <button className="toolbar-btn primary" onClick={() => handleOpenUseCasePanel()}>
+          Không gian use case
+        </button>
         <button className="toolbar-btn primary" onClick={() => void executeGenerateBrd()}>
           Generate BRD
         </button>
@@ -1884,6 +2401,43 @@ export default function App() {
           {lanes.length} lane · {status}
         </span>
       </header>
+
+      {activeCanvasUseCase || activeCanvasWorkspace ? (
+        <section className="active-usecase-context" aria-label="Use case đang gắn với canvas">
+          <div className="active-usecase-context__copy">
+            <span>{activeCanvasUseCase?.use_case_id ?? activeCanvasWorkspace?.draft.use_case_id}</span>
+            <strong>
+              {activeCanvasUseCase?.title ??
+                activeCanvasWorkspace?.draft.title ??
+                'Use case chưa đặt tên'}
+            </strong>
+            <p>
+              {activeCanvasUseCase
+                ? `Canvas hiện tại đang gắn với use case này · ${reviewStatusShellLabel(activeCanvasUseCase.review_status)} · ${
+                    activeCanvasDiagramItem
+                      ? diagramStatusLabel(activeCanvasDiagramItem.diagram_status)
+                      : 'Chưa xác định trạng thái sơ đồ'
+                  }`
+                : 'Canvas đang mở một bản sơ đồ lưu tạm; use case nguồn đã được thay thế.'}
+            </p>
+            {activeCanvasWorkspace ? (
+              <p>
+                Trace {activeCanvasWorkspace.traceCoverage.traced}/
+                {activeCanvasWorkspace.traceCoverage.total} · Thủ công{' '}
+                {activeCanvasWorkspace.traceCoverage.manual} · Không tin cậy{' '}
+                {activeCanvasWorkspace.traceCoverage.untrusted}
+              </p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className="toolbar-btn"
+            onClick={() => handleOpenUseCasePanel('diagrams')}
+          >
+            Mở vùng sơ đồ
+          </button>
+        </section>
+      ) : null}
 
       <DndPanel items={PALETTE} onStartDrag={handleStartDrag} />
 
@@ -1964,6 +2518,37 @@ export default function App() {
             }
           />
         ) : null}
+        <UseCasePanel
+          open={useCasePanelOpen}
+          phase={useCasePhase}
+          activeSection={useCaseWorkspaceSection}
+          projectSpec={projectSpec}
+          featureIntent={featureIntent}
+          useCases={useCaseDrafts}
+          diagramInventory={diagramInventory}
+          orphanedDiagrams={orphanedDiagramInventory}
+          artifactChain={artifactChain}
+          requestId={useCaseRequestId}
+          metadata={useCaseMetadata}
+          generationPreference={useCaseGenerationPreference}
+          errorMessage={useCaseError}
+          validationErrors={useCaseValidationErrors}
+          isOutdated={isUseCaseDraftOutdated}
+          hasDraftChanges={hasUseCaseDraftChanges}
+          onClose={() => setUseCasePanelOpen(false)}
+          onGenerate={() => void handleGenerateUseCases()}
+          onGenerationPreferenceChange={setUseCaseGenerationPreference}
+          onSectionChange={setUseCaseWorkspaceSection}
+          onProjectSpecChange={handleProjectSpecChange}
+          onFeatureIntentChange={handleFeatureIntentChange}
+          onUseCaseChange={handleUseCaseChange}
+          onReviewStatusChange={handleUseCaseReviewStatusChange}
+          onApproveAll={handleUseCaseApproveAll}
+          onOpenDiagramWorkspace={handleOpenUseCaseDiagramWorkspace}
+          onGenerateDiagram={(useCaseId) => void handleGenerateUseCaseDiagram(useCaseId)}
+          onOpenDiagramCanvas={handleOpenUseCaseDiagramCanvas}
+          onDiscardOrphanedDiagram={handleDiscardOrphanedDiagram}
+        />
         <BrdPanel
           open={brdPanelOpen}
           phase={brdPhase}

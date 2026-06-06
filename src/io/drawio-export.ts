@@ -1,6 +1,7 @@
 import { LANE_TOP, type LaneConfig } from '../lane-config';
 import type { EditorGraphData } from './drawio-types';
 import { encodeTextForDrawio, escapeXml } from './drawio-shared';
+import { serializeProvenance } from './provenance';
 
 const OUTER_CONTAINER_ID = 'lf-root-swimlane';
 const OUTER_CONTAINER_TOP_OFFSET = 20;
@@ -35,7 +36,7 @@ export function exportDrawioXml(
       const y = round(node.y - LANE_TOP - height / 2);
       const text = readNodeText(node);
       return `
-        <mxCell id="${escapeXml(node.id)}" parent="${escapeXml(parentLane.id)}" style="${nodeStyle(node.type)}" value="${encodeTextForDrawio(text)}" vertex="1">
+        <mxCell id="${escapeXml(node.id)}" parent="${escapeXml(parentLane.id)}" style="${nodeStyle(node.type)}" value="${encodeTextForDrawio(text)}" vertex="1"${provenanceAttribute(node.properties)}>
           <mxGeometry height="${height}" width="${width}" x="${x}" y="${y}" as="geometry" />
         </mxCell>`;
     })
@@ -53,7 +54,7 @@ export function exportDrawioXml(
         </mxCell>`
         : '';
       return `
-        <mxCell id="${escapeXml(edge.id)}" edge="1" parent="${OUTER_CONTAINER_ID}" source="${escapeXml(edge.sourceNodeId)}" target="${escapeXml(edge.targetNodeId)}" style="${edgeStyle()}" value="">
+        <mxCell id="${escapeXml(edge.id)}" edge="1" parent="${OUTER_CONTAINER_ID}" source="${escapeXml(edge.sourceNodeId)}" target="${escapeXml(edge.targetNodeId)}" style="${edgeStyle()}" value=""${provenanceAttribute(edge.properties)}>
           <mxGeometry relative="1" as="geometry" />
         </mxCell>${labelCell}`;
     })
@@ -150,4 +151,9 @@ function getNodeDimensions(node: NonNullable<EditorGraphData['nodes']>[number]) 
 
 function round(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function provenanceAttribute(properties?: Record<string, unknown>) {
+  const serialized = serializeProvenance(properties);
+  return serialized ? ` data-lf-provenance="${escapeXml(serialized)}"` : '';
 }

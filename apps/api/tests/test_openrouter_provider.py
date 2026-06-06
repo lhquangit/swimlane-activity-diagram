@@ -6,8 +6,8 @@ import pytest
 from pydantic import BaseModel
 
 from app.config import Settings
-from app.providers.openrouter_provider import OpenRouterProvider
-from app.providers.openrouter_provider import OpenRouterProviderError
+from app.ai.providers.openrouter import OpenRouterProvider
+from app.ai.providers.openrouter import OpenRouterProviderError
 
 
 class TinyResponseSchema(BaseModel):
@@ -34,7 +34,7 @@ def test_openrouter_provider_maps_incomplete_read_to_retryable_error(monkeypatch
             raise IncompleteRead(b'{"id":"partial","choices":[{"message":{"content":"')
 
     monkeypatch.setattr(
-        "app.providers.openrouter_provider.urlopen",
+        "app.ai.providers.openrouter.urlopen",
         lambda req, timeout=45: BrokenChunkedResponse(),
     )
 

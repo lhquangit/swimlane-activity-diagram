@@ -225,7 +225,9 @@ export function getLogicFlowOptions(container: HTMLElement) {
     background: { color: 'transparent' },
     keyboard: { enabled: true },
     edgeTextDraggable: true,
-    nodeTextDraggable: true,
+    // A node label is part of the shape's drag surface. Keeping label dragging
+    // enabled makes pointer gestures move only the text instead of the node.
+    nodeTextDraggable: false,
     adjustEdge: true,
     adjustEdgeStartAndEnd: true,
     snapline: true,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -8,7 +9,8 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import app
 from app.rate_limit import InMemoryRateLimiter, parse_rate_limit
-from app.routes import brd_generate, brd_validate
+from app.routes import brd_generate, brd_validate, usecase_generate
+from app.usecases.generation_service import UseCaseGenerationService
 
 SCHEMA_HEADERS = {"X-Schema-Version": "2026-05-31"}
 MAX_LIVE_COST_USD = 0.25
@@ -136,3 +138,48 @@ def test_generate_live_replays_same_idempotency_key(
     assert second.status_code == 200
     assert second.json()["status"] == "replayed"
     assert second.json()["metadata"]["cached"] is True
+
+
+def test_generate_usecase_live_has_bounded_cost(
+    live_client: TestClient, monkeypatch
+) -> None:
+    live_settings = replace(
+        Settings(),
+        usecase_provider="openrouter",
+        usecase_generation_mode="ai_default",
+    )
+    monkeypatch.setattr(
+        usecase_generate,
+        "generation_service",
+        UseCaseGenerationService(live_settings),
+    )
+    response = live_client.post(
+        "/api/usecases/generate",
+        headers=SCHEMA_HEADERS,
+        json={
+            "project_spec": {
+                "project_name": "V-PetSafe",
+                "project_summary": "Quản lý yêu cầu GPS cho cư dân.",
+                "target_users": ["Ban quản lý", "Cư dân"],
+            },
+            "feature_intent": {
+                "feature_name": "Cấp phát GPS",
+                "feature_summary": "Cấp thiết bị GPS còn trong kho cho yêu cầu hợp lệ.",
+                "primary_actor": "Ban quản lý",
+                "trigger": "Cư dân gửi yêu cầu GPS.",
+                "inputs": ["Yêu cầu GPS", "Thiết bị trong kho"],
+                "outputs": ["Trạng thái yêu cầu"],
+                "constraints": ["Chỉ cấp thiết bị còn trong kho."],
+                "success_outcome": "Thiết bị được gán cho yêu cầu.",
+            },
+            "generation_preference": "ai",
+            "language": "vi",
+        },
+    )
+
+    assert response.status_code == 200
+    metadata = response.json()["metadata"]
+    assert metadata["generation_source"] in {"ai", "deterministic_fallback"}
+    estimated_cost = metadata.get("estimated_cost_usd")
+    if estimated_cost is not None:
+        assert estimated_cost <= MAX_LIVE_COST_USD

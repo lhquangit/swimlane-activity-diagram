@@ -36,11 +36,24 @@ class GenerateResult(StrictBaseModel):
 
 
 class ResponseMetadata(StrictBaseModel):
+    capability: str | None = None
     provider: str | None = None
     model: str | None = None
+    generation_source: Literal["ai", "deterministic_fallback"] | None = None
+    generation_mode: str | None = None
+    fallback_reason: str | None = None
+    prompt_id: str | None = None
+    prompt_version: str | None = None
+    prompt_fingerprint: str | None = None
+    quality_status: str | None = None
+    quality_score: float | None = None
+    shadow_status: str | None = None
     attempt_count: int | None = None
     latency_ms: int | None = None
     estimated_cost_usd: float | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
     cached: bool | None = None
     first_request_at: datetime | None = None
 

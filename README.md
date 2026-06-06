@@ -3,6 +3,7 @@
 Trình editor Swimlane Activity Diagram tự dựng, không phụ thuộc drawio. Stack: **React + Vite + TypeScript + [LogicFlow](https://github.com/didi/LogicFlow)**.
 
 Repo hiện có thêm backend FastAPI để:
+- ingest `ProjectSpec + FeatureIntent` và sinh `UseCaseDraft[]`
 - validate semantic của diagram
 - generate mô tả BRD từ diagram
 - chạy theo `mock` mode hoặc `openrouter` live mode qua `apps/api/.env`
@@ -16,6 +17,7 @@ Repo hiện có thêm backend FastAPI để:
 - Undo / Redo (Ctrl+Z, Ctrl+Y), Zoom +/−, Fit view.
 - **Reset mẫu** (load lại diagram demo), **Xoá nội dung** (giữ lại lane).
 - **Import XML…**, **Export XML**, **Export PNG**.
+- **Use case drafts**: nhập `ProjectSpec + FeatureIntent`, generate danh sách use case draft, chỉnh tay, và approve trước khi đi tiếp.
 - **Generate BRD**: gọi backend để validate diagram, sinh structured spec, và render BRD draft.
 - BRD panel có 3 tab: **Warnings / Structured Spec / BRD Draft**.
 - User có thể **chỉnh sửa trực tiếp BRD draft**, export markdown, và thấy badge `Outdated` khi diagram đổi sau lần generate gần nhất.
@@ -49,7 +51,10 @@ Chọn một trong hai mode:
 Không cần API key. Giữ:
 
 ```bash
+AI_PROVIDER=mock
 BRD_PROVIDER=mock
+USECASE_PROVIDER=mock
+USECASE_GENERATION_MODE=deterministic
 ```
 
 #### Live mode qua OpenRouter
@@ -57,12 +62,17 @@ BRD_PROVIDER=mock
 Điền các biến tối thiểu trong `apps/api/.env`:
 
 ```bash
+AI_PROVIDER=openrouter
+AI_OPENROUTER_API_KEY=...
 BRD_PROVIDER=openrouter
-BRD_OPENROUTER_API_KEY=...
 BRD_MODEL_PRIMARY=openai/gpt-4o-mini
+USECASE_PROVIDER=openrouter
+USECASE_MODEL_PRIMARY=openai/gpt-4o-mini
+USECASE_GENERATION_MODE=ai_opt_in
 ```
 
-`BRD_MODEL_PRIMARY` có thể đổi sang model production sau khi test luồng xong.
+`USECASE_GENERATION_MODE` hỗ trợ `deterministic`, `ai_shadow`, `ai_opt_in`, và
+`ai_default`. Giữ `deterministic` làm kill switch cho tới khi quality/cost baseline đạt ngưỡng.
 
 ### 4. Chạy backend
 
@@ -98,14 +108,20 @@ http://localhost:5173
 1. Mở `http://localhost:5173`
 2. Giữ sample diagram mặc định hoặc chỉnh sửa thêm node/lane
 3. Thử `Export XML`, rồi `Import XML…` lại bằng file draw.io tương thích như `examples/bomb.drawio.xml`
-4. Bấm `Generate BRD`
-5. Kiểm tra:
+4. Bấm `Use case drafts`
+5. Điền/chỉnh `Project spec` + `Feature intent`, rồi bấm `Generate use cases`
+6. Kiểm tra:
+   - `Artifact chain`
+   - danh sách `Use case drafts`
+   - thao tác `Approve` / `Approve all`
+7. Bấm `Generate BRD`
+8. Kiểm tra:
    - tab `Warnings`
    - tab `Structured Spec`
    - tab `BRD Draft`
-6. Sửa thử nội dung trong `BRD Draft`
-7. Bấm `Export markdown`
-8. Chỉnh diagram thêm một thay đổi bất kỳ rồi kiểm tra badge `Outdated`
+9. Sửa thử nội dung trong `BRD Draft`
+10. Bấm `Export markdown`
+11. Chỉnh diagram thêm một thay đổi bất kỳ rồi kiểm tra badge `Outdated`
 
 ## Chạy test
 
@@ -123,8 +139,8 @@ Gồm:
 ### Live API smoke
 
 Chỉ dùng khi `apps/api/.env` đã có:
-- `BRD_PROVIDER=openrouter`
-- `BRD_OPENROUTER_API_KEY`
+- `AI_PROVIDER=openrouter`
+- `AI_OPENROUTER_API_KEY`
 
 ```bash
 npm run test:api-live
@@ -165,6 +181,7 @@ swimlane-logicflow/
     ├── nodes.ts            # Custom node types: lane/start/end/activity/decision/sync-bar/note
     ├── lf-config.ts        # Initial diagram data + LogicFlow options + snap logic
     ├── brd/                # Client, normalize, prevalidate, BRD panel
+    ├── usecases/           # Spec ingestion, use case client, review panel
     └── styles.css
 ```
 
@@ -177,8 +194,10 @@ swimlane-logicflow/
 | Đổi diagram khởi tạo | `src/lf-config.ts` → `buildInitialData()` |
 | Đổi contract draw.io XML | `src/io/drawio-import.ts`, `src/io/drawio-export.ts`, `src/io/drawio-shared.ts` |
 | Đổi style node (màu, font, border) | `src/nodes.ts` → từng `getNodeStyle()` / `getTextStyle()` |
-| Đổi provider/model AI BRD | `apps/api/.env` → `BRD_PROVIDER`, `BRD_MODEL_PRIMARY` |
-| Đổi structured output / provider behavior | `apps/api/app/providers/openrouter_provider.py` |
+| Đổi provider/model AI | `apps/api/.env` → `AI_PROVIDER`, `BRD_MODEL_PRIMARY`, `USECASE_MODEL_PRIMARY` |
+| Đổi rollout AI use case | `apps/api/.env` → `USECASE_GENERATION_MODE` |
+| Đổi structured output / provider behavior | `apps/api/app/ai/providers/openrouter.py` |
+| Đổi prompt/version | `apps/api/app/ai/prompts/registry.py` |
 | Đổi rule local pre-validation | `src/brd/prevalidate.ts` |
 | Đổi deterministic markdown render | `apps/api/app/services/render.py` |
 
