@@ -11,7 +11,7 @@ export default defineConfig({
   webServer: [
     {
       command:
-        'BRD_PROVIDER=mock BRD_CORS_ORIGINS=http://127.0.0.1:4173,http://localhost:4173,http://127.0.0.1:5173,http://localhost:5173 python3 -m uvicorn app.main:app --app-dir apps/api --host 127.0.0.1 --port 18000',
+        'AUTH_DISABLED=true BRD_PROVIDER=mock BRD_CORS_ORIGINS=http://127.0.0.1:4173,http://localhost:4173,http://127.0.0.1:5173,http://localhost:5173 apps/api/.venv/bin/python -m uvicorn app.main:app --app-dir apps/api --host 127.0.0.1 --port 18000',
       url: 'http://127.0.0.1:18000/healthz',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,

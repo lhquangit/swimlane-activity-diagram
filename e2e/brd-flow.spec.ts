@@ -35,7 +35,7 @@ async function getActivityBoxes(page: Page) {
 }
 
 test('Dragging from node text moves the whole shape', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/demo');
 
   const label = page.locator('foreignObject', { hasText: 'Mở nhật ký sự cố' }).first();
   await expect(label).toBeVisible();
@@ -58,7 +58,7 @@ test('Dragging from node text moves the whole shape', async ({ page }) => {
 });
 
 test('Generate BRD -> close -> reopen -> reload -> outdated -> discard -> export', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/demo');
   await page.evaluate(() => window.localStorage.clear());
   await page.reload();
   await expect(page.getByText('Tiếp nhận tín hiệu ban đầu')).toBeVisible();
@@ -98,7 +98,7 @@ test('Generate BRD -> close -> reopen -> reload -> outdated -> discard -> export
 });
 
 test('Local pre-validation blocks invalid diagram before backend validation', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/demo');
   await page.evaluate(() => window.localStorage.clear());
   await page.reload();
 
@@ -118,7 +118,7 @@ test('Local pre-validation blocks invalid diagram before backend validation', as
 });
 
 test('Dragged shapes keep horizontal placement inside lane instead of recentering', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/demo');
   await page.getByRole('button', { name: 'Xoá nội dung' }).click();
 
   const canvas = await page.locator('.lf-graph').boundingBox();
@@ -149,7 +149,7 @@ test('Dragged shapes keep horizontal placement inside lane instead of recenterin
 });
 
 test('Import XML fixture and export XML from toolbar', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/demo');
   await page
     .locator('input[accept=".xml,text/xml,application/xml"]')
     .setInputFiles('examples/bomb.drawio.xml');
@@ -164,7 +164,7 @@ test('Import XML fixture and export XML from toolbar', async ({ page }) => {
 });
 
 test('Generate use case drafts -> approve -> close -> reopen', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/demo');
 
   await page.getByRole('button', { name: 'Không gian use case' }).click();
   await expect(page.getByRole('heading', { name: 'Không gian use case', exact: true })).toBeVisible();
@@ -201,7 +201,7 @@ test('Generate use case drafts -> approve -> close -> reopen', async ({ page }) 
 
 test('Use-case generation controls and source label fit a mobile viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/');
+  await page.goto('/demo');
   await page.getByRole('button', { name: 'Không gian use case' }).click();
 
   await expect(page.getByRole('button', { name: 'Theo hệ thống' })).toBeVisible();
@@ -219,7 +219,7 @@ test('Use-case generation controls and source label fit a mobile viewport', asyn
 test('Use case intake keeps advanced and deprecated fields out of the primary flow', async ({
   page,
 }) => {
-  await page.goto('/');
+  await page.goto('/demo');
   await page.getByRole('button', { name: 'Không gian use case' }).click();
 
   await expect(page.getByLabel('Tên chức năng')).toBeVisible();
@@ -235,7 +235,7 @@ test('Use case intake keeps advanced and deprecated fields out of the primary fl
 });
 
 test('Structured step edits become the generated diagram source', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/demo');
   await page.getByRole('button', { name: 'Không gian use case' }).click();
   await page.getByRole('button', { name: 'Sinh use case' }).click();
 
@@ -261,7 +261,7 @@ test('Structured step edits become the generated diagram source', async ({ page 
 test('Diagram inventory keeps focused use case separate from active canvas binding', async ({
   page,
 }) => {
-  await page.goto('/');
+  await page.goto('/demo');
 
   await page.getByRole('button', { name: 'Không gian use case' }).click();
   await addSupportingParticipant(page);
@@ -300,7 +300,7 @@ test('Diagram inventory keeps focused use case separate from active canvas bindi
 test('Semantic diagram edits are preserved as diverged when switching use cases', async ({
   page,
 }) => {
-  await page.goto('/');
+  await page.goto('/demo');
 
   await page.getByRole('button', { name: 'Không gian use case' }).click();
   await addSupportingParticipant(page);
@@ -345,7 +345,7 @@ test('Semantic diagram edits are preserved as diverged when switching use cases'
 });
 
 test('Use case regenerate warns before replacing reviewed drafts', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/demo');
 
   await page.getByRole('button', { name: 'Không gian use case' }).click();
   await page.getByRole('button', { name: 'Sinh use case' }).click();
@@ -353,8 +353,7 @@ test('Use case regenerate warns before replacing reviewed drafts', async ({ page
   await expect(page.getByRole('button', { name: 'Mở ở vùng sơ đồ' }).first()).toBeVisible();
 
   await page.getByRole('button', { name: /Đầu vào/ }).click();
-  await page.getByText(/Bối cảnh dự án:/).click();
-  await page.getByLabel('Mô tả dự án').fill(
+  await page.getByLabel('Mô tả bối cảnh').fill(
     'Nen tang quan ly cu dan va dich vu noi khu, bo sung xu ly tai san.',
   );
 
@@ -372,15 +371,14 @@ test('Use case regenerate warns before replacing reviewed drafts', async ({ page
 test('Use case regenerate does not warn after spec is reverted to the generated snapshot', async ({
   page,
 }) => {
-  await page.goto('/');
+  await page.goto('/demo');
 
   await page.getByRole('button', { name: 'Không gian use case' }).click();
   await page.getByRole('button', { name: 'Sinh use case' }).click();
   await expect(page.getByRole('button', { name: 'Đánh dấu đã rà soát' }).first()).toBeVisible();
 
   await page.getByRole('button', { name: /Đầu vào/ }).click();
-  await page.getByText(/Bối cảnh dự án:/).click();
-  const projectSummary = page.getByLabel('Mô tả dự án');
+  const projectSummary = page.getByLabel('Mô tả bối cảnh');
   const originalSummary = await projectSummary.inputValue();
   await projectSummary.fill(`${originalSummary} Bo sung tam thoi.`);
   await projectSummary.fill(originalSummary);
@@ -399,7 +397,7 @@ test('Use case regenerate does not warn after spec is reverted to the generated 
 test('Editing an approved use case requires approval again before diagram handoff', async ({
   page,
 }) => {
-  await page.goto('/');
+  await page.goto('/demo');
 
   await page.getByRole('button', { name: 'Không gian use case' }).click();
   await page.getByRole('button', { name: 'Sinh use case' }).click();
@@ -418,7 +416,7 @@ test('Editing an approved use case requires approval again before diagram handof
 });
 
 test('Regenerating use cases keeps unmatched diagrams as saved drafts', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/demo');
   await page.getByRole('button', { name: 'Không gian use case' }).click();
   await page.getByRole('button', { name: 'Sinh use case' }).click();
   await page.getByRole('button', { name: 'Phê duyệt tất cả' }).click();
@@ -434,7 +432,6 @@ test('Regenerating use cases keeps unmatched diagrams as saved drafts', async ({
 
   await page.getByRole('button', { name: 'Mở vùng sơ đồ' }).click();
   await page.getByRole('button', { name: /Đầu vào/ }).click();
-  await page.getByText(/Bối cảnh dự án:/).click();
   await page.getByLabel('Tên dự án').fill('Dự án thay thế hoàn toàn');
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Sinh use case' }).click();
@@ -471,7 +468,7 @@ test('Failed diagram regeneration keeps the current diverged workspace openable'
     await route.continue();
   });
 
-  await page.goto('/');
+  await page.goto('/demo');
   await page.getByRole('button', { name: 'Không gian use case' }).click();
   await page.getByRole('button', { name: 'Sinh use case' }).click();
   await page.getByRole('button', { name: 'Phê duyệt tất cả' }).click();
@@ -497,7 +494,7 @@ test('Failed diagram regeneration keeps the current diverged workspace openable'
 });
 
 test('Lane resize layout survives switching between use-case workspaces', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/demo');
   await page.getByRole('button', { name: 'Không gian use case' }).click();
   await addSupportingParticipant(page);
   await page.getByRole('button', { name: 'Sinh use case' }).click();

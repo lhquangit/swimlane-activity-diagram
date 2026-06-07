@@ -184,6 +184,7 @@ export type BrdPanelPhase =
 
 export type BrdWorkspaceCacheEntry = {
   version: 'v1';
+  dirty?: boolean;
   draft: string;
   spec: BrdSpec | null;
   warnings: WarningItem[];

@@ -116,6 +116,10 @@ const baseDiagramInventory: UseCaseDiagramInventoryItem[] = [
 
 function UseCasePanelHarness({
   metadata = null,
+  sourceMode = 'standalone',
+  onEditProjectSpec,
+  onEditFeatureIntent,
+  onDeleteUseCase,
 }: {
   metadata?: {
     generation_source?: 'ai' | 'deterministic_fallback';
@@ -123,6 +127,10 @@ function UseCasePanelHarness({
     prompt_id?: string;
     prompt_version?: string;
   } | null;
+  sourceMode?: 'standalone' | 'persisted';
+  onEditProjectSpec?: () => void;
+  onEditFeatureIntent?: () => void;
+  onDeleteUseCase?: (useCaseId: string) => void;
 }) {
   const [projectSpec, setProjectSpec] = useState(baseProjectSpec);
   const [featureIntent, setFeatureIntent] = useState(baseFeatureIntent);
@@ -151,6 +159,10 @@ function UseCasePanelHarness({
       validationErrors={[]}
       isOutdated={false}
       hasDraftChanges={false}
+      sourceMode={sourceMode}
+      onEditProjectSpec={onEditProjectSpec}
+      onEditFeatureIntent={onEditFeatureIntent}
+      onDeleteUseCase={onDeleteUseCase}
       onClose={vi.fn()}
       onGenerate={vi.fn()}
       onSectionChange={setActiveSection}
@@ -266,6 +278,37 @@ describe('UseCasePanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Mở ở vùng sơ đồ' }));
     expect(screen.getByText('Sơ đồ theo từng use case')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tạo sơ đồ' })).toBeInTheDocument();
+  });
+
+  it('renders persisted input as read-only summaries with edit CTAs', () => {
+    const editSpec = vi.fn();
+    const editFeature = vi.fn();
+    render(
+      <UseCasePanelHarness
+        sourceMode="persisted"
+        onEditProjectSpec={editSpec}
+        onEditFeatureIntent={editFeature}
+      />,
+    );
+
+    expect(screen.getByText('Feature Intent đã lưu')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Tên chức năng')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Tên dự án')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sửa Feature Intent' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sửa Project Spec' }));
+    expect(editFeature).toHaveBeenCalledTimes(1);
+    expect(editSpec).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes persisted use-case delete action when supplied', () => {
+    const onDeleteUseCase = vi.fn();
+    render(<UseCasePanelHarness onDeleteUseCase={onDeleteUseCase} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Use case/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xóa use case' }));
+
+    expect(onDeleteUseCase).toHaveBeenCalledWith('UC-VPET-GPS-01');
   });
 
   it('keeps the actor newline while users enter the next actor', () => {

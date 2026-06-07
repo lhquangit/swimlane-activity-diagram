@@ -1,4 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  Show,
+  SignInButton,
+  SignUpButton,
+  UserButton,
+} from '@clerk/react';
 import LogicFlow from '@logicflow/core';
 import '@logicflow/core/dist/style/index.css';
 import { Snapshot, SelectionSelect, NodeResize } from '@logicflow/extension';
@@ -23,6 +29,7 @@ import BrdPanel from './brd/BrdPanel';
 import {
   BRD_WORKSPACE_CACHE_VERSION,
   clearBrdWorkspaceCache,
+  hasDirtyBrdRecovery,
   loadBrdWorkspaceCache,
   saveBrdWorkspaceCache,
 } from './brd/cache';
@@ -80,6 +87,8 @@ import type {
   UseCasePanelPhase,
   UseCaseWorkspaceSection,
 } from './usecases/types';
+import { useWorkspacePersistence } from './persistence/WorkspaceContext';
+import type { BrdResource, DiagramResource } from './persistence/types';
 
 LogicFlow.use(Snapshot);
 LogicFlow.use(SelectionSelect);
@@ -193,6 +202,7 @@ function buildDefaultFeatureIntent(): FeatureIntent {
     feature_name: 'Sinh use case từ mô tả chức năng',
     function_name: null,
     feature_summary: 'Tạo use case có cấu trúc để rà soát trước khi sinh sơ đồ.',
+    actors: ['BA / Solution Engineer'],
     primary_actor: 'BA / Solution Engineer',
     trigger: null,
     inputs: [],
@@ -201,6 +211,47 @@ function buildDefaultFeatureIntent(): FeatureIntent {
     assumptions: [],
     systems_involved: [],
     success_outcome: 'Có use case đủ rõ để phê duyệt và tạo sơ đồ.',
+  };
+}
+
+function persistedDiagramToWorkspace(
+  resource: DiagramResource,
+  sourceUseCase: UseCaseDraft,
+): DiagramWorkspaceEntry {
+  const storedLanes = resource.lanes_data as Array<Partial<LaneConfig> & { id: string; title: string }>;
+  const lanes = storedLanes.every((lane) => typeof lane.x === 'number' && typeof lane.width === 'number')
+    ? (storedLanes as LaneConfig[])
+    : withPositions(
+        storedLanes.map((lane) => ({
+          id: lane.id,
+          title: lane.title,
+          width: lane.width ?? 320,
+        })),
+      );
+  const graph = resource.graph_data as EditorGraphData;
+  return {
+    draft: {
+      diagram_id: resource.id,
+      use_case_id: sourceUseCase.use_case_id,
+      title: resource.title,
+      lanes: lanes.map((lane, order) => ({
+        id: lane.id,
+        title: lane.title,
+        order,
+        width: lane.width,
+      })),
+      nodes: [],
+      edges: [],
+      generation_status: 'ready',
+    },
+    graph,
+    lanes,
+    laneHeight: resource.lane_height,
+    sourceFingerprint: buildUseCaseFingerprint(sourceUseCase),
+    semanticEdited: resource.semantic_edited,
+    phase: 'ready',
+    errorMessage: null,
+    traceCoverage: buildTraceCoverage(graph),
   };
 }
 
@@ -748,6 +799,7 @@ function syncConnectedEdges(lf: LogicFlow, model: NodeModelLike) {
 }
 
 export default function App() {
+  const workspace = useWorkspacePersistence();
   const containerRef = useRef<HTMLDivElement>(null);
   const lfRef = useRef<LogicFlow | null>(null);
   const [lanes, setLanes] = useState<LaneConfig[]>(INITIAL_LANES);
@@ -775,6 +827,7 @@ export default function App() {
   const [brdRuntimeStatus, setBrdRuntimeStatus] = useState<string | null>(null);
   const [lastGenerateFingerprint, setLastGenerateFingerprint] = useState<string | null>(null);
   const [lastIdempotencyKey, setLastIdempotencyKey] = useState<string | null>(null);
+  const [pendingServerBrd, setPendingServerBrd] = useState<BrdResource | null>(null);
   const [useCasePanelOpen, setUseCasePanelOpen] = useState(false);
   const [useCasePhase, setUseCasePhase] = useState<UseCasePanelPhase>('idle');
   const [useCaseWorkspaceSection, setUseCaseWorkspaceSection] =
@@ -803,6 +856,21 @@ export default function App() {
     null,
   );
   const [lastUseCaseDraftFingerprint, setLastUseCaseDraftFingerprint] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workspace) return;
+    const drafts = workspace.useCaseResources.map((resource) => resource.content);
+    setProjectSpec(workspace.projectSpec);
+    setFeatureIntent(workspace.featureIntent);
+    setUseCaseDrafts(drafts);
+    setUseCasePhase(drafts.length > 0 ? 'ready' : 'idle');
+    setLastUseCaseDraftFingerprint(drafts.length > 0 ? buildUseCaseDraftFingerprint(drafts) : null);
+    setLastUseCaseGenerateFingerprint(null);
+    setDiagramWorkspaces({});
+    setActiveCanvasUseCaseId(null);
+    activeCanvasUseCaseIdRef.current = null;
+    setActiveDiagramFromWorkspace(null);
+  }, [workspace?.activeFeature.id]);
 
   const useCaseValidationErrors = runLocalUseCasePreValidation(projectSpec, featureIntent);
   const currentUseCaseFingerprint = buildUseCaseRequestFingerprint(
@@ -860,7 +928,12 @@ export default function App() {
     setDiagramRevision((revision) => revision + 1);
   };
 
+  const setActiveDiagramFromWorkspace = (diagram: DiagramResource | null) => {
+    workspace?.setActiveDiagram(diagram);
+  };
+
   const hasCachedBrdSnapshot = Boolean(brdDraft || brdSpec);
+  const brdCacheScope = workspace?.brdCacheScope ?? null;
   const currentBrdFingerprint = (() => {
     void diagramRevision;
     const lf = lfRef.current;
@@ -895,6 +968,66 @@ export default function App() {
     setLastGenerateFingerprint(null);
     setLastGeneratedRevision(null);
     setLastIdempotencyKey(null);
+    setPendingServerBrd(null);
+  };
+
+  const hydrateBrdCache = (cached: NonNullable<ReturnType<typeof loadBrdWorkspaceCache>>) => {
+    setBrdPhase(cached.phase);
+    setBrdTab(cached.activeTab);
+    setBrdWarnings(cached.warnings);
+    setBrdBlockingIssues(cached.blockingIssues);
+    setBrdSpec(cached.spec);
+    setBrdDraft(cached.draft);
+    setBrdError(cached.error);
+    setBrdMetadata(cached.metadata);
+    setBrdRequestId(cached.requestId);
+    setBrdRuntimeStatus(cached.runtimeStatus);
+    setLastGenerateFingerprint(cached.lastGenerateFingerprint);
+    setLastGeneratedRevision(cached.lastGeneratedRevision);
+    setLastIdempotencyKey(cached.idempotencyKey);
+  };
+
+  const applyPersistedBrd = (saved: BrdResource) => {
+    setBrdSpec(saved.structured_spec);
+    setBrdDraft(saved.markdown_content);
+    setBrdWarnings(saved.warnings);
+    setBrdBlockingIssues([]);
+    setBrdPhase('ready');
+    setBrdTab('draft');
+    setBrdError(null);
+    setLastGeneratedRevision(diagramRevision);
+    setPendingServerBrd(null);
+    workspace?.markBrdLoaded(saved.diagram_id);
+  };
+
+  const retryPersistedBrdLoad = async () => {
+    const diagramId = workspace?.activeDiagram?.id;
+    if (!workspace || !diagramId) return;
+    try {
+      const saved = await workspace.loadBrd(diagramId);
+      if (!saved) {
+        setBrdError(null);
+        setStatus('Diagram hiện chưa có BRD đã lưu trên server.');
+        return;
+      }
+      if (workspace.brdSaveState === 'dirty') {
+        setPendingServerBrd(saved);
+        setBrdError(null);
+        setStatus('Đã giữ bản recovery cục bộ; BRD server sẵn sàng nếu bạn muốn thay thế.');
+        return;
+      }
+      applyPersistedBrd(saved);
+      setStatus('Đã tải BRD đã lưu từ server.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Không tải được BRD đã lưu.';
+      setBrdError({
+        code: 'PERSISTED_BRD_LOAD_FAILED',
+        message: `${message} Bản nháp recovery cục bộ vẫn được giữ lại.`,
+        retryable: true,
+        related_node_ids: [],
+      });
+      setStatus(message);
+    }
   };
 
   const formatContextSwitchStatus = (base: string) =>
@@ -926,28 +1059,20 @@ export default function App() {
   }, [activeCanvasUseCaseId, diagramWorkspaces, focusedUseCaseId, useCaseDrafts]);
 
   useEffect(() => {
+    if (workspace) return;
     const cached = loadBrdWorkspaceCache();
     if (!cached) return;
-    setBrdPhase(cached.phase);
-    setBrdTab(cached.activeTab);
-    setBrdWarnings(cached.warnings);
-    setBrdBlockingIssues(cached.blockingIssues);
-    setBrdSpec(cached.spec);
-    setBrdDraft(cached.draft);
-    setBrdError(cached.error);
-    setBrdMetadata(cached.metadata);
-    setBrdRequestId(cached.requestId);
-    setBrdRuntimeStatus(cached.runtimeStatus);
-    setLastGenerateFingerprint(cached.lastGenerateFingerprint);
-    setLastGeneratedRevision(cached.lastGeneratedRevision);
-    setLastIdempotencyKey(cached.idempotencyKey);
+    hydrateBrdCache(cached);
     setBrdPanelOpen(false);
-  }, []);
+  }, [workspace]);
 
   useEffect(() => {
+    if (workspace && !brdCacheScope) return;
     if (!hasCachedBrdSnapshot) return;
+    if (workspace && workspace.brdSaveState !== 'dirty') return;
     saveBrdWorkspaceCache({
       version: BRD_WORKSPACE_CACHE_VERSION,
+      dirty: workspace ? workspace.brdSaveState === 'dirty' : true,
       draft: brdDraft,
       spec: brdSpec,
       warnings: brdWarnings,
@@ -962,7 +1087,7 @@ export default function App() {
       lastGeneratedRevision,
       idempotencyKey: lastIdempotencyKey,
       updatedAt: new Date().toISOString(),
-    });
+    }, brdCacheScope);
   }, [
     brdBlockingIssues,
     brdDraft,
@@ -978,7 +1103,55 @@ export default function App() {
     lastGenerateFingerprint,
     lastGeneratedRevision,
     lastIdempotencyKey,
+    workspace,
+    workspace?.brdSaveState,
+    brdCacheScope,
   ]);
+
+  useEffect(() => {
+    const diagramId = workspace?.activeDiagram?.id;
+    if (!workspace || !diagramId) return;
+    let active = true;
+    resetBrdState();
+    const cached = loadBrdWorkspaceCache(workspace.brdCacheScope);
+    const hasDirtyRecovery = hasDirtyBrdRecovery(cached);
+    if (cached) {
+      hydrateBrdCache(cached);
+      if (hasDirtyRecovery) {
+        workspace.markBrdDirty(diagramId);
+        setStatus('Đã khôi phục BRD draft chưa lưu cho diagram hiện tại.');
+      }
+    }
+    workspace
+      .loadBrd(diagramId)
+      .then((saved) => {
+        if (!active || !saved) return;
+        if (hasDirtyRecovery) {
+          setPendingServerBrd(saved);
+          setStatus('Đã giữ bản recovery cục bộ; BRD server sẵn sàng nếu bạn muốn thay thế.');
+          return;
+        }
+        applyPersistedBrd(saved);
+        setStatus('Đã tải BRD đã lưu từ server.');
+      })
+      .catch((error) => {
+        if (!active) return;
+        const message = error instanceof Error ? error.message : 'Không tải được BRD đã lưu.';
+        setBrdPhase(cached ? cached.phase : 'failed');
+        setBrdError({
+          code: 'PERSISTED_BRD_LOAD_FAILED',
+          message: cached
+            ? `${message} Bản nháp recovery cục bộ vẫn được giữ lại.`
+            : message,
+          retryable: true,
+          related_node_ids: [],
+        });
+        setStatus(cached ? 'Không tải được BRD server; đã giữ bản recovery cục bộ.' : message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspace?.activeDiagram?.id]);
 
   const bumpViewportTick = () => setViewportTick((tick) => tick + 1);
 
@@ -1064,6 +1237,7 @@ export default function App() {
     options?: { defer?: boolean },
   ) => {
     markDiagramChanged();
+    workspace?.markDiagramDirty(activeCanvasUseCaseIdRef.current);
     if (options?.defer) {
       window.setTimeout(() => persistActiveUseCaseDiagram(changeKind), 0);
       return;
@@ -1570,6 +1744,10 @@ export default function App() {
   };
 
   const handleProjectSpecChange = (next: ProjectSpec) => {
+    if (workspace) {
+      setStatus('Hãy chỉnh và lưu Project Spec ở tab Project Spec.');
+      return;
+    }
     setProjectSpec(next);
     if (useCaseError) {
       setUseCaseError(null);
@@ -1577,6 +1755,10 @@ export default function App() {
   };
 
   const handleFeatureIntentChange = (next: FeatureIntent) => {
+    if (workspace) {
+      setStatus('Hãy chỉnh và lưu Feature Intent ở tab Features.');
+      return;
+    }
     setFeatureIntent(next);
     if (useCaseError) {
       setUseCaseError(null);
@@ -1611,12 +1793,15 @@ export default function App() {
     setStatus('Đang sinh use case draft từ project spec…');
 
     try {
-      const request = buildUseCaseGenerationRequest(
-        projectSpec,
-        featureIntent,
-        useCaseGenerationPreference,
-      );
-      const envelope = await generateUseCases(request);
+      const envelope = workspace
+        ? await workspace.generateUseCases(useCaseGenerationPreference)
+        : await generateUseCases(
+            buildUseCaseGenerationRequest(
+              projectSpec,
+              featureIntent,
+              useCaseGenerationPreference,
+            ),
+          );
       const result = envelope.result;
       if (!result) {
         throw new Error('Use case generation trả về kết quả rỗng.');
@@ -1653,6 +1838,7 @@ export default function App() {
         ),
       );
       setLastUseCaseDraftFingerprint(buildUseCaseDraftFingerprint(canonicalUseCases));
+      workspace?.markUseCasesDirty();
       setStatus(`Đã sinh ${canonicalUseCases.length} use case draft để rà soát`);
     } catch (error) {
       setUseCasePhase('failed');
@@ -1674,6 +1860,7 @@ export default function App() {
     setUseCaseDrafts((current) =>
       current.map((useCase) => (useCase.use_case_id === useCaseId ? nextUseCase : useCase)),
     );
+    workspace?.markUseCasesDirty();
 
     if (shouldInvalidateApproval) {
       setStatus(`Đã chuyển ${useCaseId} về trạng thái cần phê duyệt lại vì nội dung vừa được sửa.`);
@@ -1702,6 +1889,7 @@ export default function App() {
           : useCase,
       ),
     );
+    workspace?.markUseCasesDirty();
   };
 
   const handleUseCaseApproveAll = () => {
@@ -1717,7 +1905,48 @@ export default function App() {
     setUseCaseDrafts((current) =>
       current.map((useCase) => ({ ...useCase, review_status: 'approved' })),
     );
+    workspace?.markUseCasesDirty();
     setStatus('Đã phê duyệt toàn bộ use case draft hiện tại');
+  };
+
+  const handleSaveUseCases = async () => {
+    if (!workspace) return;
+    try {
+      await workspace.saveUseCases(useCaseDrafts);
+      setLastUseCaseDraftFingerprint(buildUseCaseDraftFingerprint(useCaseDrafts));
+      setStatus(`Đã lưu ${useCaseDrafts.length} use case mới nhất.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Không thể lưu use case.');
+    }
+  };
+
+  const handleDeleteUseCase = async (useCaseId: string) => {
+    if (!workspace) return;
+    const useCase = useCaseDrafts.find((item) => item.use_case_id === useCaseId);
+    const title = useCase?.title ?? useCaseId;
+    const confirmed = window.confirm(
+      `Xóa use case "${title}"? Diagram và BRD đã lưu bên dưới use case này cũng sẽ bị xóa.`,
+    );
+    if (!confirmed) return;
+    try {
+      await workspace.deleteUseCase(useCaseId);
+      setUseCaseDrafts((current) => current.filter((item) => item.use_case_id !== useCaseId));
+      setDiagramWorkspaces((current) => {
+        const next = { ...current };
+        delete next[useCaseId];
+        return next;
+      });
+      setOrphanedDiagramIds((current) => current.filter((id) => id !== useCaseId));
+      if (activeCanvasUseCaseIdRef.current === useCaseId) {
+        activeCanvasUseCaseIdRef.current = null;
+        setActiveCanvasUseCaseId(null);
+        setActiveDiagramFromWorkspace(null);
+        resetBrdState();
+      }
+      setStatus(`Đã xóa use case ${useCaseId}.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Không thể xóa use case.');
+    }
   };
 
   const handleOpenUseCaseDiagramWorkspace = (useCaseId: string) => {
@@ -1727,6 +1956,10 @@ export default function App() {
   };
 
   const handleGenerateUseCaseDiagram = async (useCaseId: string) => {
+    if (workspace && !workspace.canSwitchDiagramScope(useCaseId)) {
+      setStatus(`Đã giữ nguyên canvas hiện tại; hãy lưu trước khi tạo sơ đồ cho ${useCaseId}.`);
+      return;
+    }
     const useCase = useCaseDrafts.find((item) => item.use_case_id === useCaseId);
     if (!useCase || useCase.review_status !== 'approved') {
       setStatus('Cần phê duyệt use case trước khi tạo sơ đồ.');
@@ -1753,16 +1986,19 @@ export default function App() {
     setStatus(`Đang tạo sơ đồ cho ${useCaseId}…`);
 
     try {
-      const envelope = await generateUseCaseDiagram(useCase);
+      const envelope = workspace
+        ? await workspace.generateDiagram(useCaseId)
+        : await generateUseCaseDiagram(useCase);
       const draft = envelope.result?.diagram;
       if (!draft) {
         throw new Error('Diagram generation trả về kết quả rỗng.');
       }
-      const workspace = diagramDraftToWorkspace(draft, useCase);
-      setDiagramWorkspaces((current) => ({ ...current, [useCaseId]: workspace }));
+      const generatedWorkspace = diagramDraftToWorkspace(draft, useCase);
+      setDiagramWorkspaces((current) => ({ ...current, [useCaseId]: generatedWorkspace }));
+      workspace?.markDiagramDirty(useCaseId);
       setOrphanedDiagramIds((current) => current.filter((id) => id !== useCaseId));
       setDiagramOperationStates((current) => ({ ...current, [useCaseId]: undefined }));
-      renderUseCaseDiagram(useCaseId, workspace);
+      renderUseCaseDiagram(useCaseId, generatedWorkspace);
       setStatus(`Đã tạo và mở sơ đồ cho ${useCaseId}.`);
     } catch (error) {
       setDiagramOperationStates((current) => ({ ...current, [useCaseId]: 'failed' }));
@@ -1770,15 +2006,53 @@ export default function App() {
     }
   };
 
-  const handleOpenUseCaseDiagramCanvas = (useCaseId: string) => {
-    const workspace = diagramWorkspaces[useCaseId];
-    if (!workspace) {
+  const handleOpenUseCaseDiagramCanvas = async (useCaseId: string) => {
+    if (workspace && !workspace.canSwitchDiagramScope(useCaseId)) {
+      setStatus(`Đã giữ nguyên canvas hiện tại; hãy lưu trước khi mở ${useCaseId}.`);
+      return;
+    }
+    let diagramWorkspace = diagramWorkspaces[useCaseId];
+    if (!diagramWorkspace && workspace) {
+      try {
+        const useCase = useCaseDrafts.find((item) => item.use_case_id === useCaseId);
+        const saved = await workspace.loadDiagram(useCaseId);
+        if (saved && useCase) {
+          diagramWorkspace = persistedDiagramToWorkspace(saved, useCase);
+          setDiagramWorkspaces((current) => ({ ...current, [useCaseId]: diagramWorkspace! }));
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Không tải được diagram đã lưu.';
+        setStatus(`Không thể mở ${useCaseId}: ${message}`);
+        return;
+      }
+    }
+    if (!diagramWorkspace) {
       setStatus(`Chưa có sơ đồ cho ${useCaseId}. Hãy tạo sơ đồ trước.`);
       return;
     }
     persistActiveUseCaseDiagram();
-    renderUseCaseDiagram(useCaseId, workspace);
+    renderUseCaseDiagram(useCaseId, diagramWorkspace);
     setStatus(`Đã mở sơ đồ của ${useCaseId} trên canvas.`);
+  };
+
+  const handleSaveDiagram = async () => {
+    const useCaseId = activeCanvasUseCaseIdRef.current;
+    const lf = lfRef.current;
+    if (!workspace || !useCaseId || !lf) return;
+    try {
+      const graph = lf.getGraphData() as EditorGraphData;
+      const entry = diagramWorkspaces[useCaseId];
+      await workspace.saveDiagram(
+        useCaseId,
+        graph as unknown as Record<string, unknown>,
+        lanesRef.current,
+        laneHeightRef.current,
+        entry?.semanticEdited ?? false,
+      );
+      setStatus(`Đã lưu diagram mới nhất của ${useCaseId}.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Không thể lưu diagram.');
+    }
   };
 
   const handleDiscardOrphanedDiagram = (useCaseId: string) => {
@@ -1829,7 +2103,7 @@ export default function App() {
     if (!hasCachedBrdSnapshot) return;
     const confirmed = window.confirm('Xoá BRD draft đã cache khỏi trình duyệt này?');
     if (!confirmed) return;
-    clearBrdWorkspaceCache();
+    clearBrdWorkspaceCache(brdCacheScope);
     resetBrdState();
     setStatus('Đã xoá BRD draft đã cache');
   };
@@ -1855,6 +2129,7 @@ export default function App() {
     setBrdWarnings([]);
     setBrdBlockingIssues([]);
     setBrdRuntimeStatus('validating');
+    setPendingServerBrd(null);
     setStatus('Đang validate diagram cho AI BRD…');
 
     try {
@@ -1871,6 +2146,40 @@ export default function App() {
           related_node_ids: localBlockingIssues.flatMap((item) => item.related_node_ids),
         });
         setStatus('Không thể generate BRD: diagram còn blocking issue cơ bản');
+        return;
+      }
+
+      if (workspace) {
+        if (!workspace.activeDiagram) {
+          throw new Error('Hãy lưu Diagram trước khi sinh BRD.');
+        }
+        setBrdPhase('generating');
+        setBrdRuntimeStatus('generating');
+        const payload = await workspace.generateBrd(
+          workspace.activeDiagram.id,
+          idempotencyKey,
+          'default',
+        );
+        setBrdRequestId(payload.request_id);
+        setBrdMetadata(payload.metadata);
+        setBrdWarnings(payload.warnings);
+        setBrdBlockingIssues(payload.blocking_issues);
+        setBrdRuntimeStatus(payload.status);
+        if (payload.error) {
+          setBrdPhase(payload.status === 'blocking' ? 'blocking' : 'failed');
+          setBrdError(payload.error);
+          setStatus(payload.error.message);
+          return;
+        }
+        setBrdSpec(payload.result.spec);
+        setBrdDraft(payload.result.brd_markdown);
+        setBrdPhase('ready');
+        setBrdTab('draft');
+        setLastGeneratedRevision(diagramRevision);
+        setLastIdempotencyKey(idempotencyKey);
+        setLastGenerateFingerprint(requestFingerprint);
+        workspace.markBrdDirty(workspace.activeDiagram.id);
+        setStatus('Đã sinh BRD draft từ diagram đã lưu.');
         return;
       }
 
@@ -1944,6 +2253,24 @@ export default function App() {
       });
       setBrdRuntimeStatus('failed');
       setStatus(message);
+    }
+  };
+
+  const handleSaveBrd = async () => {
+    if (!workspace?.activeDiagram || !brdSpec || !brdDraft) return;
+    try {
+      await workspace.saveBrd(workspace.activeDiagram.id, {
+        title: brdSpec.metadata.diagram_name || 'Business Requirements Document',
+        structured_spec: brdSpec,
+        markdown_content: brdDraft,
+        warnings: brdWarnings,
+        template: 'default',
+      });
+      clearBrdWorkspaceCache(workspace.brdCacheScope);
+      setPendingServerBrd(null);
+      setStatus('Đã lưu BRD mới nhất.');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Không thể lưu BRD.');
     }
   };
 
@@ -2377,6 +2704,19 @@ export default function App() {
         <button className="toolbar-btn primary" onClick={() => handleOpenUseCasePanel()}>
           Không gian use case
         </button>
+        {workspace ? (
+          <button
+            className="toolbar-btn primary"
+            onClick={() => void handleSaveDiagram()}
+            disabled={!activeCanvasUseCaseId || workspace.diagramSaveState === 'saving'}
+          >
+            {workspace.diagramSaveState === 'saving'
+              ? 'Đang lưu diagram…'
+              : workspace.diagramSaveState === 'saved'
+                ? 'Diagram đã lưu'
+                : 'Lưu diagram'}
+          </button>
+        ) : null}
         <button className="toolbar-btn primary" onClick={() => void executeGenerateBrd()}>
           Generate BRD
         </button>
@@ -2400,6 +2740,19 @@ export default function App() {
         <span className="toolbar-status">
           {lanes.length} lane · {status}
         </span>
+        <div className="auth-controls" aria-label="Tài khoản">
+          <Show when="signed-out">
+            <SignInButton mode="modal">
+              <button className="toolbar-btn">Đăng nhập</button>
+            </SignInButton>
+            <SignUpButton mode="modal">
+              <button className="toolbar-btn primary">Đăng ký</button>
+            </SignUpButton>
+          </Show>
+          <Show when="signed-in">
+            <UserButton />
+          </Show>
+        </div>
       </header>
 
       {activeCanvasUseCase || activeCanvasWorkspace ? (
@@ -2537,6 +2890,26 @@ export default function App() {
           hasDraftChanges={hasUseCaseDraftChanges}
           onClose={() => setUseCasePanelOpen(false)}
           onGenerate={() => void handleGenerateUseCases()}
+          onSave={workspace ? () => void handleSaveUseCases() : undefined}
+          saveState={workspace?.useCaseSaveState}
+          sourceMode={workspace ? 'persisted' : 'standalone'}
+          onEditProjectSpec={
+            workspace
+              ? () => {
+                  setUseCasePanelOpen(false);
+                  workspace.openProjectSpecEditor();
+                }
+              : undefined
+          }
+          onEditFeatureIntent={
+            workspace
+              ? () => {
+                  setUseCasePanelOpen(false);
+                  workspace.openFeatureIntentEditor();
+                }
+              : undefined
+          }
+          onDeleteUseCase={workspace ? (useCaseId) => void handleDeleteUseCase(useCaseId) : undefined}
           onGenerationPreferenceChange={setUseCaseGenerationPreference}
           onSectionChange={setUseCaseWorkspaceSection}
           onProjectSpecChange={handleProjectSpecChange}
@@ -2546,7 +2919,7 @@ export default function App() {
           onApproveAll={handleUseCaseApproveAll}
           onOpenDiagramWorkspace={handleOpenUseCaseDiagramWorkspace}
           onGenerateDiagram={(useCaseId) => void handleGenerateUseCaseDiagram(useCaseId)}
-          onOpenDiagramCanvas={handleOpenUseCaseDiagramCanvas}
+          onOpenDiagramCanvas={(useCaseId) => void handleOpenUseCaseDiagramCanvas(useCaseId)}
           onDiscardOrphanedDiagram={handleDiscardOrphanedDiagram}
         />
         <BrdPanel
@@ -2558,14 +2931,32 @@ export default function App() {
           blockingIssues={brdBlockingIssues}
           spec={brdSpec}
           draft={brdDraft}
-          onDraftChange={setBrdDraft}
+          onDraftChange={(value) => {
+            setBrdDraft(value);
+            workspace?.markBrdDirty(workspace.activeDiagram?.id);
+          }}
           onClose={() => setBrdPanelOpen(false)}
           onCopy={() => void handleCopyBrdDraft()}
           onExport={handleExportBrdDraft}
+          onSave={workspace ? () => void handleSaveBrd() : undefined}
+          saveState={workspace?.brdSaveState}
           onRetry={
             brdError?.retryable
               ? () => {
+                  if (brdError.code === 'PERSISTED_BRD_LOAD_FAILED') {
+                    void retryPersistedBrdLoad();
+                    return;
+                  }
                   void executeGenerateBrd({ reuseIdempotencyKey: true });
+                }
+              : null
+          }
+          onLoadServerVersion={
+            pendingServerBrd
+              ? () => {
+                  clearBrdWorkspaceCache(brdCacheScope);
+                  applyPersistedBrd(pendingServerBrd);
+                  setStatus('Đã thay bản recovery bằng BRD đã lưu trên server.');
                 }
               : null
           }

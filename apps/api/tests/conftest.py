@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+
+os.environ.setdefault("AUTH_DISABLED", "true")
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql+psycopg://quanliver@127.0.0.1:5432/swimlane_test",
+)
 
 from app.main import app
 from app.routes import brd_generate

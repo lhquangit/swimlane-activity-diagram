@@ -29,6 +29,7 @@ export type FeatureIntent = {
   feature_name: string;
   function_name?: string | null;
   feature_summary: string;
+  actors?: string[];
   primary_actor?: string | null;
   trigger?: string | null;
   inputs: string[];

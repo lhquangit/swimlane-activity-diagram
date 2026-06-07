@@ -6,6 +6,7 @@ import {
   ResponseMetadata,
   WarningItem,
 } from './types';
+import type { SaveState } from '../persistence/types';
 
 type Props = {
   open: boolean;
@@ -20,7 +21,10 @@ type Props = {
   onClose: () => void;
   onCopy: () => void;
   onExport: () => void;
+  onSave?: () => void;
+  saveState?: SaveState;
   onRetry: (() => void) | null;
+  onLoadServerVersion?: (() => void) | null;
   onAcknowledgeOutdated: (() => void) | null;
   metadata: ResponseMetadata | null;
   requestId: string | null;
@@ -48,7 +52,10 @@ export default function BrdPanel({
   onClose,
   onCopy,
   onExport,
+  onSave,
+  saveState = 'idle',
   onRetry,
+  onLoadServerVersion = null,
   onAcknowledgeOutdated,
   metadata,
   requestId,
@@ -100,6 +107,18 @@ export default function BrdPanel({
               Giữ bản này
             </button>
           ) : null}
+        </div>
+      ) : null}
+
+      {onLoadServerVersion ? (
+        <div className="brd-panel__banner warning">
+          <div>
+            <strong>Có BRD đã lưu trên server</strong>
+            <p>Bản recovery cục bộ chưa lưu đang được giữ. Chỉ thay thế khi bạn chủ động chọn.</p>
+          </div>
+          <button className="brd-panel__banner-btn" onClick={onLoadServerVersion}>
+            Dùng bản server
+          </button>
         </div>
       ) : null}
 
@@ -174,6 +193,21 @@ export default function BrdPanel({
         <button className="toolbar-btn primary" onClick={onExport} disabled={!draft}>
           Export markdown
         </button>
+        {onSave ? (
+          <button
+            className="toolbar-btn primary"
+            onClick={onSave}
+            disabled={!draft || !spec || saveState === 'saving'}
+          >
+            {saveState === 'saving'
+              ? 'Đang lưu…'
+              : saveState === 'saved'
+                ? 'Đã lưu'
+                : saveState === 'failed'
+                  ? 'Lưu lại'
+                  : 'Lưu BRD'}
+          </button>
+        ) : null}
       </div>
     </aside>
   );

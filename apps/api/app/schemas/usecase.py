@@ -54,6 +54,7 @@ class FeatureIntent(StrictBaseModel):
     feature_name: str = Field(min_length=1)
     function_name: str | None = None
     feature_summary: str = Field(min_length=1)
+    actors: list[str] = Field(default_factory=list)
     primary_actor: str | None = None
     trigger: str | None = None
     inputs: list[str] = Field(default_factory=list)
@@ -85,11 +86,20 @@ class FeatureIntent(StrictBaseModel):
         "constraints",
         "assumptions",
         "systems_involved",
+        "actors",
         mode="before",
     )
     @classmethod
     def normalize_feature_lists(cls, value: list[str] | None) -> list[str]:
         return normalize_text_list(value)
+
+    @model_validator(mode="after")
+    def harmonize_actor_compatibility(self) -> "FeatureIntent":
+        if not self.actors and self.primary_actor:
+            self.actors = [self.primary_actor]
+        if self.actors and not self.primary_actor:
+            self.primary_actor = self.actors[0]
+        return self
 
 
 class UseCaseFlowStep(StrictBaseModel):

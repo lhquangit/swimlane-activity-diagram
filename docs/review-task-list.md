@@ -125,7 +125,7 @@
 
 #### TASK-005 - Tách helper geometry/layout khỏi `App.tsx`
 - Priority: P2
-- Status: Pending
+- Status: Done
 - Module: lane-layout-orchestration
 - Problem: `App.tsx` đang chứa quá nhiều logic layout: lane binding, hit-test, edge sync, resize handlers, import normalization.
 - Why it matters: Nếu tiếp tục vá trực tiếp ở đây, mỗi bug fix mới sẽ làm risk regression cao hơn.
@@ -2278,22 +2278,23 @@
 - Dependencies: TASK-065, TASK-066, TASK-067, TASK-068, TASK-069, TASK-074, TASK-075, TASK-076
 - Verification: golden document snapshots
 
-#### TASK-078 - Thêm persistence/versioning cho project spec, use case, diagram, BRD
+#### TASK-078 - Thêm latest-state persistence cho project spec, use case, diagram, BRD
 - Priority: P2
 - Status: Pending
-- Module: persistence-versioning
+- Module: persistence-latest-state
 - Problem: Khi pipeline có nhiều artifact nối tiếp, local/frontend-only state sẽ trở thành bottleneck rất sớm.
 - Why it matters: Không có persistence thì review, diff, approve, regenerate sẽ không đáng tin cậy.
 - Implementation steps:
-  1. Thiết kế storage model cho 5 artifact chính.
-  2. Thêm revision/versioning cho từng artifact.
-  3. Giữ trace links và approval status.
-  4. Chuẩn bị API đọc/ghi tối thiểu trước khi mở rộng multi-user.
+  1. Dùng [database architecture](./scope/database-architecture.md) làm canonical design.
+  2. Implement theo các task con `TASK-129` đến `TASK-147`.
+  3. Chỉ lưu phiên bản mới nhất của từng artifact.
+  4. Dùng explicit Save cho project, spec, feature, use cases, diagram và BRD.
+  5. Không thêm revision/workspace/audit/realtime trong MVP.
 - Acceptance criteria:
   - Có thể lưu và nạp lại trọn chain `spec -> UC -> diagram -> BRD`.
-  - Có version history đủ để so sánh/review/regenerate.
-- Dependencies: TASK-072, TASK-073, TASK-074, TASK-075, TASK-077
-- Verification: CRUD + reload consistency tests
+  - Mỗi phần lưu đúng phiên bản mới nhất và được scope theo user/project.
+- Dependencies: TASK-072, TASK-073, TASK-074, TASK-075; TASK-077 có thể triển khai trên schema BRD đã thiết kế
+- Verification: Hoàn tất acceptance criteria của `TASK-129` đến `TASK-147`
 
 #### TASK-079 - Xây eval lane cho toàn pipeline AI
 - Priority: P2
@@ -2836,3 +2837,991 @@
 - Dependencies: None
 - Verification: `npm run test:ui-mock -- --run src/usecases/UseCasePanel.test.tsx src/usecases/prevalidate.test.ts`, `cd apps/api && python3 -m pytest tests/test_usecase_routes.py tests/test_usecase_synthesis.py -q`, `npm run test:e2e-mock -- e2e/brd-flow.spec.ts`
 - Result: Use-case input dùng một danh sách `Actors / swimlanes` ngang hàng trong primary form; disclosure `Thông tin bổ sung` bị bỏ khỏi generate input; review UI gộp `primary_actor/supporting_actors` thành một field `Actors`, còn backend contract cũ chỉ là compatibility mapping.
+
+## Current Project Database Implementation
+
+Canonical design:
+[Database Architecture](./scope/database-architecture.md) and
+[review snapshot](./reviews/2026-06-07-current-project-database-design-review.md).
+
+### Now
+
+#### TASK-129 - Rotate database credential và chuẩn hóa env contract
+- Priority: P0
+- Status: Partial (2026-06-07; repo contract complete, Railway credential rotation blocked by expired CLI session)
+- Module: secrets-railway-config
+- Problem: PostgreSQL password đã bị chia sẻ plaintext; `.env` local chứa Railway reference
+  `${{ ... }}` mà loader hiện tại không resolve, đồng thời trộn biến của Postgres service vào API
+  service.
+- Why it matters: Credential hiện tại phải coi là compromised; sau đó application vẫn không kết nối
+  local đúng nếu dùng URL/private hostname chưa resolve.
+- Implementation steps:
+  1. Rotate password trong Railway Postgres Credentials.
+  2. Redeploy mọi Railway service phụ thuộc vào database URL/password cũ.
+  3. Xóa khỏi `apps/api/.env` các biến chỉ dành cho Postgres container như `PGDATA`,
+     `POSTGRES_*`, `SSL_CERT_DAYS`; FastAPI chỉ cần canonical `DATABASE_URL`.
+  4. Cho local direct run dùng public TCP proxy URL đã resolve và `sslmode=require`, hoặc document
+     `railway run`; không để `${{ ... }}` trong file `.env` mà custom loader đọc trực tiếp.
+  5. Cho Railway API service dùng reference có namespace tới DB service, ví dụ
+     `${{Postgres.DATABASE_URL}}`, không copy password thủ công.
+  6. Thêm `DATABASE_URL` placeholder vào `.env.example`; bảo đảm config/error log không in URL thật.
+- Acceptance criteria:
+  - Credential cũ không còn authenticate được.
+  - `apps/api/.env` vẫn bị Git ignore và không có secret trong tracked diff.
+  - Local config nhận một URL đã resolve; Railway config dùng private reference giữa services.
+  - Không có password/connection URL trong docs, test output hoặc application log.
+- Dependencies: None
+- Verification: `git check-ignore -v apps/api/.env`; config tests với URL giả; `pg_isready`/read-only
+  connection bằng credential mới sau rotate; kiểm Railway Variables không lặp secret thủ công.
+
+#### TASK-130 - Tạo deployment contract cho FastAPI trên Railway
+- Priority: P0
+- Status: Partial (2026-06-07; manifest/readiness complete, staging deploy not verified)
+- Module: api-deployment
+- Problem: Repo chưa có Railway manifest, start command production, pre-deploy migration command hoặc
+  readiness check cho database.
+- Why it matters: Monorepo deploy có thể start sai thư mục, không listen `$PORT`, hoặc đưa code mới
+  lên trước khi schema tương ứng tồn tại.
+- Implementation steps:
+  1. Chốt Railway API service root/build strategy cho monorepo và commit `railway.toml` hoặc
+     `railway.json` tương ứng.
+  2. Cấu hình start command production chạy Uvicorn từ `apps/api`, bind `0.0.0.0:$PORT`, không dùng
+     `--reload`.
+  3. Cấu hình pre-deploy command `alembic upgrade head` sau khi TASK-131 có Alembic.
+  4. Giữ `/healthz` cho liveness và thêm `/readyz` kiểm tra database bằng query nhẹ.
+  5. Cấu hình Railway healthcheck path/timeout và production CORS origin variables.
+  6. Document API service và Postgres service phải cùng project/environment để dùng private network.
+- Acceptance criteria:
+  - Railway build/start từ repo root thành công.
+  - App listen đúng injected `PORT`.
+  - Migration failure chặn deployment mới.
+  - `/healthz` trả 200 khi process sống; `/readyz` fail khi DB unavailable.
+- Dependencies: TASK-129; pre-deploy hoàn tất sau TASK-131
+- Verification: Validate manifest; deploy staging; kiểm pre-deploy log, healthcheck và readiness khi
+  tạm dùng invalid DB URL.
+
+#### TASK-131 - Scaffold PostgreSQL, SQLAlchemy và Alembic latest-state
+- Priority: P0
+- Status: Done (2026-06-07)
+- Module: persistence-foundation
+- Problem: Backend chưa có database driver, ORM, migrations hoặc request-scoped session.
+- Why it matters: Mọi flow Save phụ thuộc vào schema, transaction và constraint chung.
+- Implementation steps:
+  1. Thêm SQLAlchemy 2.x synchronous, `psycopg` và Alembic vào `apps/api/pyproject.toml`.
+  2. Mở rộng `Settings` với `database_url`, pool sizing/timeout tối thiểu và validation fail-fast.
+  3. Tạo engine với `pool_pre_ping`, session factory và FastAPI dependency rollback/close an toàn.
+  4. Tạo models/migration cho `app_users`, `projects`, `specs`, `feature_intents`, `use_cases`,
+     `diagrams`, `brd_docs`.
+  5. Enforce FK cascade, unique 1-1, role/review/template checks, JSONB defaults và indexes trong
+     canonical design.
+  6. Tạo migration/constraint tests chạy trên PostgreSQL test database, không dùng SQLite thay thế.
+- Acceptance criteria:
+  - Fresh PostgreSQL database migrate tới `head`.
+  - Upgrade/downgrade/upgrade chạy được.
+  - Cardinality và check constraints bị database reject đúng.
+  - Session rollback transaction lỗi và không leak connection.
+- Dependencies: TASK-129
+- Verification: Alembic up/down/up; pytest migration/model constraints; smoke `SELECT 1`.
+
+#### TASK-132 - Thêm backend Clerk auth, `app_users` và CORS đúng contract
+- Priority: P1
+- Status: Partial (2026-06-07; runtime complete, live invalid/expired-token matrix remains)
+- Module: identity-authorization
+- Problem: Clerk mới bảo vệ UI; backend routes public và CORS không cho `Authorization`,
+  `PUT/PATCH/DELETE`.
+- Why it matters: Browser không gọi được authenticated CRUD, và server không có trust boundary để
+  bảo vệ dữ liệu theo user.
+- Implementation steps:
+  1. Thêm Clerk Python backend SDK hoặc verified JWT/JWKS dependency có cache/key rotation.
+  2. Chỉ chấp nhận Clerk `session_token`; validate signature, expiry/not-before, issuer và
+     `authorized_parties`.
+  3. Bảo vệ mọi `/api/*` business route; để `/healthz` và `/readyz` public.
+  4. Thêm `GET /api/me` và get-or-create `app_users` theo verified JWT `sub`, role mặc định `user`.
+  5. Không nhận role từ client; email/display name để nullable nếu token không có claim đáng tin cậy.
+  6. Mở CORS chính xác cho production/local origins, required methods và headers
+     `Authorization/Content-Type/Idempotency-Key/X-Schema-Version`.
+- Acceptance criteria:
+  - Missing/invalid/expired token bị 401.
+  - User mới có role `user`.
+  - Client không thể tự nâng role.
+  - Browser preflight cho authenticated `PUT` và `DELETE` thành công.
+- Dependencies: TASK-131
+- Verification: Auth dependency tests với mocked Clerk keys/claims; CORS OPTIONS tests; `/api/me`
+  integration test.
+
+#### TASK-133 - Tạo repository/service ownership boundary và CRUD response contract
+- Priority: P1
+- Status: Partial (2026-06-07; ownership helpers/DTOs complete, service transaction refactor remains)
+- Module: persistence-api-foundation
+- Problem: Nếu mỗi route tự join ownership và tự serialize model, IDOR/error/transaction behavior sẽ
+  bị lặp và dễ lệch.
+- Why it matters: Mọi child resource phải chứng minh ownership qua
+  `resource -> ... -> project.app_user_id`, kể cả khi caller biết UUID.
+- Implementation steps:
+  1. Tạo repository/service boundary cho project tree, không expose raw SQLAlchemy model ra route.
+  2. Tạo helpers `require_owned_project/spec/feature/use_case/diagram/brd` dùng current `app_user.id`.
+  3. Chuẩn hóa DTO Pydantic cho resource IDs, timestamps và payload latest-state.
+  4. Chuẩn hóa `404` cho resource không tồn tại hoặc không thuộc user để tránh leak existence.
+  5. Chuẩn hóa error envelope cho validation, conflict, payload-too-large và database unavailable.
+  6. Đặt transaction boundary ở service/use-case; route không commit nhiều lần giữa một operation.
+- Acceptance criteria:
+  - Child lookup luôn đi qua ownership chain.
+  - User A và user B nhận cùng semantics 404 khi A thử UUID của B.
+  - Không route persistence nào trả SQLAlchemy object trực tiếp.
+  - Multi-row operation rollback toàn bộ khi một bước fail.
+- Dependencies: TASK-131, TASK-132
+- Verification: Repository/service unit tests + cross-user IDOR integration matrix.
+
+#### TASK-134 - Tạo authenticated frontend API client và protected routing
+- Priority: P1
+- Status: Done (2026-06-07)
+- Module: frontend-application-shell
+- Problem: Frontend fetch clients đang tách rời, không gửi Clerk token, không có protected project
+  routes hoặc route-level loading/error state.
+- Why it matters: CRUD mới sẽ lặp auth/error logic; không có project ID trong URL thì refresh/deep
+  link và chuyển project không ổn định.
+- Implementation steps:
+  1. Thêm React Router và routes tối thiểu `/`, `/projects`, `/projects/:projectId`.
+  2. Tạo protected shell dùng `useAuth()` và chờ `isLoaded` trước khi quyết định signed-in state.
+  3. Tạo một API client nhận token provider từ `getToken()`, tự gắn `Authorization: Bearer`,
+     content/schema headers và parse error envelope.
+  4. Di chuyển BRD/use-case generation clients lên shared transport nhưng giữ typed functions theo
+     capability.
+  5. Xử lý 401 bằng session-aware UI; không retry write tự động khi chưa có idempotency policy.
+  6. Thêm route-level loading/not-found/error boundaries cơ bản.
+- Acceptance criteria:
+  - Signed-out user không vào project workspace.
+  - Mọi API business request có Clerk session token.
+  - Refresh `/projects/:projectId` giữ đúng route.
+  - Existing generation client tests vẫn pass sau khi dùng shared transport.
+- Dependencies: TASK-132
+- Verification: Vitest API client tests; router component tests; Playwright signed-out redirect và
+  authenticated request-header assertion.
+
+### Next
+
+#### TASK-135 - Implement Project và Spec backend API
+- Priority: P1
+- Status: Done (2026-06-07)
+- Module: project-spec-backend
+- Problem: Chưa có CRUD cho user projects hoặc single Spec của project.
+- Why it matters: Đây là root persistence boundary cho toàn bộ artifact chain.
+- Implementation steps:
+  1. Implement `POST/GET /api/projects`, `GET/PUT/DELETE /api/projects/{id}` qua ownership service.
+  2. Tạo `specs` default cùng transaction khi tạo project.
+  3. Implement `GET/PUT /api/projects/{id}/spec`.
+  4. Validate/normalize name, description, project context và JSONB string arrays.
+  5. Trả Project và Spec DTO với UUID/timestamps; không nhận `app_user_id` từ client.
+  6. Xóa project cascade toàn chain trong một transaction.
+- Acceptance criteria:
+  - User CRUD được nhiều project của chính mình.
+  - Mỗi project có đúng một spec.
+  - User không đọc/sửa/xóa project hoặc spec của user khác.
+  - Project delete xóa child rows theo FK policy.
+- Dependencies: TASK-133
+- Verification: API CRUD/validation/ownership/cascade tests trên PostgreSQL.
+
+#### TASK-136 - Implement Project dashboard và Spec frontend flow
+- Priority: P1
+- Status: Partial (2026-06-07; core flow complete, independent project/spec save timestamps remain)
+- Module: project-spec-frontend
+- Problem: UI hiện mở thẳng editor; project name nằm trong `ProjectSpec` của use-case panel.
+- Why it matters: User chưa thể tạo/chọn nhiều project hoặc hiểu ranh giới Project và Spec.
+- Implementation steps:
+  1. Tạo Project Dashboard list/create/open/delete với empty/loading/error states.
+  2. Tạo Project Workspace shell/header có tên project, đổi project và edit project metadata.
+  3. Chuyển `project_name` khỏi Spec form; giữ adapter generation dựng ProjectSpec từ project + spec.
+  4. Tạo tab `Bối cảnh dự án` cho Spec fields và nút `Lưu bối cảnh`.
+  5. Thêm `Lưu project`, delete confirmation và dirty state riêng cho project/spec.
+  6. Load project + spec theo route param; hiển thị 404/forbidden-safe state.
+- Acceptance criteria:
+  - User tạo/chọn/đổi/xóa project từ dashboard.
+  - `Tên dự án` không còn nằm trong Spec card.
+  - Save/reload giữ project metadata và context.
+  - Project và Spec có save state độc lập.
+- Dependencies: TASK-134, TASK-135
+- Verification: Component tests + Playwright create/open/save/reload/delete project/spec.
+
+#### TASK-137 - Nâng FeatureIntent contract và implement backend CRUD
+- Priority: P1
+- Status: Done (2026-06-07)
+- Module: feature-intent-backend
+- Problem: Backend contract còn `primary_actor`; database cần nhiều FeatureIntent và first-class
+  `actors`, tách khỏi `specs.target_users`.
+- Why it matters: Nếu giữ compatibility mapping làm canonical, actor của feature tiếp tục bị trộn
+  với context dự án và generation không có nguồn dữ liệu rõ.
+- Implementation steps:
+  1. Nâng Pydantic/frontend-compatible generation contract của FeatureIntent sang `actors: string[]`;
+     giữ adapter đọc legacy `primary_actor` ngắn hạn nếu cần.
+  2. Implement list/create/get/update/delete FeatureIntent theo owned Spec.
+  3. Normalize/dedupe actor và string-list fields; enforce required name/summary.
+  4. Trả feature UUID và timestamps; không nhận `spec_id` khác qua update payload.
+  5. Khi xóa feature, cascade use cases/diagrams/BRDs trong transaction.
+  6. Cập nhật deterministic/AI generation, grounding và tests để dùng peer actors.
+- Acceptance criteria:
+  - Một Spec có nhiều FeatureIntent.
+  - `actors` là canonical; feature save không sửa `specs.target_users`.
+  - Legacy request compatibility có test và được đánh dấu deprecate.
+  - Cross-project feature access bị chặn.
+- Dependencies: TASK-133, TASK-135
+- Verification: Feature CRUD/ownership/cascade tests + generation contract suites.
+
+#### TASK-138 - Implement FeatureIntent selector và editor frontend
+- Priority: P1
+- Status: Done (2026-06-07)
+- Module: feature-intent-frontend
+- Problem: `App.tsx` chỉ có một `featureIntent`; Spec và Feature đang chung một input section.
+- Why it matters: User không thể quản lý nhiều feature độc lập hoặc chuyển context mà không trộn
+  use cases/diagram.
+- Implementation steps:
+  1. Tạo tab `Chức năng` với feature list, active feature ID và create/select/delete actions.
+  2. Di chuyển toàn bộ feature fields khỏi mixed Input panel vào editor riêng.
+  3. Bind Actors textarea vào `feature.actors`, không ghi vào ProjectSpec.
+  4. Thêm `Lưu chức năng`, dirty state và delete confirmation.
+  5. Reset/load child use-case state khi active feature đổi; guard nếu feature hiện tại dirty.
+  6. Chặn `Sinh use case` cho đến khi Spec và active Feature đã save.
+- Acceptance criteria:
+  - Tạo/chọn/sửa/xóa được nhiều feature trong một project.
+  - Chuyển feature không trộn use cases hoặc diagrams.
+  - Actors của feature và target users của Spec hiển thị/lưu độc lập.
+  - Refresh load đúng feature theo route/query/local selection policy đã document.
+- Dependencies: TASK-136, TASK-137
+- Verification: Feature editor/selector component tests + multi-feature Playwright flow.
+
+#### TASK-139 - Implement UseCase persistence và saved-parent generation backend
+- Priority: P1
+- Status: Done (2026-06-07)
+- Module: use-case-backend
+- Problem: Use cases chỉ được generate từ browser payload và chưa có resource UUID/persistence.
+- Why it matters: Diagram phải tham chiếu một saved approved use case thuộc đúng user/project.
+- Implementation steps:
+  1. Tạo `UseCaseResource` DTO tách DB UUID `id` khỏi `use_case_key/content.use_case_id`.
+  2. Implement GET và bulk PUT upsert theo owned FeatureIntent; validate canonical `UseCaseDraft`.
+  3. Bulk PUT không xóa item bị thiếu; implement explicit `DELETE /api/use-cases/{id}`.
+  4. Đồng bộ `title`, `use_case_key`, `review_status` columns với `content` trong service.
+  5. Thay generation boundary bằng
+     `POST /api/feature-intents/{id}/use-cases/generate`, server load Project + Spec + Feature.
+  6. Generation trả drafts chưa persist; only bulk Save writes database.
+- Acceptance criteria:
+  - Use-case portfolio save/reload giữ structured flow và review status.
+  - UUID database không đổi khi update cùng `use_case_key`.
+  - Missing item trong bulk payload không bị xóa ngầm.
+  - Generation dùng saved parent của current user, không tin arbitrary ProjectSpec/Feature payload.
+- Dependencies: TASK-137
+- Verification: Bulk upsert/explicit delete/ownership tests + saved-parent generation tests.
+
+#### TASK-140 - Implement UseCase Save và resource identity frontend
+- Priority: P1
+- Status: Partial (2026-06-07; Save/UUID/downstream guard complete, explicit item delete UI remains)
+- Module: use-case-frontend
+- Problem: Use-case state chỉ có generated business ID và bị giữ trong `App.tsx`; generate/edit chưa
+  có Save boundary.
+- Why it matters: Frontend cần biết item nào đã persist để tạo diagram và delete đúng row.
+- Implementation steps:
+  1. Tạo frontend `UseCaseResource` type với `id`, `use_case_key`, `content`, timestamps.
+  2. Generate qua active saved feature ID và map draft result thành unsaved resources.
+  3. Thêm `Lưu danh sách use case`, dirty/saving/error state và replace local resources bằng server
+     response sau success.
+  4. Thêm explicit delete confirmation gọi resource UUID; không suy delete từ array diff.
+  5. Giữ review/approve editing hiện tại nhưng đánh dirty; approve chưa có nghĩa là saved.
+  6. Chỉ enable tạo diagram khi resource có UUID, approved và latest edit đã save.
+- Acceptance criteria:
+  - Generate không ghi DB trước khi user bấm Save.
+  - Save/reload giữ portfolio và status.
+  - Unsaved hoặc dirty approved use case không tạo được diagram.
+  - Delete một use case không xóa nhầm item khác khi key được regenerate.
+- Dependencies: TASK-138, TASK-139
+- Verification: Component tests + generate/edit/approve/save/reload/delete Playwright flow.
+
+#### TASK-141 - Implement Diagram persistence và saved-use-case generation backend
+- Priority: P1
+- Status: Done (2026-06-07)
+- Module: diagram-backend
+- Problem: Diagram generation nhận full UseCase payload và diagram workspace không được persist.
+- Why it matters: Một diagram phải thuộc đúng saved use case UUID và BRD phải có parent ổn định.
+- Implementation steps:
+  1. Định nghĩa Diagram DTO/validator cho graph, lanes, lane height, provenance và semantic flag.
+  2. Implement GET/PUT/DELETE diagram theo owned UseCase với unique `use_case_id`.
+  3. Validate payload size, node/edge/lane structure và normalized graph invariants trước Save.
+  4. Thay generation boundary bằng `POST /api/use-cases/{id}/diagram/generate`; server load saved
+     approved `UseCase.content`.
+  5. Set `source_use_case_updated_at` từ row use case khi generate/save source draft.
+  6. Giữ generation là draft; only PUT persists latest diagram.
+- Acceptance criteria:
+  - Một use case có tối đa một diagram.
+  - Generation reject unsaved/not-approved/not-owned use case.
+  - Graph Save/load round-trip không mất lane/provenance/size data.
+  - Outdated được tính từ source timestamp.
+- Dependencies: TASK-139
+- Verification: Diagram API/constraint/ownership/payload-limit tests + canonical round-trip fixtures.
+
+#### TASK-142 - Implement Diagram Save/Load frontend
+- Priority: P1
+- Status: Partial (2026-06-07; Save/load complete, context-switch guard and adapter tests remain)
+- Module: diagram-frontend
+- Problem: Canvas state nằm trong LogicFlow + React maps và mất khi reload.
+- Why it matters: Diagram là artifact trung tâm; serializer thiếu field có thể làm hỏng sơ đồ đã chỉnh.
+- Implementation steps:
+  1. Tạo pure adapters `serializeDiagramWorkspace` và `hydrateDiagramWorkspace`.
+  2. Key diagram state bằng saved UseCase UUID, không chỉ `UC-01`.
+  3. Generate diagram qua saved use-case ID, review draft trên canvas nhưng không auto-save.
+  4. Thêm toolbar `Lưu sơ đồ` với `idle/dirty/saving/saved/failed`.
+  5. Mark dirty cho mọi graph/lane/resize/import mutation; load server diagram khi mở use case.
+  6. Confirm khi đổi use case/project hoặc rời page với diagram dirty.
+- Acceptance criteria:
+  - Save/reload/open lại giữ graph tương đương.
+  - Generated draft chỉ persist sau `Lưu sơ đồ`.
+  - Chuyển use case không trộn diagram workspaces.
+  - Existing lane/node/provenance invariants vẫn pass.
+- Dependencies: TASK-140, TASK-141
+- Verification: Adapter unit tests, LogicFlow round-trip tests, browser Save/reload/navigation guard.
+
+#### TASK-143 - Implement BRD persistence và saved-diagram generation backend
+- Priority: P1
+- Status: Done (2026-06-07)
+- Module: brd-backend
+- Problem: BRD generation nhận diagram payload tùy ý và chưa có `brd_docs` CRUD.
+- Why it matters: BRD phải thuộc một saved diagram đã authorize, và user cần mở lại markdown đã chỉnh.
+- Implementation steps:
+  1. Định nghĩa BRD DTO cho structured spec, markdown, warnings, template và source timestamp.
+  2. Implement GET/PUT/DELETE BRD theo owned Diagram với unique `diagram_id`.
+  3. Thêm resource-scoped validate/generate routes theo diagram ID; server load saved graph/lanes.
+  4. Reuse existing validate/generate services và response metadata; generation không auto-persist.
+  5. Set `source_diagram_updated_at` từ diagram row khi user Save generated/edited BRD.
+  6. Validate markdown/JSON payload limits và template enum.
+- Acceptance criteria:
+  - Một diagram có tối đa một BRD.
+  - BRD generation không nhận diagram của user khác hoặc unsaved graph.
+  - Save/reload giữ markdown user edit và structured spec.
+  - Diagram update làm saved BRD được đánh outdated.
+- Dependencies: TASK-141
+- Verification: BRD CRUD/ownership/outdated tests + existing generation pipeline regression suite.
+
+#### TASK-144 - Implement BRD Save/Load frontend và scoped recovery cache
+- Priority: P1
+- Status: Partial (2026-06-07; server Save/load complete, scoped recovery cache remains)
+- Module: brd-frontend
+- Problem: BRD hiện chỉ dùng một global localStorage cache và panel không có server Save.
+- Why it matters: Cache có thể hiển thị draft của diagram/project trước; server phải là nguồn chính.
+- Implementation steps:
+  1. Load BRD theo active saved diagram ID khi mở panel.
+  2. Generate/validate qua saved diagram resource routes.
+  3. Thêm `Lưu BRD` với dirty/save/error state; edit markdown đánh dirty.
+  4. Scope local recovery cache theo Clerk user ID + diagram UUID, không dùng một global artifact.
+  5. Sau server Save thành công, cập nhật baseline/cache; server data thắng khi load bình thường.
+  6. Hiển thị outdated khi diagram timestamp mới hơn source timestamp nhưng vẫn cho mở bản saved.
+- Acceptance criteria:
+  - Edit/Save/reload markdown không mất dữ liệu.
+  - Draft của project/diagram khác không xuất hiện sai context.
+  - Generate không auto-save.
+  - Diagram thay đổi hiển thị BRD outdated đúng.
+- Dependencies: TASK-142, TASK-143
+- Verification: BrdPanel/cache tests + multi-diagram Save/reload/outdated Playwright flow.
+
+#### TASK-145 - Chuẩn hóa Save UX và unsaved-change guards toàn chain
+- Priority: P1
+- Status: Partial (2026-06-07; shared states/beforeunload/downstream guards complete, full navigation matrix remains)
+- Module: save-ux-integration
+- Problem: Sáu Save scope dễ có state, copy và guard không nhất quán.
+- Why it matters: Latest-only không có undo history; UI phải nói rõ phần nào durable trước khi user
+  chuyển context hoặc tạo child artifact.
+- Implementation steps:
+  1. Tạo shared save-state contract `idle/dirty/saving/saved/failed` và reusable status/button UI.
+  2. Hiển thị saved timestamp/error/retry theo từng Project, Spec, Feature, UseCase portfolio,
+     Diagram và BRD.
+  3. Thêm guard cho route/project/feature/use-case/canvas/panel switch khi scope hiện tại dirty.
+  4. Chặn downstream CTA bằng persisted parent ID + clean saved baseline, không chỉ bằng dữ liệu local.
+  5. Không đánh dirty khi hydrate; chỉ đánh dirty sau user/canvas mutation.
+  6. Chuẩn hóa confirm copy cho delete cascade và unsaved navigation.
+- Acceptance criteria:
+  - Mỗi phần hiển thị chính xác trạng thái Save riêng.
+  - User không vô tình mất dirty edits khi đổi context.
+  - Generate và Save luôn là hai action khác nhau.
+  - Downstream artifact không được tạo từ parent chưa save.
+- Dependencies: TASK-136, TASK-138, TASK-140, TASK-142, TASK-144
+- Verification: Save-state unit tests + navigation matrix Playwright.
+
+#### TASK-146 - Thêm full-chain persistence, auth và isolation test suite
+- Priority: P1
+- Status: Partial (2026-06-07; PostgreSQL full-chain/ownership test complete, authenticated Clerk browser E2E remains)
+- Module: persistence-e2e-security
+- Problem: Existing tests chủ yếu cover mock generation; chưa chứng minh migration, authenticated
+  CRUD, ownership isolation hoặc full reload chain.
+- Why it matters: Sai auth/FK/serializer có thể mất hoặc lộ toàn bộ project data.
+- Implementation steps:
+  1. Tạo PostgreSQL integration test fixture riêng, migrate schema trước suite và isolate transaction.
+  2. Thêm API matrix cho unauthenticated, invalid token, user A/user B IDOR và cascade constraints.
+  3. Thêm Clerk Playwright test setup với test keys/token và reusable authenticated storage state.
+  4. Thêm E2E: sign in -> create project -> Save Spec -> Feature -> UseCases -> Diagram -> BRD.
+  5. Reload browser và verify toàn chain; edit từng scope và verify latest-state overwrite.
+  6. Thêm failure cases: DB unavailable, 401 mid-session, oversized graph, Save error và retry.
+- Acceptance criteria:
+  - Full chain tồn tại sau browser refresh.
+  - Cross-user access fail ở mọi resource level.
+  - Test chứng minh generation không auto-save.
+  - Migration + API + UI persistence suites chạy bằng một documented command.
+- Dependencies: TASK-131 through TASK-145
+- Verification: PostgreSQL pytest suite + Vitest + authenticated Playwright full-chain suite.
+
+### Later
+
+#### TASK-147 - Hoàn thiện Railway release, backup và observability checklist
+- Priority: P2
+- Status: Partial (2026-06-07; runbook complete, Railway backup/deploy/restore execution blocked)
+- Module: persistence-operations
+- Problem: Latest-only storage không có in-app history; Railway Postgres là unmanaged service và repo
+  chưa có release/backup/DB telemetry checklist.
+- Why it matters: Migration lỗi hoặc accidental overwrite cần recovery path ngoài application.
+- Implementation steps:
+  1. Enable scheduled Railway volume backups trước production launch; document restore drill owner.
+  2. Thêm structured logs cho request ID, route, user/resource IDs đã hash/redact, latency và DB error
+     class; không log payload/secret.
+  3. Thêm connection-pool metrics hoặc tối thiểu health/readiness/error-rate dashboard.
+  4. Chạy staging migration + full-chain smoke trước production deploy.
+  5. Document rollback: application rollback, migration compatibility và database restore decision.
+  6. Đặt alert cho readiness/deploy failure và database connection saturation.
+- Acceptance criteria:
+  - Có backup schedule và một restore drill đã ghi nhận.
+  - Production deploy checklist yêu cầu migration + authenticated persistence smoke.
+  - Logs/metrics đủ phân biệt auth, validation và DB failures mà không lộ dữ liệu.
+  - Rollback procedure có owner và verification command.
+- Dependencies: TASK-130, TASK-146
+- Verification: Railway staging release rehearsal, backup restore drill và log redaction review.
+
+## Post-Implementation Review: TASK-131 to TASK-145
+
+Review snapshot:
+[2026-06-07 TASK-131 to TASK-145 implementation review](./reviews/2026-06-07-task-131-145-implementation-review.md).
+
+### Now
+
+#### TASK-148 - Chuẩn hóa Python runner cho backend scripts
+- Priority: P1
+- Status: Done
+- Module: test-runtime-tooling
+- Problem: `npm run test:api-mock` và `npm run dev:api` dùng `python3` hệ thống, trong khi dependency mới như `clerk_backend_api`, SQLAlchemy và Alembic nằm trong `apps/api/.venv`.
+- Why it matters: Developer/CI có thể fail trước khi chạy test, làm các task persistence trông hỏng dù code đúng.
+- Implementation steps:
+  1. Chọn một runner chính thức cho backend: `apps/api/.venv/bin/python`, `uv run`, hoặc script bootstrap tương đương.
+  2. Cập nhật `package.json` cho `dev:api`, `test:api-mock`, `test:api-live`, `db:migrate`, `db:downgrade`.
+  3. Cập nhật `playwright.config.ts` để dùng cùng runner, không hard-code một đường khác.
+  4. Cập nhật README/setup nếu cần cài venv trước khi chạy scripts.
+  5. Thêm smoke command kiểm `python -c "import clerk_backend_api, sqlalchemy, alembic"`.
+- Acceptance criteria:
+  - `npm run test:api-mock` chạy pass trên máy không cài dependency backend global.
+  - `npm run dev:api` start được backend với dependency mới.
+  - README chỉ dẫn đúng một đường chạy backend local.
+- Dependencies: None
+- Verification: `npm run test:api-mock`, `npm run dev:api`, `npm run test:e2e-mock`.
+- Completion notes: Standardized npm backend commands on `apps/api/.venv/bin/python`, added `api:python:smoke`, and verified `npm run api:python:smoke`, `npm run test:api-mock`, `npm run test:e2e-mock`.
+
+#### TASK-149 - Sửa UseCasePanel input trong persisted workspace thành read-only/CTA
+- Priority: P1
+- Status: Done
+- Module: project-workspace-ux
+- Problem: Trong `/projects/:projectId`, `UseCasePanel` vẫn render input ProjectSpec/Feature nhưng `App.tsx` bỏ qua mọi edit và chỉ set status.
+- Why it matters: User có cảm giác đang sửa dữ liệu nhưng Save không thể ghi thay đổi; flow Spec/Feature tách riêng bị mâu thuẫn.
+- Implementation steps:
+  1. Thêm mode prop cho `UseCasePanel`, ví dụ `sourceMode="standalone" | "persisted"`.
+  2. Khi `persisted`, thay input Feature/ProjectSpec bằng summary read-only.
+  3. Thêm CTA `Sửa Project Spec` và `Sửa Feature Intent` gọi callback từ `ProjectWorkspace` để chuyển tab.
+  4. Ẩn hoặc disable những field đang gọi `onProjectSpecChange`/`onFeatureIntentChange`.
+  5. Cập nhật copy để nói rõ UseCase được sinh từ parent đã lưu.
+- Acceptance criteria:
+  - Trong persisted workspace, không có field giả editable cho ProjectSpec/Feature.
+  - User có đường rõ ràng để quay về tab Spec/Features.
+  - Standalone `/demo` vẫn giữ flow nhập liệu cũ cho regression.
+- Dependencies: TASK-148 không bắt buộc nhưng nên làm trước khi rerun full suite.
+- Verification: Vitest `UseCasePanel` mode tests; Playwright project workspace smoke.
+- Completion notes: Added persisted `sourceMode` with read-only Feature/ProjectSpec summaries and CTAs back to workspace tabs; standalone mode remains editable. Verified with `npm run test:ui-mock` and `npm run test:e2e-mock`.
+
+#### TASK-150 - Tách save-state theo từng resource scope và reset khi đổi context
+- Priority: P1
+- Status: Done
+- Module: save-ux-integration
+- Problem: `ProjectWorkspace` dùng chung `shellSaveState` cho Spec và Feature, đồng thời không reset `useCaseSaveState`, `diagramSaveState`, `brdSaveState` khi chọn feature khác.
+- Why it matters: Dirty state của feature/use case/diagram này có thể leak sang feature khác, block action sai hoặc hiển thị banner sai.
+- Implementation steps:
+  1. Tách `projectSaveState`, `specSaveState`, `featureSaveState`.
+  2. Key child save-state theo resource ID: feature ID, use case key/UUID, diagram ID.
+  3. Khi active feature đổi, reset/hydrate child states theo feature mới.
+  4. Khi active use case/diagram đổi, guard dirty state trước rồi mới switch.
+  5. Hiển thị save timestamp/error theo đúng scope.
+- Acceptance criteria:
+  - Spec save không đổi trạng thái Save của Feature.
+  - Dirty UseCase/Diagram/BRD của Feature A không hiển thị ở Feature B.
+  - Đổi feature khi child dirty luôn hỏi confirm hoặc chặn rõ.
+- Dependencies: TASK-149
+- Verification: Component tests cho save-state reducer/context; Playwright multi-feature dirty-state matrix.
+- Completion notes: Split Project/Spec/Feature save states and keyed UseCase/Diagram/BRD states by active resource scope with dirty guards on feature switches. Verified by build, UI tests and E2E suite.
+
+#### TASK-151 - Siết validator cho saved Diagram graph payload
+- Priority: P1
+- Status: Done
+- Module: diagram-backend
+- Problem: `DiagramSave` chỉ kiểm `nodes/edges` là array và payload size, nhưng BRD generation sau đó assume node type, id, coordinate, lane and edge endpoint hợp lệ.
+- Why it matters: Một diagram malformed có thể lưu thành công rồi làm `/api/diagrams/{id}/brd/generate` trả 500 thay vì 422.
+- Implementation steps:
+  1. Tạo Pydantic models cho saved graph node/edge tối thiểu.
+  2. Enforce supported node types: `start`, `end`, `activity`, `decision`, `note`, `sync-bar`, `lane`.
+  3. Enforce node IDs unique và edge endpoints tồn tại.
+  4. Enforce activity/decision/note lane binding hợp lệ khi có lanes.
+  5. Cập nhật `stored_generate_request` dùng adapter đã validate, không cast ad hoc.
+  6. Trả 422 envelope thay vì 500 cho malformed graph.
+- Acceptance criteria:
+  - Malformed graph không được lưu hoặc bị reject có kiểm soát.
+  - Saved valid graph vẫn round-trip và generate BRD như hiện tại.
+  - Không còn `float(...)`/field assumptions có thể throw ngoài validator path.
+- Dependencies: None
+- Verification: Pytest payload-limit/malformed graph cases + full-chain persistence test.
+- Completion notes: Added saved diagram graph validation for supported node types, unique node/edge IDs, finite coordinates, edge endpoint existence and lane binding. Malformed graph save now returns `422`.
+
+#### TASK-152 - Thêm Clerk auth matrix tests cho backend
+- Priority: P1
+- Status: Done
+- Module: identity-authorization
+- Problem: Persistence tests đang dựa vào `AUTH_DISABLED=true` và dependency override, chưa chứng minh missing/invalid/wrong-party Clerk token bị xử lý đúng.
+- Why it matters: Auth là trust boundary chính của toàn bộ project data.
+- Implementation steps:
+  1. Refactor `auth.py` để có seam testable quanh `authenticate_request`.
+  2. Test missing Authorization trả 401 khi `AUTH_DISABLED=false`.
+  3. Test invalid token, wrong authorized party và missing subject.
+  4. Test user mới được tạo role `user`, client không gửi role.
+  5. Test cross-user access ở Project, Spec, Feature, UseCase, Diagram, BRD đều trả `404`.
+- Acceptance criteria:
+  - Auth-disabled tests vẫn tồn tại cho fast local flow.
+  - Có suite riêng chạy auth thật/mocked SDK state với `AUTH_DISABLED=false`.
+  - Không route business nào public trừ health/readiness.
+- Dependencies: TASK-148
+- Verification: `npm run test:api-mock` hoặc backend pytest command mới.
+- Completion notes: Added a Clerk auth seam and matrix tests for missing/invalid/wrong-party/subjectless tokens, default role hydration and cross-user `404` across the resource chain.
+
+### Next
+
+#### TASK-153 - Extract persistence service layer khỏi route monolith
+- Priority: P2
+- Status: Done
+- Module: persistence-api-foundation
+- Problem: `routes/persistence.py` đang chứa route handlers, serializers, generation adapters và transaction commits trong một file lớn.
+- Why it matters: Các fix tiếp theo cho delete/guards/validation sẽ khó review và dễ tạo transaction behavior lệch nhau.
+- Implementation steps:
+  1. Tách serializers sang `app/persistence/serializers.py`.
+  2. Tách Project/Spec/Feature/UseCase/Diagram/BRD operations sang service modules.
+  3. Đặt transaction boundary trong service function, route chỉ parse dependency và trả DTO.
+  4. Tách resource-scoped generation adapters khỏi CRUD service.
+  5. Giữ public route paths không đổi.
+- Acceptance criteria:
+  - Route file còn chủ yếu endpoint wiring.
+  - Service tests có thể gọi operations không cần TestClient.
+  - Full-chain API test vẫn pass.
+- Dependencies: TASK-151, TASK-152 nên làm trước để tránh refactor trên nền thiếu guard.
+- Verification: Backend pytest + diff review route size/commit ownership.
+- Completion notes: Extracted serializers, CRUD services and generation adapters into `app.services.persistence_*`; route file now primarily wires dependencies and endpoint contracts.
+
+#### TASK-154 - Implement explicit UseCase delete UI bằng resource UUID
+- Priority: P2
+- Status: Done
+- Module: use-case-frontend
+- Problem: API có `DELETE /api/use-cases/{id}` nhưng UI chưa expose delete theo DB UUID trong persisted workspace.
+- Why it matters: User không thể quản lý portfolio latest-state rõ ràng; xóa bằng array diff bị tránh đúng nhưng chưa có action thay thế.
+- Implementation steps:
+  1. Map `UseCaseResource.id` vào UI inventory/card state.
+  2. Thêm delete action per use case với confirmation nêu cascade diagram/BRD.
+  3. Gọi `api.deleteUseCase(id)` và update local resources/drafts.
+  4. Nếu deleted use case đang active canvas, clear canvas binding hoặc chuyển sang orphan state có copy rõ.
+  5. Add empty-state sau khi xóa hết.
+- Acceptance criteria:
+  - Xóa một use case không ảnh hưởng use case khác.
+  - Child diagram/BRD cascade rõ trong copy và test.
+  - Refresh sau delete không load lại item.
+- Dependencies: TASK-150
+- Verification: Playwright use-case delete/reload/cascade smoke + API cascade test.
+- Completion notes: Added persisted UseCase delete action backed by `DELETE /api/use-cases/{id}`, with cascade copy and local canvas/BRD cleanup. Added backend cascade coverage.
+
+#### TASK-155 - Scope BRD recovery cache theo user/project/diagram
+- Priority: P2
+- Status: Done
+- Module: brd-frontend
+- Problem: Legacy BRD localStorage cache vẫn global trong standalone editor và chưa có recovery cache trong persisted workspace.
+- Why it matters: Latest-only server Save không bảo vệ unsaved markdown nếu user hard-reload trước khi bấm Save.
+- Implementation steps:
+  1. Thêm cache key format gồm Clerk user ID, project ID, diagram ID.
+  2. Trong persisted workspace, hydrate cache chỉ khi diagram ID khớp active diagram.
+  3. Server saved BRD thắng cache bình thường; cache chỉ là recovery draft.
+  4. Sau Save thành công, clear hoặc baseline scoped cache.
+  5. Ẩn legacy `Open last BRD draft` trong persisted workspace nếu không có scoped cache.
+- Acceptance criteria:
+  - Draft của diagram/project khác không xuất hiện sai context.
+  - Hard reload trước Save có thể recover đúng draft hiện tại.
+  - Server Save/reload vẫn là nguồn chính.
+- Dependencies: TASK-150
+- Verification: Brd cache unit tests + Playwright multi-diagram recovery flow.
+- Completion notes: Scoped BRD recovery cache by Clerk user, project and diagram, hydrates only for the active persisted diagram, and clears scoped cache after successful server Save.
+
+#### TASK-156 - Thêm active feature identity vào URL hoặc route
+- Priority: P2
+- Status: Done
+- Module: frontend-application-shell
+- Problem: Project workspace luôn chọn feature đầu tiên theo `updated_at`; active feature không deep-link được.
+- Why it matters: Refresh/share link có thể mở nhầm feature sau khi một feature khác vừa update.
+- Implementation steps:
+  1. Chọn route/query contract: `/projects/:projectId/features/:featureId` hoặc `?feature=`.
+  2. Khi user chọn feature, update URL bằng navigate/replace phù hợp.
+  3. Khi route có feature ID không thuộc project, hiển thị not-found-safe hoặc fallback rõ.
+  4. Khi chưa có feature ID, redirect/chọn feature đầu tiên có chủ đích.
+  5. Cập nhật tests cho refresh/deep-link.
+- Acceptance criteria:
+  - Refresh giữ đúng active feature.
+  - URL không leak resource existence của user khác.
+  - Dashboard/open project behavior vẫn có default hợp lý.
+- Dependencies: TASK-150
+- Verification: Router/component tests + Playwright refresh active feature.
+- Completion notes: Added `/projects/:projectId/features/:featureId` route, feature selection URL sync and default redirect to the selected feature.
+
+### Later
+
+#### TASK-157 - Rehearse Docker/Railway API deploy path
+- Priority: P2
+- Status: Partial
+- Module: api-deployment
+- Problem: Repo có Dockerfile/Railway manifest nhưng Docker build/Railway deploy chưa được xác nhận end-to-end trong review.
+- Why it matters: Runtime contract mới chỉ đáng tin khi image build, pre-deploy migration và health/readiness đều chạy trên staging.
+- Implementation steps:
+  1. Build Docker image local hoặc CI từ repo root.
+  2. Run container với test `DATABASE_URL` và hit `/healthz`.
+  3. Run Alembic inside same image against staging/test DB.
+  4. Re-auth Railway CLI, link project/environment.
+  5. Deploy staging và ghi log pre-deploy/start/healthcheck.
+- Acceptance criteria:
+  - Docker image build không copy `.env` và start được.
+  - Railway staging deploy chạy migration trước start.
+  - `/healthz` và `/readyz` pass trên staging.
+- Dependencies: TASK-148, Railway credential rotation.
+- Verification: Docker build/run logs + Railway staging smoke.
+- Completion notes: Fixed Python package discovery for Docker, built `swimlane-api:task-157`, ran the container and verified `/healthz`. Railway live staging deploy remains blocked because `railway status` reports expired OAuth token and no linked project.
+
+#### TASK-158 - Split full-chain persistence test thành scenario matrix
+- Priority: P2
+- Status: Done
+- Module: persistence-e2e-security
+- Problem: `test_persistence_chain.py` chứng minh happy path lớn, nhưng ít scenario nhỏ cho conflict, not-owned child levels, generation-not-auto-save và malformed payloads.
+- Why it matters: Một test lớn dễ pass mà vẫn bỏ sót regression ở từng boundary.
+- Implementation steps:
+  1. Tạo fixture factory cho user/project/spec/feature/usecase/diagram.
+  2. Split happy path, generation-not-auto-save, ownership matrix, cascade, outdated timestamp thành test riêng.
+  3. Add malformed diagram/BRD payload tests sau TASK-151.
+  4. Add no-leak 404 assertions cho every child endpoint.
+  5. Keep one full-chain smoke as final integration.
+- Acceptance criteria:
+  - Test failure chỉ ra boundary cụ thể.
+  - Full-chain smoke vẫn tồn tại nhưng không chứa toàn bộ assertion matrix.
+  - Ownership coverage đủ Project, Spec, Feature, UseCase, Diagram, BRD.
+- Dependencies: TASK-151, TASK-152
+- Verification: Backend pytest suite runtime and coverage review.
+- Completion notes: Added scenario matrix coverage for auth, ownership, generation-not-auto-save, malformed diagram payloads and UseCase cascade while keeping the existing full-chain smoke.
+
+## Post-Implementation Review: TASK-148 to TASK-158
+
+Review snapshot:
+[2026-06-07 TASK-148 to TASK-158 implementation review](./reviews/2026-06-07-task-148-158-implementation-review.md).
+
+### Now
+
+#### TASK-159 - Track dirty state across all persisted resource scopes
+- Priority: P1
+- Status: Done
+- Module: save-ux-integration
+- Problem: `ProjectWorkspace` keys Save states by resource scope, but the global unsaved-change guard only checks the currently active Feature/UseCase/Diagram/BRD scope.
+- Why it matters: User can dirty Diagram A, switch to Diagram B, and lose the beforeunload warning even though Diagram A is still dirty in `scopedSaveStates`.
+- Implementation steps:
+  1. Replace `Record<string, SaveState>` with a small save-state registry/reducer module.
+  2. Track scope metadata: type, resource ID, label, active flag, and state.
+  3. Expose helpers for `isActiveDirty`, `isAnyDirty`, `dirtyScopes`, `setScopeState`, and `clearScope`.
+  4. Use `isAnyDirty` for `beforeunload` and leaving workspace.
+  5. Use active-scope helpers for button labels so the toolbar still reflects the current artifact.
+  6. Clear deleted resource scopes when UseCase/Diagram/BRD is deleted.
+- Acceptance criteria:
+  - Dirty state of inactive Diagram/BRD still triggers leave/reload warning.
+  - Active toolbar still shows the current resource state, not a random inactive dirty state.
+  - Deleting a resource clears its dirty scopes.
+  - Feature and diagram switching do not silently hide unsaved work.
+- Dependencies: TASK-150, TASK-154
+- Verification: Add reducer unit tests plus Playwright flow: dirty Diagram A, switch to B, attempt leave/reload and confirm warning still appears.
+- Completion notes: Added `src/persistence/save-state.ts` registry with dirty scope helpers, wired `ProjectWorkspace` to use aggregate dirty state for leave/reload guards, and added registry unit tests.
+
+#### TASK-160 - Guard diagram/use-case context switches with scoped dirty prompts
+- Priority: P1
+- Status: Done
+- Module: editor-save-state
+- Problem: `handleOpenUseCaseDiagramCanvas` switches active canvas after persisting the current graph locally, but it does not check whether the current persisted Diagram/BRD has unsaved server changes.
+- Why it matters: Local editor state may survive, but latest-state server Save intent is unclear; user can move away from a dirty artifact without an explicit decision.
+- Implementation steps:
+  1. Add `canSwitchDiagramScope(nextUseCaseId)` helper using the save-state registry from TASK-159.
+  2. Before opening another use-case diagram, prompt if current Diagram or BRD scope is dirty.
+  3. Offer clear choices: stay and save, discard local unsaved changes, or continue while keeping dirty state tracked.
+  4. Preserve current local graph before switch only after the user confirms the chosen path.
+  5. Add status copy that names the previous and next use case IDs.
+- Acceptance criteria:
+  - Switching away from dirty Diagram/BRD prompts the user.
+  - Cancel keeps the current canvas binding unchanged.
+  - Continue keeps the previous dirty scope visible in the global unsaved-change summary.
+- Dependencies: TASK-159
+- Verification: Playwright multi-use-case matrix for dirty diagram switch, dirty BRD switch, cancel, continue and save paths.
+- Completion notes: Added `WorkspacePersistence.canSwitchDiagramScope` and guarded `handleOpenUseCaseDiagramCanvas` so switching away from dirty Diagram/BRD asks for confirmation and preserves the previous dirty scope.
+
+### Next
+
+#### TASK-161 - Make invalid active feature deep-links explicit
+- Priority: P2
+- Status: Done
+- Module: frontend-routing
+- Problem: `/projects/:projectId/features/:featureId` silently falls back to the first feature when the feature ID is not in the project.
+- Why it matters: A stale or mistyped URL can open a different feature without explanation, which is confusing during review/share flows.
+- Implementation steps:
+  1. Detect `routeFeatureId && !routedFeature` after features load.
+  2. Show a not-found-safe banner: "Feature không tồn tại trong project này hoặc bạn không có quyền."
+  3. Provide CTA to open the first feature or return to the feature list.
+  4. Avoid revealing whether the feature exists under another user/project.
+  5. Add route tests for valid feature, missing feature and no feature ID default.
+- Acceptance criteria:
+  - Valid feature URLs refresh to the same feature.
+  - Invalid feature URLs do not silently open another feature.
+  - Copy does not leak cross-user resource existence.
+- Dependencies: TASK-156
+- Verification: Router/component tests and Playwright refresh/deep-link smoke.
+- Completion notes: Invalid `/projects/:projectId/features/:featureId` links now show a safe not-found banner with CTAs instead of silently opening another feature.
+
+#### TASK-162 - Handle persisted BRD load failures without losing recovery drafts
+- Priority: P2
+- Status: Done
+- Module: brd-frontend
+- Problem: The persisted BRD load effect calls `workspace.loadBrd(diagramId).then(...)` without an error path.
+- Why it matters: A transient backend failure can leave stale panel state or create an unhandled promise rejection while switching diagrams.
+- Implementation steps:
+  1. Add `.catch` or async/await error handling around persisted BRD load.
+  2. Preserve scoped local recovery cache when server load fails.
+  3. Set BRD panel/status copy that tells the user server load failed and local draft is still recoverable.
+  4. Avoid overwriting an existing dirty BRD draft with partial/failed server state.
+  5. Add a unit or component test by mocking `loadBrd` rejection.
+- Acceptance criteria:
+  - Failed BRD load is visible to the user and does not crash.
+  - Scoped cache is still available after a load failure.
+  - Successful retry/server load still wins over cache when not dirty.
+- Dependencies: TASK-155
+- Verification: Vitest mocked workspace test plus manual Browser smoke if available.
+- Completion notes: Persisted BRD load now catches backend errors, preserves scoped recovery cache, marks the BRD panel failed/retryable when appropriate, and avoids overwriting the local draft on load failure.
+
+### Later
+
+#### TASK-163 - Complete Railway staging deploy rehearsal
+- Priority: P2
+- Status: Partial
+- Module: api-deployment
+- Problem: Docker build and `/healthz` pass locally, but Railway live deployment, Alembic pre-deploy and `/readyz` remain unverified because Railway CLI is not logged in and the repo is not linked.
+- Why it matters: Production readiness depends on the actual Railway environment resolving credentials, running migrations and serving health checks.
+- Implementation steps:
+  1. Run `railway login` with the project owner account.
+  2. Run `railway link` to attach the repository to the correct project/environment.
+  3. Confirm rotated PostgreSQL credentials are in Railway and local `.env` does not contain stale exposed secrets.
+  4. Deploy staging using `railway.toml`.
+  5. Verify pre-deploy `python -m alembic upgrade head` logs.
+  6. Hit `/healthz` and `/readyz` on the staging service.
+  7. Record deploy result in `docs/operations/railway-persistence-release.md`.
+- Acceptance criteria:
+  - Railway staging deployment completes from the current Dockerfile.
+  - Alembic migration runs before app start.
+  - `/healthz` and `/readyz` pass in staging.
+  - Release runbook contains timestamped evidence.
+- Dependencies: Railway account access, credential rotation, TASK-157 partial completion
+- Verification: Railway deploy logs, staging HTTP checks and runbook update.
+- Completion notes: Rechecked Railway CLI. `railway status` still fails with expired OAuth token and no linked project, so staging deploy/pre-deploy/ready checks remain externally blocked until the project owner runs `railway login` and `railway link`.
+
+## Post-Implementation Review: TASK-159 to TASK-163
+
+Review snapshot:
+[2026-06-07 TASK-159 to TASK-163 implementation review](./reviews/2026-06-07-task-159-163-implementation-review.md).
+
+### Now
+
+#### TASK-164 - Clear stale dirty scopes on feature discard and cascade delete
+- Priority: P1
+- Status: Done
+- Module: save-ux-integration
+- Problem: `TASK-159` preserves inactive dirty scopes, but `selectFeature`, `startNewFeature` and
+  `deleteFeature` do not clear scopes after the user confirms discard or deletes the owning feature.
+- Why it matters: The global unsaved-change guard can remain stuck on invisible or intentionally
+  discarded artifacts, making the persisted workspace feel unsafe and confusing.
+- Implementation steps:
+  1. Add parent metadata to `SaveScopeEntry` or add helper predicates that can identify all scopes
+     owned by a feature/use case/diagram.
+  2. Create a `clearFeatureScopes(featureId)` helper around `clearScopesByPredicate`.
+  3. Call the helper when feature changes are explicitly discarded in `selectFeature` and
+     `startNewFeature`.
+  4. Call the helper after `deleteFeature` succeeds, including known diagram and BRD scopes for the
+     deleted feature.
+  5. Keep "continue while tracking dirty state" from diagram switching unchanged; only clear when
+     the user selected a discard/delete path.
+- Acceptance criteria:
+  - Confirming feature discard removes dirty warnings for the previous feature's use cases,
+    diagrams and BRD scopes.
+  - Deleting a feature clears all dirty scopes owned by that feature.
+  - Continuing from a dirty diagram switch still preserves the previous dirty scope.
+- Dependencies: TASK-159
+- Verification: Add save-state/ProjectWorkspace tests for feature discard, new feature, feature
+  delete and diagram switch continue.
+- Completion notes: Added feature ownership metadata to every persisted Save scope,
+  `clearFeatureScopes`, cleanup on feature discard/new/delete paths, and regression tests proving
+  other features' dirty scopes remain tracked.
+
+#### TASK-165 - Clear active editor context for invalid feature routes
+- Priority: P1
+- Status: Done
+- Module: frontend-routing
+- Problem: Invalid `/projects/:projectId/features/:featureId` URLs show a banner but can leave the
+  previous `activeFeatureId` and editor provider context mounted when navigating from a valid feature
+  to an invalid feature in the same project.
+- Why it matters: The URL says the feature is missing, but the editor can still show another
+  feature, which violates the explicit deep-link behavior expected by `TASK-161`.
+- Implementation steps:
+  1. In the project load effect, add an explicit `routeFeatureId && !routedFeature` branch.
+  2. Clear `activeFeatureId`, `featureDraftId`, `activeDiagram` and `activeDiagramBusinessKey` in
+     that branch.
+  3. Route the user to a safe tab or render a not-found-only state that cannot mount `App` with a
+     stale `WorkspacePersistenceProvider`.
+  4. Keep the banner copy non-enumerating: do not reveal whether the feature exists under another
+     user or project.
+  5. Preserve the CTA that opens the first visible feature after user action.
+- Acceptance criteria:
+  - Navigating from a valid feature URL to an invalid feature URL unmounts the old editor context.
+  - Invalid URLs never silently show another feature.
+  - The "open first feature" CTA still works and updates the URL.
+- Dependencies: TASK-161
+- Verification: Add router/component tests for valid refresh, invalid initial load and valid-to-
+  invalid navigation.
+- Completion notes: Invalid feature routes now clear active feature/draft/diagram context, move to
+  the safe feature tab, unmount the stale editor provider and preserve the explicit first-feature
+  CTA.
+
+#### TASK-166 - Make persisted diagram load and scope switching transactional
+- Priority: P1
+- Status: Done
+- Module: editor-save-state
+- Problem: `handleOpenUseCaseDiagramCanvas` does not catch `workspace.loadDiagram` failures, and
+  `ProjectWorkspace.loadDiagram` sets `activeDiagramBusinessKey` before the backend load succeeds.
+- Why it matters: A transient load failure can leave the active save scope half-switched and produce
+  an uncaught async error from the click handler.
+- Implementation steps:
+  1. Move `setActiveDiagramBusinessKey(businessKey)` in `loadDiagram` until after `api.getDiagram`
+     succeeds, or add an explicit loading/pending scope state.
+  2. Wrap `workspace.loadDiagram(useCaseId)` in `handleOpenUseCaseDiagramCanvas` with `try/catch`.
+  3. On failure, keep the previous canvas binding and active save scope unchanged.
+  4. Surface a status message that names the use case that failed to load.
+  5. Preserve the dirty-switch confirmation behavior from `TASK-160`.
+- Acceptance criteria:
+  - Failed persisted diagram load does not change `activeDiagramBusinessKey`.
+  - Failed persisted diagram load does not throw an unhandled promise rejection.
+  - The user sees a clear retryable status message.
+- Dependencies: TASK-160
+- Verification: Add mocked `loadDiagram` rejection test and a Playwright mock flow for switching
+  from dirty Diagram A to Diagram B when B load fails.
+- Completion notes: Diagram generation/load commits the active business key only after success,
+  App catches persisted load failures without rebinding the canvas, and both open and generate paths
+  now run the scoped dirty-switch guard.
+
+### Next
+
+#### TASK-167 - Protect BRD recovery cache from server-load overwrite
+- Priority: P2
+- Status: Done
+- Module: brd-frontend
+- Problem: The persisted BRD load effect hydrates scoped recovery cache, but a successful server
+  load immediately overwrites component state and can overwrite the local cache with the server
+  version.
+- Why it matters: A local unsaved recovery draft can disappear when the server has an older saved
+  BRD, despite the UI implying the recovery draft was preserved.
+- Implementation steps:
+  1. Track whether a scoped BRD recovery cache was restored for the active diagram.
+  2. Treat restored local recovery as dirty unless it matches the server payload fingerprint.
+  3. On server success with dirty local recovery, keep the local draft visible and expose an action to
+     load the server version.
+  4. Only overwrite local recovery automatically when there is no local draft or the draft is not
+     dirty.
+  5. Clear the restored-cache marker after a successful explicit Save.
+- Acceptance criteria:
+  - Server success does not overwrite a dirty local BRD recovery draft.
+  - User can deliberately replace local recovery with the server BRD.
+  - Saving BRD clears the local recovery cache and returns the BRD save state to saved.
+- Dependencies: TASK-162
+- Verification: Add a mocked `loadBrd` success test with existing scoped cache, plus the existing
+  load failure test.
+- Completion notes: Scoped BRD cache now records dirty recovery state, only persists unsaved
+  workspace drafts, keeps dirty local recovery when a server BRD loads, exposes an explicit
+  `Dùng bản server` action, retries server load correctly and clears recovery after Save.
+
+#### TASK-168 - Add route and dirty-switch regression coverage
+- Priority: P2
+- Status: Done
+- Module: frontend-tests
+- Problem: The new behavior from `TASK-159` through `TASK-162` is mostly covered by registry helper
+  tests, not by component or E2E tests for actual user transitions.
+- Why it matters: The highest-risk failures are state-machine regressions that helper tests will not
+  catch.
+- Implementation steps:
+  1. Add ProjectWorkspace tests for aggregate dirty guard, invalid route banner and stale context
+     clearing.
+  2. Add App/workspace tests for `canSwitchDiagramScope` cancel/continue behavior.
+  3. Add App/workspace tests for persisted diagram load rejection.
+  4. Add BRD recovery tests for `PERSISTED_BRD_LOAD_FAILED` and dirty cache preservation.
+  5. Add one Playwright mock scenario that dirties Diagram A, opens Diagram B, then attempts to leave
+     and sees the global unsaved warning.
+- Acceptance criteria:
+  - Regression tests fail against the current reviewed gaps before fixes.
+  - `npm run test:ui-mock` covers the component-level route/switch/recovery cases.
+  - `npm run test:e2e-mock` covers one full dirty-switch flow.
+- Dependencies: TASK-164, TASK-165, TASK-166, TASK-167
+- Verification: Run `npm run test:ui-mock`, `npm run test:e2e-mock` and `npm run build`.
+- Completion notes: Added `ProjectWorkspace` integration tests for valid-to-invalid routing,
+  discard cleanup and failed diagram load scope retention; expanded save-state/cache/BRD panel
+  tests for switch decisions and recovery conflict actions. Full UI suite, existing 17-scenario
+  Playwright suite and production build pass. Real hosted Clerk E2E remains outside this mock
+  persistence batch.
+
+#### TASK-169 - Add Clerk backend config preflight and local auth setup guard
+- Priority: P1
+- Status: Pending
+- Module: identity-authorization
+- Problem: Current local testing can still hit `503 Clerk backend authentication is not configured.`
+  after adding `CLERK_SECRET_KEY` if the backend process is not restarted, runs from an environment
+  that does not load `apps/api/.env`, or the frontend/backend Clerk env names drift.
+- Why it matters: This blocks every authenticated backend route and makes the system look broken
+  even though the auth code path is working as written.
+- Implementation steps:
+  1. Treat real Clerk local mode as configured when `apps/api/.env` has `CLERK_SECRET_KEY` or
+     `CLERK_JWT_KEY`, and root `.env.local` has `VITE_CLERK_PUBLISHABLE_KEY`.
+  2. Add a backend auth config preflight command, for example `npm run api:auth:smoke`, that prints
+     only redacted presence checks for `CLERK_SECRET_KEY`, `CLERK_JWT_KEY`, `AUTH_DISABLED` and
+     `CLERK_AUTHORIZED_PARTIES`.
+  3. Add a startup or `/readyz` diagnostic that reports an actionable redacted message when auth is
+     enabled but no backend Clerk key is configured.
+  4. Update README setup with explicit restart guidance: after editing `apps/api/.env`, restart the
+     FastAPI process because settings are read at import time.
+  5. Update env docs to clarify that `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is not consumed by this
+     Vite app; use `VITE_CLERK_PUBLISHABLE_KEY` for the frontend.
+  6. Keep secrets out of docs and logs; never print actual `CLERK_SECRET_KEY`, `CLERK_JWT_KEY` or
+     publishable key values.
+- Acceptance criteria:
+  - In real Clerk mode, a fresh backend process reports backend Clerk auth configured without
+    exposing the key.
+  - Authenticated API calls no longer return `Clerk backend authentication is not configured.`
+    after the backend is restarted with the updated env.
+  - In fast dev mode, `AUTH_DISABLED=true` produces the deterministic test user path.
+  - Missing Clerk backend key produces a clear setup/preflight failure, not a confusing runtime
+    blocker during the product flow.
+  - `.env.example`, root `.env.local` guidance and README explain the required variables without
+    containing real secrets.
+- Dependencies: TASK-132, TASK-152
+- Verification: Run `npm run api:auth:smoke`, backend auth/config tests, `npm run test:api-mock`,
+  and one local authenticated API smoke after restarting the backend.
+- Current notes: 2026-06-07 config smoke confirms a new backend Python process sees
+  `CLERK_SECRET_KEY=<set>` and `AUTH_DISABLED=False`; if the running server still returns 503,
+  restart it or confirm it is launched from this repository with `apps/api/.env` visible.

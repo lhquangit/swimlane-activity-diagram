@@ -21,6 +21,30 @@ Severity:
 
 ---
 
+## [FIXED] Project Spec list textarea không giữ Space và Enter (severity: P1) {#fixed-project-spec-list-input-space-enter}
+
+- **ID**: KI-33
+- **Phát hiện**: 2026-06-07 by Codex (user report)
+- **Severity**: P1 — chặn nhập tự nhiên các danh sách nhiều dòng như `Người dùng mục tiêu`; user không thể gõ tên có nhiều từ hoặc tạo dòng mới.
+- **Reproduction**: Trong Project Spec, nhập vào `Người dùng mục tiêu`; dấu cách cuối từ hoặc dòng trống vừa tạo bằng Enter biến mất ngay.
+- **Root cause**: `ListField` derive trực tiếp textarea value từ `string[]` và chạy `trim().filter(Boolean)` trên mỗi keystroke, làm mất whitespace tạm thời trước khi user nhập ký tự tiếp theo.
+- **Fix**: Giữ raw textarea draft trong local component state, đồng thời parse danh sách normalized để cập nhật persistence draft; chỉ đồng bộ lại raw draft khi giá trị danh sách thực sự thay đổi từ bên ngoài.
+- **Verified**: 2026-06-07 by Codex — ProjectWorkspace integration regression, full 74-test UI suite và production build.
+
+---
+
+## [OPEN] Backend trả 503 khi thiếu hoặc chưa reload Clerk backend key (severity: P1) {#open-clerk-backend-auth-not-configured}
+
+- **ID**: KI-32
+- **Phát hiện**: 2026-06-07 by Codex (user report)
+- **Severity**: P1 — chặn toàn bộ authenticated API trong local/current system; có workaround bằng cách cấu hình Clerk backend key rồi restart backend, hoặc bật auth-disabled cho dev.
+- **Reproduction**: Chạy backend với `AUTH_DISABLED=false` hoặc unset, gọi business API có auth dependency; response trả `503` với detail `Clerk backend authentication is not configured.`
+- **Root cause**: `apps/api/app/auth.py` yêu cầu ít nhất một trong `CLERK_SECRET_KEY` hoặc `CLERK_JWT_KEY`. User đã bổ sung `CLERK_SECRET_KEY` trong `apps/api/.env`, nhưng backend process đã import settings trước đó sẽ không tự reload; frontend Vite cũng chỉ đọc `VITE_CLERK_PUBLISHABLE_KEY`, không đọc `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`.
+- **Fix**: Todo — TASK-169 thêm preflight config, docs local modes, restart guidance và test/dev guard để lỗi cấu hình được phát hiện rõ trước khi user vào flow chính.
+- **Verified**: 2026-06-07 by Codex — backend config smoke thấy `CLERK_SECRET_KEY=<set>` trong process mới; runtime flow vẫn cần restart backend và auth smoke.
+
+---
+
 ## [FIXED] Kéo shape từ vùng text chỉ di chuyển label (severity: P1) {#fixed-node-text-drag-hijacks-shape}
 
 - **ID**: KI-31

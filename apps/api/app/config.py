@@ -28,6 +28,17 @@ _load_env_file()
 
 @dataclass(frozen=True)
 class Settings:
+    database_url: str = os.getenv("DATABASE_URL", "").strip()
+    database_pool_size: int = int(os.getenv("DATABASE_POOL_SIZE", "5"))
+    database_max_overflow: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "10"))
+    database_pool_timeout_seconds: int = int(os.getenv("DATABASE_POOL_TIMEOUT_SECONDS", "10"))
+    clerk_secret_key: str = os.getenv("CLERK_SECRET_KEY", "").strip()
+    clerk_jwt_key: str = os.getenv("CLERK_JWT_KEY", "").strip()
+    clerk_authorized_parties_raw: str = os.getenv(
+        "CLERK_AUTHORIZED_PARTIES",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173",
+    )
+    auth_disabled: bool = os.getenv("AUTH_DISABLED", "false").lower() == "true"
     ai_provider: str = (
         os.getenv("AI_PROVIDER", os.getenv("BRD_PROVIDER", "openrouter")).strip() or "openrouter"
     )
@@ -84,6 +95,28 @@ class Settings:
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins_raw.split(",") if origin.strip()]
+
+    @property
+    def clerk_authorized_parties(self) -> list[str]:
+        return [
+            origin.strip()
+            for origin in self.clerk_authorized_parties_raw.split(",")
+            if origin.strip()
+        ]
+
+    @property
+    def sqlalchemy_database_url(self) -> str:
+        value = self.database_url
+        if not value:
+            raise RuntimeError("DATABASE_URL is required for persistence operations.")
+        if "${{" in value:
+            raise RuntimeError(
+                "DATABASE_URL contains an unresolved Railway reference. "
+                "Use railway run or a resolved local URL."
+            )
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+        return value
 
 
 settings = Settings()

@@ -56,3 +56,20 @@ Chuỗi này tồn tại để mọi bước AI/giao diện đều bám vào cù
 - Repo đã implement `ProjectSpec + FeatureIntent -> UseCaseDraft -> DiagramDraft`.
 - `DiagramDraft` được giữ theo `use_case_id` trong frontend session, có trạng thái `outdated/diverged`, giữ orphan draft khi use case regenerate, và vẫn mở được artifact hiện tại nếu regenerate diagram thất bại; chưa có persistence database hoặc semantic merge ngược vào use case.
 - `FormalBRDDraft` tổng hợp từ portfolio use case/diagram vẫn là bước tiếp theo trong backlog.
+
+## Persistence MVP đã chốt
+
+Quan hệ lưu trữ:
+
+`AppUser -> Projects -> Spec -> FeatureIntents -> UseCases -> Diagram -> BrdDoc`
+
+- Một user có nhiều project.
+- Một project có một spec.
+- `Spec` là `ProjectSpec` hiện tại, nhưng tên project được chuyển sang entity `Project`.
+- Một spec có nhiều feature intent.
+- Một feature intent có nhiều use case.
+- Một use case có tối đa một diagram.
+- Một diagram có tối đa một BRD document.
+- Chỉ lưu phiên bản mới nhất; user dùng nút `Lưu` cho từng phần.
+
+Xem [database-architecture.md](./database-architecture.md).

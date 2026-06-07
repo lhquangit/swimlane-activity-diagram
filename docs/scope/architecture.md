@@ -161,3 +161,8 @@ Chi tiết contract tại [artifact-chain.md](./artifact-chain.md).
 - Lưu trữ tạm hiện gồm:
   - `localStorage` cho BRD draft cache
   - in-memory state cho `ProjectSpec`, `FeatureIntent`, và `UseCaseDraft`
+
+Thiết kế persistence MVP đã được chốt tại
+[database-architecture.md](./database-architecture.md): PostgreSQL + SQLAlchemy/Alembic trên FastAPI
+hiện có, Clerk JWT ở backend, ownership trực tiếp user/project, chỉ lưu phiên bản mới nhất và dùng
+nút `Lưu` cho từng phần.

@@ -38,6 +38,9 @@ source apps/api/.venv/bin/activate
 pip install -e "apps/api[dev]"
 ```
 
+Repo scripts intentionally call `apps/api/.venv/bin/python` directly, so backend commands do
+not depend on packages installed in the system Python.
+
 ### 3. Tạo file env cho backend
 
 ```bash
@@ -79,7 +82,7 @@ USECASE_GENERATION_MODE=ai_opt_in
 Mở terminal 1:
 
 ```bash
-source apps/api/.venv/bin/activate
+npm run api:python:smoke
 npm run dev:api
 ```
 

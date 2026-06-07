@@ -10,6 +10,7 @@ docs/
 ├── scope/                   ← Phạm vi & kiến trúc dự án
 │   ├── overview.md          ← Tổng quan, mục tiêu, đối tượng dùng
 │   ├── architecture.md      ← Stack công nghệ & thiết kế tổng thể
+│   ├── database-architecture.md ← PostgreSQL, artifact revisions, auth và provenance
 │   └── features.md          ← Danh sách tính năng hiện có
 ├── use-cases/               ← Các kịch bản sử dụng end-to-end
 │   ├── README.md
@@ -47,6 +48,7 @@ docs/
 
 - [Tổng quan dự án](scope/overview.md)
 - [Kiến trúc kỹ thuật](scope/architecture.md)
+- [Kiến trúc database](scope/database-architecture.md)
 - [Danh sách tính năng](scope/features.md)
 - [Code review task list](review-task-list.md)
 - [Code review archive](reviews/README.md)

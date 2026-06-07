@@ -3,6 +3,12 @@ import type { BrdWorkspaceCacheEntry } from './types';
 export const BRD_WORKSPACE_CACHE_KEY = 'swimlane.ai_brd.cache.v1';
 export const BRD_WORKSPACE_CACHE_VERSION = 'v1';
 
+export type BrdWorkspaceCacheScope = {
+  userId: string;
+  projectId: string;
+  diagramId: string;
+};
+
 function getStorage() {
   if (typeof window === 'undefined' || !window.localStorage) return null;
   return window.localStorage;
@@ -58,6 +64,7 @@ export function isBrdWorkspaceCacheEntry(value: unknown): value is BrdWorkspaceC
     (value.runtimeStatus === null || typeof value.runtimeStatus === 'string') &&
     typeof value.phase === 'string' &&
     typeof value.activeTab === 'string' &&
+    (value.dirty === undefined || typeof value.dirty === 'boolean') &&
     isErrorObject(value.error) &&
     (value.lastGenerateFingerprint === null || typeof value.lastGenerateFingerprint === 'string') &&
     (value.lastGeneratedRevision === null || typeof value.lastGeneratedRevision === 'number') &&
@@ -66,12 +73,28 @@ export function isBrdWorkspaceCacheEntry(value: unknown): value is BrdWorkspaceC
   );
 }
 
-export function loadBrdWorkspaceCache(): BrdWorkspaceCacheEntry | null {
+export function hasDirtyBrdRecovery(entry: BrdWorkspaceCacheEntry | null): boolean {
+  return Boolean(entry && entry.dirty !== false && (entry.draft || entry.spec));
+}
+
+function cacheKey(scope?: BrdWorkspaceCacheScope | null) {
+  if (!scope) return BRD_WORKSPACE_CACHE_KEY;
+  return [
+    BRD_WORKSPACE_CACHE_KEY,
+    scope.userId,
+    scope.projectId,
+    scope.diagramId,
+  ].join(':');
+}
+
+export function loadBrdWorkspaceCache(
+  scope?: BrdWorkspaceCacheScope | null,
+): BrdWorkspaceCacheEntry | null {
   const storage = getStorage();
   if (!storage) return null;
 
   try {
-    const raw = storage.getItem(BRD_WORKSPACE_CACHE_KEY);
+    const raw = storage.getItem(cacheKey(scope));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as unknown;
     return isBrdWorkspaceCacheEntry(parsed) ? parsed : null;
@@ -80,14 +103,17 @@ export function loadBrdWorkspaceCache(): BrdWorkspaceCacheEntry | null {
   }
 }
 
-export function saveBrdWorkspaceCache(entry: BrdWorkspaceCacheEntry) {
+export function saveBrdWorkspaceCache(
+  entry: BrdWorkspaceCacheEntry,
+  scope?: BrdWorkspaceCacheScope | null,
+) {
   const storage = getStorage();
   if (!storage) return;
-  storage.setItem(BRD_WORKSPACE_CACHE_KEY, JSON.stringify(entry));
+  storage.setItem(cacheKey(scope), JSON.stringify(entry));
 }
 
-export function clearBrdWorkspaceCache() {
+export function clearBrdWorkspaceCache(scope?: BrdWorkspaceCacheScope | null) {
   const storage = getStorage();
   if (!storage) return;
-  storage.removeItem(BRD_WORKSPACE_CACHE_KEY);
+  storage.removeItem(cacheKey(scope));
 }

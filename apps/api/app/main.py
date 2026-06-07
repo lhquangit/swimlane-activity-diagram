@@ -3,15 +3,18 @@ from __future__ import annotations
 import logging
 from uuid import uuid4
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.auth import require_session
+from app.db import check_database
 from app.routes.brd_generate import router as brd_generate_router
 from app.routes.brd_validate import router as brd_validate_router
 from app.routes.diagram_generate import router as diagram_generate_router
 from app.routes.usecase_generate import router as usecase_generate_router
+from app.routes.persistence import router as persistence_router
 from app.runtime_contract import json_response_from_envelope
 from app.schemas.common import ErrorObject, ResponseEnvelope
 
@@ -25,14 +28,25 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins or ["http://localhost:5173"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Idempotency-Key", "X-Schema-Version"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Idempotency-Key",
+        "X-Schema-Version",
+    ],
 )
 
 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/readyz")
+def readyz() -> dict[str, str]:
+    check_database()
+    return {"status": "ready"}
 
 
 @app.exception_handler(RequestValidationError)
@@ -57,7 +71,9 @@ async def handle_request_validation_error(
     return json_response_from_envelope(envelope, 422)
 
 
-app.include_router(brd_validate_router)
-app.include_router(brd_generate_router)
-app.include_router(usecase_generate_router)
-app.include_router(diagram_generate_router)
+auth_dependencies = [Depends(require_session)]
+app.include_router(brd_validate_router, dependencies=auth_dependencies)
+app.include_router(brd_generate_router, dependencies=auth_dependencies)
+app.include_router(usecase_generate_router, dependencies=auth_dependencies)
+app.include_router(diagram_generate_router, dependencies=auth_dependencies)
+app.include_router(persistence_router)

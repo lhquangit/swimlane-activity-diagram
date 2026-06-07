@@ -12,6 +12,7 @@ import type {
   UseCaseWorkspaceSection,
 } from './types';
 import type { ResponseMetadata } from '../brd/types';
+import type { SaveState } from '../persistence/types';
 import { diagramStatusLabel } from './lifecycle';
 import { migratePrimaryActor, validateUseCaseContract } from './contract';
 import { collectUseCaseActors } from './prevalidate';
@@ -50,6 +51,12 @@ type UseCasePanelProps = {
   hasDraftChanges: boolean;
   onClose: () => void;
   onGenerate: () => void;
+  onSave?: () => void;
+  saveState?: SaveState;
+  sourceMode?: 'standalone' | 'persisted';
+  onEditProjectSpec?: () => void;
+  onEditFeatureIntent?: () => void;
+  onDeleteUseCase?: (useCaseId: string) => void;
   onGenerationPreferenceChange?: (next: UseCaseGenerationPreference) => void;
   onSectionChange: (section: UseCaseWorkspaceSection) => void;
   onProjectSpecChange: (next: ProjectSpec) => void;
@@ -85,6 +92,12 @@ export default function UseCasePanel({
   hasDraftChanges,
   onClose,
   onGenerate,
+  onSave,
+  saveState = 'idle',
+  sourceMode = 'standalone',
+  onEditProjectSpec,
+  onEditFeatureIntent,
+  onDeleteUseCase,
   onGenerationPreferenceChange,
   onSectionChange,
   onProjectSpecChange,
@@ -119,6 +132,7 @@ export default function UseCasePanel({
     ...projectSpec.business_rules,
     ...featureIntent.constraints,
   ]);
+  const isPersistedSource = sourceMode === 'persisted';
 
   return (
     <aside className="usecase-panel" aria-label="Không gian use case">
@@ -174,135 +188,153 @@ export default function UseCasePanel({
             </div>
 
             <div className="usecase-panel__stack">
-              <section className="usecase-panel__card">
-                <div className="usecase-panel__section-header">
-                  <div>
-                    <h4>Chức năng cần mô hình hóa</h4>
-                    <p>Nhập các actor/swimlane tham gia trực tiếp vào quy trình.</p>
+              {isPersistedSource ? (
+                <section className="usecase-panel__card usecase-panel__readonly-card">
+                  <div className="usecase-panel__section-header">
+                    <div>
+                      <h4>Feature Intent đã lưu</h4>
+                      <p>Use case được sinh từ Feature Intent mới nhất trong tab Features.</p>
+                    </div>
+                    <button className="toolbar-btn" type="button" onClick={onEditFeatureIntent}>
+                      Sửa Feature Intent
+                    </button>
                   </div>
-                </div>
-                <label>
-                  <span>Tên chức năng</span>
-                  <input
-                    value={featureIntent.feature_name}
-                    onChange={(event) =>
-                      onFeatureIntentChange({
-                        ...featureIntent,
-                        feature_name: event.target.value,
-                      })
-                    }
-                    placeholder="VD: Cấp phát thiết bị GPS"
-                  />
-                </label>
-                <label>
-                  <span>Mô tả chức năng</span>
-                  <textarea
-                    rows={3}
-                    value={featureIntent.feature_summary}
-                    onChange={(event) =>
-                      onFeatureIntentChange({
-                        ...featureIntent,
-                        feature_summary: event.target.value,
-                      })
-                    }
-                    placeholder="Mô tả chức năng muốn build."
-                  />
-                </label>
-                <label>
-                  <span>Actors / swimlanes (mỗi dòng một actor)</span>
-                  <textarea
-                    rows={4}
-                    value={actorsInputValue}
-                    onChange={(event) => {
-                      const nextInputValue = event.target.value;
-                      const nextActors = splitLines(nextInputValue);
-                      setActorsInputValue(nextInputValue);
-                      onProjectSpecChange({
-                        ...projectSpec,
-                        target_users: nextActors,
-                      });
-                      onFeatureIntentChange({
-                        ...featureIntent,
-                        primary_actor: nextActors[0] ?? '',
-                        systems_involved: [],
-                      });
-                    }}
-                    placeholder={'Ban quản lý\nCư dân\nKỹ thuật viên'}
-                  />
-                </label>
-                <label>
-                  <span>Kết quả mong muốn</span>
-                  <textarea
-                    rows={2}
-                    value={featureIntent.success_outcome ?? ''}
-                    onChange={(event) =>
-                      onFeatureIntentChange({
-                        ...featureIntent,
-                        success_outcome: event.target.value,
-                      })
-                    }
-                    placeholder="Kết quả thành công mong muốn."
-                  />
-                </label>
+                  <ReadonlyField label="Tên chức năng" value={featureIntent.feature_name} />
+                  <ReadonlyField label="Mô tả chức năng" value={featureIntent.feature_summary} />
+                  <ReadonlyField label="Actors / swimlanes" value={joinLines(actors)} />
+                  <ReadonlyField label="Điều gì bắt đầu quy trình?" value={featureIntent.trigger ?? 'Chưa có'} />
+                  <ReadonlyField label="Dữ liệu vào" value={joinLines(featureIntent.inputs) || 'Chưa có'} />
+                  <ReadonlyField label="Dữ liệu đầu ra" value={joinLines(featureIntent.outputs) || 'Chưa có'} />
+                  <ReadonlyField label="Quy tắc và ràng buộc" value={joinLines(rulesAndConstraints) || 'Chưa có'} />
+                  <ReadonlyField label="Kết quả mong muốn" value={featureIntent.success_outcome ?? 'Chưa có'} />
+                </section>
+              ) : (
+                <section className="usecase-panel__card">
+                  <div className="usecase-panel__section-header">
+                    <div>
+                      <h4>Chức năng cần mô hình hóa</h4>
+                      <p>Nhập các actor/swimlane tham gia trực tiếp vào quy trình.</p>
+                    </div>
+                  </div>
+                  <label>
+                    <span>Tên chức năng</span>
+                    <input
+                      value={featureIntent.feature_name}
+                      onChange={(event) =>
+                        onFeatureIntentChange({
+                          ...featureIntent,
+                          feature_name: event.target.value,
+                        })
+                      }
+                      placeholder="VD: Cấp phát thiết bị GPS"
+                    />
+                  </label>
+                  <label>
+                    <span>Mô tả chức năng</span>
+                    <textarea
+                      rows={3}
+                      value={featureIntent.feature_summary}
+                      onChange={(event) =>
+                        onFeatureIntentChange({
+                          ...featureIntent,
+                          feature_summary: event.target.value,
+                        })
+                      }
+                      placeholder="Mô tả chức năng muốn build."
+                    />
+                  </label>
+                  <label>
+                    <span>Actors / swimlanes (mỗi dòng một actor)</span>
+                    <textarea
+                      rows={4}
+                      value={actorsInputValue}
+                      onChange={(event) => {
+                        const nextInputValue = event.target.value;
+                        const nextActors = splitLines(nextInputValue);
+                        setActorsInputValue(nextInputValue);
+                        onFeatureIntentChange({
+                          ...featureIntent,
+                          actors: nextActors,
+                          primary_actor: nextActors[0] ?? '',
+                        });
+                      }}
+                      placeholder={'Ban quản lý\nCư dân\nKỹ thuật viên'}
+                    />
+                  </label>
+                  <label>
+                    <span>Kết quả mong muốn</span>
+                    <textarea
+                      rows={2}
+                      value={featureIntent.success_outcome ?? ''}
+                      onChange={(event) =>
+                        onFeatureIntentChange({
+                          ...featureIntent,
+                          success_outcome: event.target.value,
+                        })
+                      }
+                      placeholder="Kết quả thành công mong muốn."
+                    />
+                  </label>
 
-                <label>
-                  <span>Điều gì bắt đầu quy trình?</span>
-                  <input
-                    value={featureIntent.trigger ?? ''}
-                    onChange={(event) =>
-                      onFeatureIntentChange({
-                        ...featureIntent,
-                        trigger: event.target.value,
-                      })
-                    }
-                    placeholder="VD: Có yêu cầu hợp lệ"
-                  />
-                </label>
-                <label>
-                  <span>Dữ liệu vào (mỗi dòng một mục)</span>
-                  <textarea
-                    rows={3}
-                    value={joinLines(featureIntent.inputs)}
-                    onChange={(event) =>
-                      onFeatureIntentChange({
-                        ...featureIntent,
-                        inputs: splitLines(event.target.value),
-                      })
-                    }
-                  />
-                </label>
-                <label>
-                  <span>Dữ liệu đầu ra (mỗi dòng một mục)</span>
-                  <textarea
-                    rows={3}
-                    value={joinLines(featureIntent.outputs)}
-                    onChange={(event) =>
-                      onFeatureIntentChange({
-                        ...featureIntent,
-                        outputs: splitLines(event.target.value),
-                      })
-                    }
-                  />
-                </label>
-                <label>
-                  <span>Quy tắc và ràng buộc (mỗi dòng một mục)</span>
-                  <textarea
-                    rows={3}
-                    value={joinLines(rulesAndConstraints)}
-                    onChange={(event) => {
-                      const next = splitLines(event.target.value);
-                      onProjectSpecChange({
-                        ...projectSpec,
-                        business_rules: [],
-                      });
-                      onFeatureIntentChange({
-                        ...featureIntent,
-                        constraints: next,
-                      });
-                    }}
-                  />
-                </label>
-              </section>
+                  <label>
+                    <span>Điều gì bắt đầu quy trình?</span>
+                    <input
+                      value={featureIntent.trigger ?? ''}
+                      onChange={(event) =>
+                        onFeatureIntentChange({
+                          ...featureIntent,
+                          trigger: event.target.value,
+                        })
+                      }
+                      placeholder="VD: Có yêu cầu hợp lệ"
+                    />
+                  </label>
+                  <label>
+                    <span>Dữ liệu vào (mỗi dòng một mục)</span>
+                    <textarea
+                      rows={3}
+                      value={joinLines(featureIntent.inputs)}
+                      onChange={(event) =>
+                        onFeatureIntentChange({
+                          ...featureIntent,
+                          inputs: splitLines(event.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>Dữ liệu đầu ra (mỗi dòng một mục)</span>
+                    <textarea
+                      rows={3}
+                      value={joinLines(featureIntent.outputs)}
+                      onChange={(event) =>
+                        onFeatureIntentChange({
+                          ...featureIntent,
+                          outputs: splitLines(event.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>Quy tắc và ràng buộc (mỗi dòng một mục)</span>
+                    <textarea
+                      rows={3}
+                      value={joinLines(rulesAndConstraints)}
+                      onChange={(event) => {
+                        const next = splitLines(event.target.value);
+                        onProjectSpecChange({
+                          ...projectSpec,
+                          business_rules: [],
+                        });
+                        onFeatureIntentChange({
+                          ...featureIntent,
+                          constraints: next,
+                        });
+                      }}
+                    />
+                  </label>
+                </section>
+              )}
 
               <section className="usecase-panel__project-context" aria-label="Bối cảnh dự án">
                 <div className="usecase-panel__project-context-header">
@@ -313,36 +345,46 @@ export default function UseCasePanel({
                   </div>
                   <strong>{projectSpec.project_name || 'Chưa đặt tên'}</strong>
                 </div>
-                <div className="usecase-panel__project-context-fields">
-                  <label>
-                    <span>Tên dự án</span>
-                    <input
-                      value={projectSpec.project_name}
-                      onChange={(event) =>
-                        onProjectSpecChange({
-                          ...projectSpec,
-                          project_name: event.target.value,
-                        })
-                      }
-                      placeholder="VD: V-PetSafe"
-                    />
-                  </label>
-                  <label>
-                    <span>Mô tả bối cảnh</span>
-                    <textarea
-                      rows={3}
-                      value={projectSpec.project_summary}
-                      onChange={(event) =>
-                        onProjectSpecChange({
-                          ...projectSpec,
-                          project_summary: event.target.value,
-                          business_context: null,
-                        })
-                      }
-                      placeholder="VD: Nền tảng quản lý cư dân, dịch vụ nội khu và yêu cầu vận hành."
-                    />
-                  </label>
-                </div>
+                {isPersistedSource ? (
+                  <div className="usecase-panel__project-context-fields">
+                    <ReadonlyField label="Tên dự án" value={projectSpec.project_name} />
+                    <ReadonlyField label="Mô tả bối cảnh" value={projectSpec.project_summary} />
+                    <button className="toolbar-btn" type="button" onClick={onEditProjectSpec}>
+                      Sửa Project Spec
+                    </button>
+                  </div>
+                ) : (
+                  <div className="usecase-panel__project-context-fields">
+                    <label>
+                      <span>Tên dự án</span>
+                      <input
+                        value={projectSpec.project_name}
+                        onChange={(event) =>
+                          onProjectSpecChange({
+                            ...projectSpec,
+                            project_name: event.target.value,
+                          })
+                        }
+                        placeholder="VD: V-PetSafe"
+                      />
+                    </label>
+                    <label>
+                      <span>Mô tả bối cảnh</span>
+                      <textarea
+                        rows={3}
+                        value={projectSpec.project_summary}
+                        onChange={(event) =>
+                          onProjectSpecChange({
+                            ...projectSpec,
+                            project_summary: event.target.value,
+                            business_context: null,
+                          })
+                        }
+                        placeholder="VD: Nền tảng quản lý cư dân, dịch vụ nội khu và yêu cầu vận hành."
+                      />
+                    </label>
+                  </div>
+                )}
               </section>
             </div>
 
@@ -373,6 +415,21 @@ export default function UseCasePanel({
               >
                 {phase === 'generating' ? 'Đang sinh…' : 'Sinh use case'}
               </button>
+              {onSave ? (
+                <button
+                  className="toolbar-btn primary"
+                  onClick={onSave}
+                  disabled={saveState === 'saving' || useCases.length === 0}
+                >
+                  {saveState === 'saving'
+                    ? 'Đang lưu…'
+                    : saveState === 'saved'
+                      ? 'Đã lưu'
+                      : saveState === 'failed'
+                        ? 'Lưu lại'
+                        : 'Lưu use case'}
+                </button>
+              ) : null}
             </div>
             {validationErrors.length > 0 ? (
               <ul className="usecase-panel__validation-list">
@@ -514,6 +571,15 @@ export default function UseCasePanel({
                               : 'Phê duyệt'}
                           </button>
                         )}
+                        {onDeleteUseCase ? (
+                          <button
+                            className="toolbar-btn danger"
+                            type="button"
+                            onClick={() => onDeleteUseCase(useCase.use_case_id)}
+                          >
+                            Xóa use case
+                          </button>
+                        ) : null}
                       </div>
                     </div>
 
@@ -1247,6 +1313,15 @@ function splitLines(value: string) {
 
 function joinLines(values: string[]) {
   return values.join('\n');
+}
+
+function ReadonlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="usecase-panel__readonly-field">
+      <span>{label}</span>
+      <p>{value || 'Chưa có'}</p>
+    </div>
+  );
 }
 
 function uniqueLines(values: string[]) {

@@ -98,6 +98,7 @@ export function runLocalUseCasePreValidation(
 
 export function collectUseCaseActors(projectSpec: ProjectSpec, featureIntent: FeatureIntent) {
   return normalizeTextList([
+    ...(featureIntent.actors ?? []),
     featureIntent.primary_actor ?? '',
     ...projectSpec.target_users,
     ...featureIntent.systems_involved,
@@ -149,11 +150,16 @@ export function normalizeProjectSpec(projectSpec: ProjectSpec): ProjectSpec {
 }
 
 export function normalizeFeatureIntent(featureIntent: FeatureIntent): FeatureIntent {
+  const actors = normalizeTextList([
+    ...(featureIntent.actors ?? []),
+    featureIntent.primary_actor ?? '',
+  ]);
   return {
     feature_name: normalizeText(featureIntent.feature_name),
     function_name: normalizeOptionalText(featureIntent.function_name),
     feature_summary: normalizeText(featureIntent.feature_summary),
-    primary_actor: normalizeOptionalText(featureIntent.primary_actor),
+    actors,
+    primary_actor: actors[0] ?? null,
     trigger: normalizeOptionalText(featureIntent.trigger),
     inputs: normalizeTextList(featureIntent.inputs),
     outputs: normalizeTextList(featureIntent.outputs),
