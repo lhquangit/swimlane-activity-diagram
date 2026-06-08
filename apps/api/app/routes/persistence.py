@@ -209,7 +209,7 @@ def generate_feature_use_cases(
     db: Session = Depends(get_db),
 ) -> object:
     feature = require_feature(db, current_user, feature_id)
-    envelope = generate_feature_use_case_envelope(feature, generation_preference, db)
+    envelope = generate_feature_use_case_envelope(feature, generation_preference)
     return json_response_from_envelope(envelope, 200)
 
 

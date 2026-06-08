@@ -55,9 +55,11 @@ export default function PersistedUseCaseWorkspace({
   const [generationPreference, setGenerationPreference] =
     useState<UseCaseGenerationPreference>('auto');
   const [useCaseError, setUseCaseError] = useState<string | null>(null);
-  const [useCaseRequestId, setUseCaseRequestId] = useState<string | null>(null);
-  const [latestGenerationMetadata, setLatestGenerationMetadata] =
-    useState<ResponseMetadata | null>(workspace?.activeFeature.latest_usecase_generation ?? null);
+  const [pendingGenerationRequestId, setPendingGenerationRequestId] = useState<string | null>(
+    workspace?.pendingUseCaseGenerationRequestId ?? null,
+  );
+  const [pendingGenerationMetadata, setPendingGenerationMetadata] =
+    useState<ResponseMetadata | null>(workspace?.pendingUseCaseGenerationMetadata ?? null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [hasUnsavedGeneratedDrafts, setHasUnsavedGeneratedDrafts] = useState(false);
   const [optimisticDiagramState, setOptimisticDiagramState] =
@@ -86,8 +88,14 @@ export default function PersistedUseCaseWorkspace({
 
   useEffect(() => {
     if (!workspace) return;
-    setLatestGenerationMetadata(workspace.activeFeature.latest_usecase_generation ?? null);
-  }, [workspace, workspace?.activeFeature.id, workspace?.activeFeature.latest_usecase_generation]);
+    setPendingGenerationMetadata(workspace.pendingUseCaseGenerationMetadata ?? null);
+    setPendingGenerationRequestId(workspace.pendingUseCaseGenerationRequestId ?? null);
+  }, [
+    workspace,
+    workspace?.activeFeature.id,
+    workspace?.pendingUseCaseGenerationMetadata,
+    workspace?.pendingUseCaseGenerationRequestId,
+  ]);
 
   if (!workspace) return null;
 
@@ -105,13 +113,22 @@ export default function PersistedUseCaseWorkspace({
   const canPersistDraftList =
     useCaseDrafts.length > 0 && workspace.useCaseSaveState !== 'saving' && !isGenerating;
   const generationMetadata =
-    latestGenerationMetadata ?? workspace.activeFeature.latest_usecase_generation ?? null;
+    pendingGenerationMetadata ?? workspace.activeFeature.latest_usecase_generation ?? null;
+  const generationRequestId = pendingGenerationRequestId;
+  const generationPending = pendingGenerationMetadata != null;
 
-  const persistDraftList = async (drafts: UseCaseDraft[]) => {
-    await workspace.saveUseCases(drafts);
+  const persistDraftList = async (
+    drafts: UseCaseDraft[],
+    generationMetadataToCommit: ResponseMetadata | null = pendingGenerationMetadata,
+  ) => {
+    await workspace.saveUseCases(drafts, {
+      generationMetadata: generationMetadataToCommit,
+    });
     await workspace.refreshArtifactTree();
     setHasUnsavedGeneratedDrafts(false);
     setUseCaseError(null);
+    setPendingGenerationMetadata(null);
+    setPendingGenerationRequestId(null);
   };
 
   const handleGenerateAndPersist = async () => {
@@ -133,14 +150,12 @@ export default function PersistedUseCaseWorkspace({
       const generatedDrafts = result.use_cases.map(canonicalizeUseCaseDraft);
       setUseCaseDrafts(generatedDrafts);
       setHasUnsavedGeneratedDrafts(true);
-      setUseCaseRequestId(envelope.request_id);
-      setLatestGenerationMetadata(envelope.metadata ?? null);
+      setPendingGenerationRequestId(envelope.request_id);
+      setPendingGenerationMetadata(envelope.metadata ?? null);
 
-      await persistDraftList(generatedDrafts);
+      await persistDraftList(generatedDrafts, envelope.metadata ?? null);
       setUseCaseDrafts(generatedDrafts);
       setUseCaseError(null);
-      setUseCaseRequestId(envelope.request_id);
-      setLatestGenerationMetadata(envelope.metadata ?? null);
     } catch (error) {
       setUseCaseError(
         error instanceof Error ? error.message : 'Không thể sinh và lưu danh sách use case.',
@@ -154,7 +169,7 @@ export default function PersistedUseCaseWorkspace({
     if (!canPersistDraftList) return;
     setUseCaseError(null);
     try {
-      await persistDraftList(useCaseDrafts);
+      await persistDraftList(useCaseDrafts, pendingGenerationMetadata);
     } catch (error) {
       setUseCaseError(
         error instanceof Error ? error.message : 'Không thể lưu danh sách use case hiện tại.',
@@ -210,6 +225,7 @@ export default function PersistedUseCaseWorkspace({
     try {
       await workspace.saveUseCases(useCaseDrafts, {
         businessKeys: [selectedDraft.use_case_id],
+        generationMetadata: pendingGenerationMetadata,
         labelsByBusinessKey: {
           [selectedDraft.use_case_id]: selectedDraft.title || selectedDraft.use_case_id,
         },
@@ -381,7 +397,8 @@ export default function PersistedUseCaseWorkspace({
             {generationMetadata ? (
               <GenerationMetadataCard
                 metadata={generationMetadata}
-                requestId={useCaseRequestId}
+                isPending={generationPending}
+                requestId={generationRequestId}
                 compact
               />
             ) : null}
@@ -615,7 +632,11 @@ export default function PersistedUseCaseWorkspace({
 
         <p className="persisted-usecase__hero-note">{diagramLifecycle.note}</p>
         {generationMetadata ? (
-          <GenerationMetadataCard metadata={generationMetadata} requestId={useCaseRequestId} />
+          <GenerationMetadataCard
+            metadata={generationMetadata}
+            isPending={generationPending}
+            requestId={generationRequestId}
+          />
         ) : null}
 
         <div className="persisted-usecase__section-grid">
@@ -1374,10 +1395,12 @@ function nextActionCopy(
 
 function GenerationMetadataCard({
   metadata,
+  isPending = false,
   requestId,
   compact = false,
 }: {
   metadata: ResponseMetadata;
+  isPending?: boolean;
   requestId?: string | null;
   compact?: boolean;
 }) {
@@ -1391,7 +1414,9 @@ function GenerationMetadataCard({
   const modeLabel = metadata.generation_mode ? `Mode ${metadata.generation_mode}` : null;
   const qualityLabel = metadata.quality_status ? `Quality ${metadata.quality_status}` : null;
   const note =
-    metadata.generation_source === 'deterministic_fallback'
+    isPending
+      ? 'Đây là kết quả sinh mới nhất trong phiên làm việc hiện tại. Nó chỉ trở thành provenance persisted sau khi lưu thành công danh sách Use Case.'
+      : metadata.generation_source === 'deterministic_fallback'
       ? fallbackSourceCopy(metadata.fallback_reason)
       : 'Đã dùng semantic synthesis theo cấu hình hiện tại của project.';
 
@@ -1411,6 +1436,9 @@ function GenerationMetadataCard({
             >
               {sourceLabel}
             </span>
+            {isPending ? (
+              <span className="persisted-usecase__generation-status">Chưa lưu vào revision</span>
+            ) : null}
             {requestId ? (
               <span className="persisted-usecase__generation-request">Request {requestId}</span>
             ) : null}

@@ -15,7 +15,7 @@ import type {
   WorkspaceGenerationResponse,
 } from './types';
 import type { FeatureIntent, UseCaseDraft } from '../usecases/types';
-import type { GenerateResult, ResponseEnvelope } from '../brd/types';
+import type { GenerateResult, ResponseEnvelope, ResponseMetadata } from '../brd/types';
 
 const fallbackBaseUrl = `${window.location.protocol}//${window.location.hostname}:8000`;
 const API_BASE_URL = (import.meta.env.VITE_BRD_API_URL || fallbackBaseUrl).replace(/\/$/, '');
@@ -135,7 +135,12 @@ export class PersistenceApi {
     return this.request<UseCaseResource[]>(`/api/feature-intents/${featureId}/use-cases`);
   }
 
-  saveUseCases(featureId: string, resources: UseCaseResource[], drafts: UseCaseDraft[]) {
+  saveUseCases(
+    featureId: string,
+    resources: UseCaseResource[],
+    drafts: UseCaseDraft[],
+    committedGenerationMetadata?: ResponseMetadata | null,
+  ) {
     const idByKey = new Map(resources.map((item) => [item.use_case_key, item.id]));
     return this.request<UseCaseResource[]>(`/api/feature-intents/${featureId}/use-cases`, {
       method: 'PUT',
@@ -144,6 +149,7 @@ export class PersistenceApi {
           id: idByKey.get(content.use_case_id) ?? null,
           content,
         })),
+        committed_generation_metadata: committedGenerationMetadata ?? null,
       }),
     });
   }

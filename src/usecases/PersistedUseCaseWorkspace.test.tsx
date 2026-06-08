@@ -109,6 +109,8 @@ function buildWorkspace(overrides: Partial<WorkspacePersistence> = {}): Workspac
     markDiagramDirty: vi.fn(),
     markBrdDirty: vi.fn(),
     markBrdLoaded: vi.fn(),
+    pendingUseCaseGenerationMetadata: null,
+    pendingUseCaseGenerationRequestId: null,
     generateUseCases: vi.fn(),
     saveUseCases: vi.fn(),
     generateDiagram: vi.fn(),
@@ -188,8 +190,13 @@ describe('PersistedUseCaseWorkspace', () => {
 
     await waitFor(() => expect(workspace.generateUseCases).toHaveBeenCalledWith('auto'));
     await waitFor(() => expect(workspace.saveUseCases).toHaveBeenCalledTimes(1));
+    expect(workspace.saveUseCases).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        generationMetadata: { generation_source: 'ai' },
+      }),
+    );
     expect(await screen.findByText('Tiep nhan yeu cau GPS')).toBeVisible();
-    expect(screen.getByText('Bản nháp AI')).toBeVisible();
   });
 
   it('keeps generated drafts visible when persistence fails after generation', async () => {
@@ -232,7 +239,17 @@ describe('PersistedUseCaseWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sinh use case' }));
 
     await waitFor(() => expect(workspace.saveUseCases).toHaveBeenCalledTimes(1));
+    expect(workspace.saveUseCases).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        generationMetadata: {
+          generation_source: 'deterministic',
+          fallback_reason: 'mock fallback',
+        },
+      }),
+    );
     expect(await screen.findByText('Tiep nhan yeu cau GPS')).toBeVisible();
+    expect(screen.getByText('Chưa lưu vào revision')).toBeVisible();
     expect(await screen.findByText('Khong the luu use case')).toBeVisible();
   });
 
@@ -397,8 +414,35 @@ describe('PersistedUseCaseWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Thử lưu lại' }));
 
     await waitFor(() => expect(saveUseCases).toHaveBeenCalledTimes(2));
+    expect(saveUseCases).toHaveBeenLastCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        generationMetadata: {
+          generation_source: 'ai',
+        },
+      }),
+    );
     expect(workspace.generateUseCases).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(workspace.refreshArtifactTree).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows pending generation metadata from the current session without treating it as persisted', () => {
+    const workspace = buildWorkspace({
+      pendingUseCaseGenerationMetadata: {
+        generation_source: 'ai',
+        provider: 'openrouter',
+        model: 'openai/gpt-5.4-mini',
+        prompt_id: 'usecase_synthesis',
+        prompt_version: '1.1.0',
+      },
+      pendingUseCaseGenerationRequestId: 'req-pending-1',
+    });
+
+    renderWorkspace(workspace, { mode: 'list', treeUseCases: [] });
+
+    expect(screen.getByText('Bản nháp AI')).toBeVisible();
+    expect(screen.getByText('Chưa lưu vào revision')).toBeVisible();
+    expect(screen.getByText('Request req-pending-1')).toBeVisible();
   });
 
   it('shows persisted generation metadata on the list route after reload', () => {

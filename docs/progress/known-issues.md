@@ -47,7 +47,7 @@ Severity:
 
 ## [FIXED] Kéo shape từ vùng text chỉ di chuyển label (severity: P1) {#fixed-node-text-drag-hijacks-shape}
 
-- **ID**: KI-31
+- **ID**: KI-29
 - **Phát hiện**: 2026-06-06 by Codex (user report)
 - **Severity**: P1 — vùng text chiếm phần lớn nhiều shape nên thao tác sắp xếp canvas thường xuyên kéo nhầm label thay vì kéo node.
 - **Reproduction**: Đặt chuột lên text bên trong Activity, Decision hoặc Note rồi kéo; LogicFlow nhận thao tác là kéo node text độc lập, shape không di chuyển theo.
@@ -71,7 +71,7 @@ Severity:
 
 ## [FIXED] Shape text không tự wrap theo giới hạn shape (severity: P2) {#fixed-shape-text-auto-wrap}
 
-- **ID**: KI-29
+- **ID**: KI-32
 - **Phát hiện**: 2026-06-06 by Codex (user report)
 - **Severity**: P2 — text dài có thể tràn/khó đọc trong activity, decision, note dù shape có giới hạn kích thước rõ.
 - **Reproduction**: Tạo hoặc sinh activity/note/decision có mô tả dài; text không wrap ổn định theo width shape, newline thủ công cũng dễ bị render như một dòng liền.
@@ -114,6 +114,22 @@ Severity:
 - **Root cause**: `get_prompt()` được gọi trước provider/fallback error handling trong `UseCaseGenerationService.generate()`.
 - **Fix**: Todo — TASK-125 map unknown prompt/config errors thành deterministic fallback metadata.
 - **Verified**: Pending.
+
+---
+
+## [OPEN] Persisted use-case provenance stays stale after Feature Intent edits (severity: P2) {#open-persisted-usecase-provenance-drift}
+
+- **ID**: KI-40
+- **Phát hiện**: 2026-06-08 by Codex (`TASK-192` implementation review)
+- **Severity**: P2 — provenance persisted vẫn có thể mô tả input cũ, làm reviewer hiểu nhầm prompt/provider metadata đang áp vào Feature Intent hiện tại.
+- **Reproduction**:
+  1. Generate và lưu thành công một bộ Use Cases từ persisted route.
+  2. Sửa `Feature Intent` ở các field ảnh hưởng generation như actors, trigger, inputs, constraints.
+  3. Reload rồi mở lại persisted Use Case list/editor.
+  4. Panel `Lần sinh gần nhất` vẫn hiển thị metadata prompt/provider cũ như thể nó mô tả source input hiện tại.
+- **Root cause**: update `Feature Intent` chưa invalidate hoặc mark stale cho `latest_usecase_generation` đã commit.
+- **Fix**: Todo — `TASK-194` clear hoặc mark stale provenance khi Feature Intent thay đổi ở các field ảnh hưởng generation.
+- **Verified**: 2026-06-08 by Codex — `TASK-193` đã chặn nhánh unsaved-generate drift; stale-after-edit path vẫn còn mở.
 
 ---
 

@@ -4559,3 +4559,63 @@ Review snapshot:
   - Persisted the latest use-case generation metadata on `Feature Intent` and surfaced it on both
     the persisted Use Case list and single-item editor routes, including source, fallback note,
     provider/model, generation mode, and prompt version when available.
+
+## TASK-192 Re-review
+
+Review snapshot:
+[2026-06-08 TASK-192 implementation review](./reviews/2026-06-08-task-192-implementation-review.md).
+
+### Next
+
+#### TASK-193 - Commit use-case generation provenance only with the saved portfolio revision
+- Priority: P1
+- Status: Done
+- Module: usecase-generation-observability
+- Problem: `latest_usecase_generation` is currently persisted during the generate call, before the
+  generated Use Case list has been saved successfully. After a save failure, the feature can show
+  metadata for a generation run that never became the persisted portfolio.
+- Why it matters: The new `Lần sinh gần nhất` UI becomes misleading after reload, which undermines
+  the whole goal of provenance clarity.
+- Implementation steps:
+  1. Move committed provenance persistence out of the generate endpoint and into the successful
+     persisted portfolio save path, or introduce separate `pending` vs `committed` generation
+     metadata fields.
+  2. Ensure reload surfaces only the metadata that matches the portfolio currently stored in DB.
+  3. Keep session-local visibility for a fresh generate result even before save succeeds, but label
+     it as pending if needed.
+  4. Add API and UI regressions for `generate success -> save fail -> reload`.
+- Acceptance criteria:
+  - Reload never shows provenance for a generation run that failed to save its Use Case list.
+  - Session-local retry flows still show the newest generate result without losing context.
+  - Persisted metadata corresponds to a committed Use Case portfolio revision.
+- Dependencies: TASK-192
+- Verification: `npm run test:ui-mock`, `npm run test:api-mock`, plus a targeted regression for the
+  failed-save reload path.
+- Completion notes:
+  - Moved committed provenance persistence from the generate endpoint into the successful bulk
+    `saveUseCases` path, added explicit `committed_generation_metadata` on the save contract, and
+    kept session-local visibility via pending metadata that is labeled as not yet attached to the
+    persisted Use Case revision.
+
+#### TASK-194 - Invalidate or mark provenance stale when Feature Intent changes after generation
+- Priority: P2
+- Status: Todo
+- Module: usecase-generation-observability
+- Problem: Editing Feature Intent fields currently leaves `latest_usecase_generation` untouched, so
+  the UI can show old provider/prompt metadata for newer source inputs.
+- Why it matters: Prompt/provider provenance is only useful if it still describes the current source
+  state that the reviewer is looking at.
+- Implementation steps:
+  1. Define which Feature Intent fields are generation-relevant for provenance invalidation.
+  2. On updates to those fields, either clear committed provenance or keep it with an explicit stale
+     marker plus source fingerprint comparison.
+  3. Update the persisted Use Case list/editor card to show `stale` or `needs regenerate` copy when
+     the current feature no longer matches the last generated input.
+  4. Add API/UI regression tests for `generate -> edit feature -> revisit use-case route`.
+- Acceptance criteria:
+  - After changing generation-relevant feature inputs, the UI no longer presents old provenance as
+    fresh/current.
+  - Reviewers can tell whether the displayed Use Cases came from the current Feature Intent revision.
+- Dependencies: TASK-192, TASK-193
+- Verification: `npm run test:ui-mock`, `npm run test:api-mock`, and one manual persisted flow
+  where actors/trigger are edited after generate.

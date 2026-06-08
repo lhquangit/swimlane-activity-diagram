@@ -38,6 +38,15 @@
   `src/persistence/WorkspaceContext.tsx`, `src/persistence/save-state.ts`,
   `src/application/ProjectWorkspace.test.tsx`, `src/usecases/PersistedUseCaseWorkspace.test.tsx`,
   `e2e/artifact-tree.spec.ts`, `docs/use-cases/UC-07-sinh-usecase-tu-spec.md`.
+
+### Changed
+- **Committed use-case provenance now follows the saved portfolio revision**: use-case generation
+  metadata is no longer persisted during the generate call. The backend now commits provenance only
+  when the generated Use Case portfolio is saved successfully, while the persisted Use Case UI keeps
+  the newest in-session generation metadata visible as a clearly labeled pending state until save
+  succeeds. Xem `apps/api/app/{routes/persistence.py,schemas/persistence.py,services/persistence_generation.py,services/persistence_service.py}`,
+  `apps/api/tests/test_persistence_auth_matrix.py`,
+  `src/{application/ProjectWorkspace.tsx,persistence/WorkspaceContext.tsx,persistence/api.ts,usecases/PersistedUseCaseWorkspace.tsx,usecases/PersistedUseCaseWorkspace.test.tsx,styles.css}`.
 - **Persisted artifact tree workspace**: added one owned metadata-only artifact-tree API, canonical
   deep-links for Spec/Feature/Use Case/Diagram/BRD, an accessible collapsible left tree, lazy
   Diagram/BRD hydration, real empty/loading/error states, and guarded node transitions. A full

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import App from '../App';
+import type { ResponseMetadata } from '../brd/types';
 import { featurePayload, usePersistenceApi } from '../persistence/api';
 import {
   clearFeatureScopes,
@@ -88,6 +89,9 @@ export default function ProjectWorkspace({
   const [featureSaveState, setFeatureSaveState] = useState<SaveState>('idle');
   const [saveStateRegistry, setSaveStateRegistry] = useState<SaveStateRegistry>({});
   const [activeDiagramBusinessKey, setActiveDiagramBusinessKey] = useState<string | null>(null);
+  const [pendingUseCaseGenerationByFeature, setPendingUseCaseGenerationByFeature] = useState<
+    Record<string, { metadata: ResponseMetadata; requestId: string | null }>
+  >({});
 
   const refreshArtifactTree = useCallback(async () => {
     const nextTree = await api.getProjectArtifactTree(projectId);
@@ -395,6 +399,12 @@ export default function ProjectWorkspace({
       await api.deleteFeature(activeFeature.id);
       setSaveStateRegistry((current) => clearFeatureScopes(current, activeFeature.id));
       setFeatureResources((current) => current.filter((item) => item.id !== activeFeature.id));
+      setPendingUseCaseGenerationByFeature((current) => {
+        if (!(activeFeature.id in current)) return current;
+        const next = { ...current };
+        delete next[activeFeature.id];
+        return next;
+      });
       await refreshArtifactTree();
       navigate(artifactPath(projectId, { kind: 'spec' }), { replace: true });
     } catch (reason) {
@@ -404,6 +414,7 @@ export default function ProjectWorkspace({
 
   const contextValue = useMemo<WorkspacePersistence | null>(() => {
     if (!tree || !activeFeature) return null;
+    const pendingUseCaseGeneration = pendingUseCaseGenerationByFeature[activeFeature.id] ?? null;
     return {
       project: tree.project,
       spec: tree.spec,
@@ -470,17 +481,25 @@ export default function ProjectWorkspace({
           ),
           'idle',
         ),
+      pendingUseCaseGenerationMetadata: pendingUseCaseGeneration?.metadata ?? null,
+      pendingUseCaseGenerationRequestId: pendingUseCaseGeneration?.requestId ?? null,
       generateUseCases: async (preference) => {
         const envelope = await api.generateUseCases(activeFeature.id, preference);
-        setFeatureResources((current) =>
-          current.map((feature) =>
-            feature.id === activeFeature.id
-              ? {
-                  ...feature,
-                  latest_usecase_generation: envelope.metadata ?? null,
-                }
-              : feature,
-          ),
+        setPendingUseCaseGenerationByFeature((current) =>
+          envelope.metadata
+            ? {
+                ...current,
+                [activeFeature.id]: {
+                  metadata: envelope.metadata,
+                  requestId: envelope.request_id,
+                },
+              }
+            : (() => {
+                if (!(activeFeature.id in current)) return current;
+                const next = { ...current };
+                delete next[activeFeature.id];
+                return next;
+              })(),
         );
         return envelope;
       },
@@ -504,8 +523,31 @@ export default function ProjectWorkspace({
           ),
         );
         try {
-          const saved = await api.saveUseCases(activeFeature.id, useCaseResources, drafts);
+          const saved = await api.saveUseCases(
+            activeFeature.id,
+            useCaseResources,
+            drafts,
+            options?.generationMetadata,
+          );
           setUseCaseResources(saved);
+          if (options?.generationMetadata) {
+            setFeatureResources((current) =>
+              current.map((feature) =>
+                feature.id === activeFeature.id
+                  ? {
+                      ...feature,
+                      latest_usecase_generation: options.generationMetadata ?? null,
+                    }
+                  : feature,
+              ),
+            );
+            setPendingUseCaseGenerationByFeature((current) => {
+              if (!(activeFeature.id in current)) return current;
+              const next = { ...current };
+              delete next[activeFeature.id];
+              return next;
+            });
+          }
           setTree((current) => {
             if (!current) return current;
             return {
@@ -676,6 +718,7 @@ export default function ProjectWorkspace({
     brdScope,
     diagramSaveState,
     projectId,
+    pendingUseCaseGenerationByFeature,
     refreshArtifactTree,
     saveStateRegistry,
     tree,
