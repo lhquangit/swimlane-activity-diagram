@@ -8,6 +8,7 @@ import type {
   DiagramSavePayload,
   FeatureIntentResource,
   ProjectResource,
+  ProjectArtifactTree,
   SpecResource,
   UseCaseResource,
   WorkspaceDiagramGenerationResponse,
@@ -20,6 +21,7 @@ const fallbackBaseUrl = `${window.location.protocol}//${window.location.hostname
 const API_BASE_URL = (import.meta.env.VITE_BRD_API_URL || fallbackBaseUrl).replace(/\/$/, '');
 
 type TokenProvider = () => Promise<string | null>;
+const localAuthDisabledTokenProvider: TokenProvider = async () => 'local-auth-disabled';
 
 export class ApiError extends Error {
   constructor(
@@ -70,6 +72,10 @@ export class PersistenceApi {
     return this.request<ProjectResource>(`/api/projects/${id}`);
   }
 
+  getProjectArtifactTree(id: string) {
+    return this.request<ProjectArtifactTree>(`/api/projects/${id}/artifact-tree`);
+  }
+
   updateProject(id: string, payload: { name: string; description?: string | null }) {
     return this.request<ProjectResource>(`/api/projects/${id}`, {
       method: 'PUT',
@@ -94,6 +100,10 @@ export class PersistenceApi {
 
   listFeatures(specId: string) {
     return this.request<FeatureIntentResource[]>(`/api/specs/${specId}/feature-intents`);
+  }
+
+  getFeature(id: string) {
+    return this.request<FeatureIntentResource>(`/api/feature-intents/${id}`);
   }
 
   createFeature(specId: string, payload: FeaturePayload) {
@@ -212,5 +222,9 @@ export function featurePayload(intent: FeatureIntent): FeaturePayload {
 
 export function usePersistenceApi() {
   const { getToken } = useAuth();
-  return useMemo(() => new PersistenceApi(getToken), [getToken]);
+  const tokenProvider =
+    import.meta.env.VITE_AUTH_DISABLED === 'true'
+      ? localAuthDisabledTokenProvider
+      : getToken;
+  return useMemo(() => new PersistenceApi(tokenProvider), [tokenProvider]);
 }

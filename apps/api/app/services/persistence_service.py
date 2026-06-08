@@ -3,7 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.auth import CurrentUser
 from app.models import BrdDoc, Diagram, FeatureIntentModel, Project, Spec, UseCaseModel
@@ -18,18 +18,24 @@ from app.persistence import (
 from app.schemas.persistence import (
     BrdResource,
     BrdSave,
+    ArtifactTreeBrd,
+    ArtifactTreeDiagram,
+    ArtifactTreeFeature,
+    ArtifactTreeUseCase,
     DiagramResource,
     DiagramSave,
     FeatureIntentCreate,
     FeatureIntentResource,
     FeatureIntentUpdate,
     ProjectCreate,
+    ProjectArtifactTree,
     ProjectResource,
     ProjectUpdate,
     SpecResource,
     SpecUpdate,
     UseCaseBulkSave,
     UseCaseResource,
+    UseCaseSaveItem,
 )
 from app.services.persistence_serializers import (
     brd_resource,
@@ -69,6 +75,84 @@ def create_owned_project(
 
 def get_owned_project(db: Session, current_user: CurrentUser, project_id: UUID) -> ProjectResource:
     return project_resource(require_project(db, current_user, project_id))
+
+
+def get_owned_project_artifact_tree(
+    db: Session,
+    current_user: CurrentUser,
+    project_id: UUID,
+) -> ProjectArtifactTree:
+    project = db.scalar(
+        select(Project)
+        .where(Project.id == project_id, Project.app_user_id == current_user.id)
+        .options(
+            selectinload(Project.spec)
+            .selectinload(Spec.feature_intents)
+            .selectinload(FeatureIntentModel.use_cases)
+            .selectinload(UseCaseModel.diagram)
+            .selectinload(Diagram.brd_doc)
+        )
+    )
+    if project is None:
+        raise not_found()
+
+    features = sorted(
+        project.spec.feature_intents,
+        key=lambda item: (item.created_at, str(item.id)),
+    )
+    return ProjectArtifactTree(
+        project=project_resource(project),
+        spec=spec_resource(project.spec),
+        features=[
+            ArtifactTreeFeature(
+                id=feature.id,
+                name=feature.name,
+                updated_at=feature.updated_at,
+                use_cases=[
+                    ArtifactTreeUseCase(
+                        id=use_case.id,
+                        use_case_key=use_case.use_case_key,
+                        title=use_case.title,
+                        review_status=use_case.review_status,
+                        updated_at=use_case.updated_at,
+                        diagram=(
+                            ArtifactTreeDiagram(
+                                id=use_case.diagram.id,
+                                title=use_case.diagram.title,
+                                semantic_edited=use_case.diagram.semantic_edited,
+                                is_outdated=(
+                                    use_case.diagram.source_use_case_updated_at
+                                    < use_case.updated_at
+                                ),
+                                updated_at=use_case.diagram.updated_at,
+                                brd=(
+                                    ArtifactTreeBrd(
+                                        id=use_case.diagram.brd_doc.id,
+                                        title=use_case.diagram.brd_doc.title,
+                                        template=use_case.diagram.brd_doc.template,
+                                        is_outdated=(
+                                            use_case.diagram.brd_doc.source_diagram_updated_at
+                                            < use_case.diagram.updated_at
+                                        ),
+                                        updated_at=use_case.diagram.brd_doc.updated_at,
+                                    )
+                                    if use_case.diagram.brd_doc
+                                    else None
+                                ),
+                            )
+                            if use_case.diagram
+                            else None
+                        ),
+                    )
+                    for use_case in sorted(
+                        feature.use_cases,
+                        key=lambda item: (item.created_at, str(item.id)),
+                    )
+                ],
+            )
+            for feature in features
+        ],
+    )
 
 
 def update_owned_project(
@@ -190,24 +274,41 @@ def save_owned_use_cases(
     payload: UseCaseBulkSave,
 ) -> list[UseCaseResource]:
     require_feature(db, current_user, feature_id)
-    existing = {
-        row.use_case_key: row
-        for row in db.scalars(
-            select(UseCaseModel).where(UseCaseModel.feature_intent_id == feature_id)
-        ).all()
-    }
-    result: list[UseCaseModel] = []
+    existing_rows = db.scalars(
+        select(UseCaseModel).where(UseCaseModel.feature_intent_id == feature_id)
+    ).all()
+    existing_by_key = {row.use_case_key: row for row in existing_rows}
+    retained_existing_ids: set[UUID] = set()
+    resolved_rows: list[tuple[UseCaseSaveItem, UseCaseModel | None]] = []
+
     for item in payload.items:
-        draft = item.content
-        row = existing.get(draft.use_case_id)
+        row: UseCaseModel | None = None
         if item.id is not None:
             owned = require_use_case(db, current_user, item.id)
             if owned.feature_intent_id != feature_id:
                 raise not_found()
             row = owned
+        else:
+            row = existing_by_key.get(item.content.use_case_id)
+        if row is not None:
+            retained_existing_ids.add(row.id)
+        resolved_rows.append((item, row))
+
+    omitted_rows = [
+        row for row in existing_rows if row.id not in retained_existing_ids
+    ]
+    for row in omitted_rows:
+        db.delete(row)
+    if omitted_rows:
+        db.flush()
+
+    result: list[UseCaseModel] = []
+    for item, row in resolved_rows:
+        draft = item.content
         if row is None:
             row = UseCaseModel(feature_intent_id=feature_id, use_case_key=draft.use_case_id)
             db.add(row)
+        row.use_case_key = draft.use_case_id
         row.title = draft.title
         row.content = draft.model_dump(mode="json")
         row.review_status = draft.review_status

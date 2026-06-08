@@ -14,7 +14,7 @@ import type {
 } from './types';
 
 const baseProjectSpec: ProjectSpec = {
-  project_name: 'V-PetSafe',
+  project_name: 'Smart Diagram',
   project_summary: 'Nen tang quan ly cu dan va dich vu noi khu.',
   business_context: 'Ban quan ly can xu ly yeu cau GPS cho thu nuoi.',
   target_users: ['Ban quan ly', 'Cu dan'],

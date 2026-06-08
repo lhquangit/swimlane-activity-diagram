@@ -12,7 +12,7 @@
 | # | Hạng mục | Trạng thái | PR / Note |
 |---|---|---|---|
 | 1.1 | Khởi tạo project (Vite + React + TS + LogicFlow) | ✅ | PR #1 |
-| 1.2 | Render diagram mẫu khi mở app | ✅ | PR #1 |
+| 1.2 | Render diagram mẫu khi mở app | 🗑️ Removed | Thay bằng persisted artifact tree 2026-06-07 |
 | 1.3 | Palette sidebar (Start, Activity, Decision, Sync, End, Note) | ✅ | PR #1 |
 | 1.4 | Drag-and-drop từ palette vào canvas | ✅ | PR #1 |
 | 1.5 | Snap-to-lane khi thả node | ✅ | PR #1 |
@@ -22,7 +22,7 @@
 | 1.9 | Undo / Redo / Zoom / Fit | ✅ | PR #1 (LogicFlow default) |
 | 1.10 | Export PNG / SVG / JSON | ✅ | PR #1 |
 | 1.11 | Import JSON | ✅ | PR #1 |
-| 1.12 | Reset mẫu / Xoá nội dung | ✅ | PR #1 |
+| 1.12 | Reset mẫu / Xoá nội dung | 🟡 Changed | Bỏ Reset mẫu; giữ Xoá nội dung |
 | 1.13 | Fix bug shape biến mất khi thả vào lane | ✅ | PR fix bug drop (2026-05) |
 | 1.14 | Tài liệu nội bộ (`docs/`) | ✅ | PR fix bug drop (2026-05) |
 | 1.15 | Resize node bằng kéo góc | 📋 | Backlog |

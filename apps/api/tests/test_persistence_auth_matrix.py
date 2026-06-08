@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -226,11 +227,257 @@ def test_cross_user_access_returns_404_for_full_resource_chain(
         ids = create_project_chain(client, "user_a")
         other = auth_headers("user_b")
         assert client.get(f"/api/projects/{ids['project_id']}", headers=other).status_code == 404
+        assert (
+            client.get(
+                f"/api/projects/{ids['project_id']}/artifact-tree",
+                headers=other,
+            ).status_code
+            == 404
+        )
         assert client.get(f"/api/projects/{ids['project_id']}/spec", headers=other).status_code == 404
         assert client.get(f"/api/feature-intents/{ids['feature_id']}", headers=other).status_code == 404
         assert client.delete(f"/api/use-cases/{ids['use_case_id']}", headers=other).status_code == 404
         assert client.get(f"/api/diagrams/{ids['diagram_id']}/brd", headers=other).status_code == 404
         assert client.delete(f"/api/diagrams/{ids['diagram_id']}/brd", headers=other).status_code == 404
+    finally:
+        clear_tables()
+
+
+def test_project_artifact_tree_returns_owned_metadata_without_heavy_payloads(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    clear_tables()
+    install_fake_clerk(monkeypatch)
+    try:
+        ids = create_project_chain(client, "user_a")
+        response = client.get(
+            f"/api/projects/{ids['project_id']}/artifact-tree",
+            headers=auth_headers("user_a"),
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["project"]["id"] == ids["project_id"]
+        assert payload["spec"]["id"] == ids["spec_id"]
+        assert len(payload["features"]) == 1
+
+        feature = payload["features"][0]
+        assert feature["id"] == ids["feature_id"]
+        assert len(feature["use_cases"]) == 1
+
+        use_case = feature["use_cases"][0]
+        assert use_case["id"] == ids["use_case_id"]
+        assert use_case["diagram"]["id"] == ids["diagram_id"]
+        assert use_case["diagram"]["brd"]["id"] == ids["brd_id"]
+        assert "graph_data" not in use_case["diagram"]
+        assert "lanes_data" not in use_case["diagram"]
+        assert "structured_spec" not in use_case["diagram"]["brd"]
+        assert "markdown_content" not in use_case["diagram"]["brd"]
+    finally:
+        clear_tables()
+
+
+def test_feature_resources_persist_latest_usecase_generation_metadata(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    clear_tables()
+    install_fake_clerk(monkeypatch)
+    try:
+        headers = auth_headers("user_a")
+        project = client.post(
+            "/api/projects",
+            headers=headers,
+            json={"name": "AI Camera", "description": "Re-identification workspace"},
+        )
+        assert project.status_code == 201
+        project_id = project.json()["id"]
+
+        spec = client.put(
+            f"/api/projects/{project_id}/spec",
+            headers=headers,
+            json={
+                "project_summary": "Theo dõi camera và AI re-id.",
+                "business_context": "Cần rà soát sự kiện từ camera.",
+                "target_users": ["Ban quản lý"],
+                "business_rules": [],
+                "glossary": [],
+            },
+        )
+        assert spec.status_code == 200
+        spec_id = spec.json()["id"]
+
+        feature = client.post(
+            f"/api/specs/{spec_id}/feature-intents",
+            headers=headers,
+            json={
+                "name": "Re-ID camera",
+                "feature_summary": "Nhận diện lại đối tượng từ camera và dịch vụ AI.",
+                "actors": ["Ban quản lý", "Camera AI", "Dịch vụ Re-ID"],
+                "trigger": "Camera phát hiện đối tượng quan tâm",
+                "inputs": ["Ảnh camera"],
+                "outputs": ["Kết quả nhận diện"],
+                "constraints": [],
+                "assumptions": [],
+                "systems_involved": ["Dịch vụ Re-ID"],
+                "success_outcome": "Ban quản lý nhận được đối tượng đã đối sánh.",
+            },
+        )
+        assert feature.status_code == 201
+        feature_id = feature.json()["id"]
+
+        generated = client.post(
+            f"/api/feature-intents/{feature_id}/use-cases/generate",
+            headers=headers,
+            params={"generation_preference": "deterministic"},
+        )
+        assert generated.status_code == 200
+
+        feature_response = client.get(f"/api/feature-intents/{feature_id}", headers=headers)
+        assert feature_response.status_code == 200
+        feature_payload = feature_response.json()
+        assert (
+            feature_payload["latest_usecase_generation"]["generation_source"]
+            == "deterministic_fallback"
+        )
+        assert feature_payload["latest_usecase_generation"]["provider"] == "deterministic"
+        assert feature_payload["latest_usecase_generation"]["model"] == "spec-usecase-builder-v1"
+
+        list_response = client.get(f"/api/specs/{spec_id}/feature-intents", headers=headers)
+        assert list_response.status_code == 200
+        listed_feature = next(item for item in list_response.json() if item["id"] == feature_id)
+        assert (
+            listed_feature["latest_usecase_generation"]["generation_source"]
+            == "deterministic_fallback"
+        )
+    finally:
+        clear_tables()
+
+
+def test_bulk_use_case_save_replaces_omitted_rows_and_rekeys_retained_row(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    clear_tables()
+    install_fake_clerk(monkeypatch)
+    try:
+        ids = create_project_chain(client, "user_a")
+        headers = auth_headers("user_a")
+        saved_use_cases = client.get(
+            f"/api/feature-intents/{ids['feature_id']}/use-cases",
+            headers=headers,
+        )
+        assert saved_use_cases.status_code == 200
+        original = saved_use_cases.json()[0]
+
+        second_draft = deepcopy(original["content"])
+        second_draft["use_case_id"] = "UC-SECOND"
+        second_draft["title"] = "Theo doi canh bao"
+        second_draft["main_flow_steps"][0]["step_id"] = "UC-SECOND-S01"
+        second_draft["main_flow_steps"][0]["action"] = "Theo doi canh bao"
+
+        expanded = client.put(
+            f"/api/feature-intents/{ids['feature_id']}/use-cases",
+            headers=headers,
+            json={
+                "items": [
+                    {"id": original["id"], "content": original["content"]},
+                    {"id": None, "content": second_draft},
+                ]
+            },
+        )
+        assert expanded.status_code == 200
+        expanded_payload = expanded.json()
+        assert len(expanded_payload) == 2
+        second_saved = next(
+            item for item in expanded_payload if item["use_case_key"] == "UC-SECOND"
+        )
+
+        replacement = deepcopy(second_draft)
+        replacement["use_case_id"] = "UC-SECOND-REKEYED"
+        replacement["title"] = "Theo doi canh bao da cap nhat"
+        replacement["main_flow_steps"][0]["step_id"] = "UC-SECOND-REKEYED-S01"
+
+        replaced = client.put(
+            f"/api/feature-intents/{ids['feature_id']}/use-cases",
+            headers=headers,
+            json={"items": [{"id": second_saved["id"], "content": replacement}]},
+        )
+        assert replaced.status_code == 200
+        replaced_payload = replaced.json()
+        assert len(replaced_payload) == 1
+        assert replaced_payload[0]["id"] == second_saved["id"]
+        assert replaced_payload[0]["use_case_key"] == "UC-SECOND-REKEYED"
+
+        tree = client.get(
+            f"/api/projects/{ids['project_id']}/artifact-tree",
+            headers=headers,
+        )
+        assert tree.status_code == 200
+        use_cases = tree.json()["features"][0]["use_cases"]
+        assert [item["use_case_key"] for item in use_cases] == ["UC-SECOND-REKEYED"]
+        assert use_cases[0]["diagram"] is None
+
+        with get_session_factory()() as db:
+            assert db.get(UseCaseModel, ids["use_case_id"]) is None
+            assert db.get(Diagram, ids["diagram_id"]) is None
+            assert db.get(BrdDoc, ids["brd_id"]) is None
+            assert db.get(UseCaseModel, second_saved["id"]) is not None
+            assert db.query(UseCaseModel).count() == 1
+            assert db.query(Diagram).count() == 0
+            assert db.query(BrdDoc).count() == 0
+    finally:
+        clear_tables()
+
+
+def test_project_artifact_tree_supports_empty_and_partial_chains(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    clear_tables()
+    install_fake_clerk(monkeypatch)
+    try:
+        headers = auth_headers("user_a")
+        project = client.post(
+            "/api/projects",
+            headers=headers,
+            json={"name": "Empty project", "description": None},
+        )
+        assert project.status_code == 201
+
+        empty_tree = client.get(
+            f"/api/projects/{project.json()['id']}/artifact-tree",
+            headers=headers,
+        )
+        assert empty_tree.status_code == 200
+        assert empty_tree.json()["features"] == []
+
+        spec_id = empty_tree.json()["spec"]["id"]
+        feature = client.post(
+            f"/api/specs/{spec_id}/feature-intents",
+            headers=headers,
+            json={
+                "name": "Feature without children",
+                "feature_summary": "Persisted feature only.",
+                "actors": [],
+                "trigger": None,
+                "inputs": [],
+                "outputs": [],
+                "constraints": [],
+                "assumptions": [],
+                "systems_involved": [],
+                "success_outcome": None,
+            },
+        )
+        assert feature.status_code == 201
+
+        partial_tree = client.get(
+            f"/api/projects/{project.json()['id']}/artifact-tree",
+            headers=headers,
+        )
+        assert partial_tree.status_code == 200
+        assert partial_tree.json()["features"][0]["use_cases"] == []
     finally:
         clear_tables()
 

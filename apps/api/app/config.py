@@ -85,7 +85,7 @@ class Settings:
     usecase_generation_mode: str = os.getenv(
         "USECASE_GENERATION_MODE", "deterministic"
     ).strip()
-    usecase_prompt_version: str = os.getenv("USECASE_PROMPT_VERSION", "1.0.0").strip()
+    usecase_prompt_version: str = os.getenv("USECASE_PROMPT_VERSION", "1.1.0").strip()
     usecase_max_attempts: int = max(1, min(2, int(os.getenv("USECASE_MAX_ATTEMPTS", "2"))))
     idempotency_ttl_seconds: int = int(os.getenv("BRD_IDEMPOTENCY_TTL_SECONDS", "600"))
     request_rate_limit: str = os.getenv("BRD_REQUEST_RATE_LIMIT", "20/min").strip()

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from app.schemas.usecase import FeatureIntent, ProjectSpec
 
+from .actor_signals import is_technical_actor
 from .synthesis_schema import UseCaseSynthesisResult
 
 
@@ -35,6 +36,8 @@ def build_grounding_catalog(
         ("feature.inputs", feature_intent.inputs),
         ("feature.outputs", feature_intent.outputs),
         ("feature.constraints", feature_intent.constraints),
+        ("feature.assumptions", feature_intent.assumptions),
+        ("feature.actors", feature_intent.actors),
         ("feature.systems_involved", feature_intent.systems_involved),
     ):
         catalog.update({f"{field_name}.{index}": value for index, value in enumerate(values)})
@@ -52,6 +55,7 @@ def validate_grounding(
         actor.casefold()
         for actor in [
             *project_spec.target_users,
+            *feature_intent.actors,
             *feature_intent.systems_involved,
             feature_intent.primary_actor or "",
             "Hệ thống",
@@ -66,6 +70,28 @@ def validate_grounding(
             if actor.casefold() not in allowed_actors:
                 issues.append(
                     GroundingIssue("UNSUPPORTED_ACTOR", f"Actor không có trong input: {actor}")
+                )
+        if any(is_technical_actor(actor) for actor in feature_intent.actors):
+            used_step_actors = {
+                step.actor.casefold()
+                for step in use_case.main_flow_steps
+            }
+            used_step_actors.update(
+                step.actor.casefold()
+                for flow in use_case.alternate_flows
+                for step in flow.steps
+            )
+            technical_actor_keys = {
+                actor.casefold()
+                for actor in [*feature_intent.actors, *feature_intent.systems_involved]
+                if actor and is_technical_actor(actor)
+            }
+            if technical_actor_keys and not technical_actor_keys.intersection(used_step_actors):
+                issues.append(
+                    GroundingIssue(
+                        "MISSING_TECHNICAL_ACTOR_COVERAGE",
+                        "Output không gán bước nào cho actor kỹ thuật có trong canonical input.",
+                    )
                 )
         evidence_groups = [use_case.evidence_refs]
         evidence_groups.extend(step.evidence_refs for step in use_case.main_flow_steps)

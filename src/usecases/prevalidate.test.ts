@@ -12,7 +12,7 @@ import {
 import type { FeatureIntent, ProjectSpec, UseCaseDraft } from './types';
 
 const baseProjectSpec: ProjectSpec = {
-  project_name: '  V-PetSafe  ',
+  project_name: '  Smart Diagram  ',
   project_summary: ' Nen tang   quan ly cu dan va dich vu noi khu. ',
   business_context: ' Ban quan ly can xu ly yeu cau GPS cho thu nuoi. ',
   target_users: [' Ban quan ly ', 'Cu dan', 'Cu dan'],
@@ -61,7 +61,7 @@ describe('use case prevalidation helpers', () => {
   it('normalizes strings and lists before request building', () => {
     const request = buildUseCaseGenerationRequest(baseProjectSpec, baseFeatureIntent);
 
-    expect(request.project_spec.project_name).toBe('V-PetSafe');
+    expect(request.project_spec.project_name).toBe('Smart Diagram');
     expect(request.project_spec.project_summary).toContain(
       'Ban quan ly can xu ly yeu cau GPS cho thu nuoi.',
     );
@@ -105,7 +105,7 @@ describe('use case prevalidation helpers', () => {
     const second = buildUseCaseRequestFingerprint(
       {
         ...baseProjectSpec,
-        project_name: 'V-PetSafe',
+        project_name: 'Smart Diagram',
       },
       {
         ...baseFeatureIntent,

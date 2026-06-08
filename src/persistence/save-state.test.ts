@@ -11,6 +11,7 @@ import {
   isAnyDirty,
   makeBrdScope,
   makeDiagramScope,
+  makeUseCaseScope,
   makeUseCasesScope,
   setScopeState,
 } from './save-state';
@@ -54,6 +55,7 @@ describe('save-state registry', () => {
 
   it('clears every persisted scope owned by a discarded feature', () => {
     const featureOneUseCases = makeUseCasesScope('feature-1', 'Use cases feature 1');
+    const featureOneUseCase = makeUseCaseScope('feature-1', 'UC-001', 'Use case UC-001');
     const featureOneDiagram = makeDiagramScope('feature-1', 'UC-001');
     const featureOneBrd = makeBrdScope('diagram-1', 'feature-1', 'BRD UC-001');
     const featureTwoDiagram = makeDiagramScope('feature-2', 'UC-002');
@@ -61,6 +63,7 @@ describe('save-state registry', () => {
 
     for (const scope of [
       featureOneUseCases,
+      featureOneUseCase,
       featureOneDiagram,
       featureOneBrd,
       featureTwoDiagram,

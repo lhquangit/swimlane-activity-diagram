@@ -1,5 +1,5 @@
 import { UserButton, useUser } from '@clerk/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import App from '../App';
@@ -14,6 +14,7 @@ import {
   isAnyDirty,
   makeBrdScope,
   makeDiagramScope,
+  makeUseCaseScope,
   makeUseCasesScope,
   setScopeState,
   type SaveScope,
@@ -27,14 +28,23 @@ import {
   type BrdResource,
   type DiagramResource,
   type FeatureIntentResource,
-  type ProjectResource,
+  type ProjectArtifactTree,
   type SaveState,
-  type SpecResource,
   type UseCaseResource,
 } from '../persistence/types';
 import type { FeatureIntent, ProjectSpec, UseCaseDraft } from '../usecases/types';
+import PersistedUseCaseWorkspace from '../usecases/PersistedUseCaseWorkspace';
+import ArtifactTree from './ArtifactTree';
+import { artifactPath, sameArtifact, type ActiveArtifact } from './artifact-routing';
 
-type WorkspaceTab = 'spec' | 'features' | 'editor';
+export type WorkspaceRouteKind =
+  | 'root'
+  | 'spec'
+  | 'feature'
+  | 'use-cases'
+  | 'use-case'
+  | 'diagram'
+  | 'brd';
 
 const emptyFeature = (): FeatureIntent => ({
   feature_name: '',
@@ -50,89 +60,188 @@ const emptyFeature = (): FeatureIntent => ({
   success_outcome: null,
 });
 
-export default function ProjectWorkspace() {
-  const { projectId = '', featureId: routeFeatureId } = useParams();
+export default function ProjectWorkspace({
+  routeKind = 'root',
+}: {
+  routeKind?: WorkspaceRouteKind;
+}) {
+  const { projectId = '', featureId, useCaseId } = useParams();
   const api = usePersistenceApi();
   const navigate = useNavigate();
   const { user } = useUser();
-  const [project, setProject] = useState<ProjectResource | null>(null);
-  const [spec, setSpec] = useState<SpecResource | null>(null);
-  const [features, setFeatures] = useState<FeatureIntentResource[]>([]);
-  const [activeFeatureId, setActiveFeatureId] = useState<string | null>(null);
+  const [tree, setTree] = useState<ProjectArtifactTree | null>(null);
+  const [featureResources, setFeatureResources] = useState<FeatureIntentResource[]>([]);
+  const [featuresLoading, setFeaturesLoading] = useState(true);
   const [useCaseResources, setUseCaseResources] = useState<UseCaseResource[]>([]);
   const [activeDiagram, setActiveDiagram] = useState<DiagramResource | null>(null);
-  const [tab, setTab] = useState<WorkspaceTab>('spec');
   const [projectDraft, setProjectDraft] = useState({ name: '', description: '' });
   const [specDraft, setSpecDraft] = useState<ProjectSpec | null>(null);
   const [featureDraft, setFeatureDraft] = useState<FeatureIntent>(emptyFeature);
   const [featureDraftId, setFeatureDraftId] = useState<string | null>(null);
+  const [creatingFeature, setCreatingFeature] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [contentLoading, setContentLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [routeError, setRouteError] = useState<string | null>(null);
   const [projectSaveState, setProjectSaveState] = useState<SaveState>('idle');
   const [specSaveState, setSpecSaveState] = useState<SaveState>('idle');
   const [featureSaveState, setFeatureSaveState] = useState<SaveState>('idle');
   const [saveStateRegistry, setSaveStateRegistry] = useState<SaveStateRegistry>({});
   const [activeDiagramBusinessKey, setActiveDiagramBusinessKey] = useState<string | null>(null);
-  const [missingFeatureRouteId, setMissingFeatureRouteId] = useState<string | null>(null);
+
+  const refreshArtifactTree = useCallback(async () => {
+    const nextTree = await api.getProjectArtifactTree(projectId);
+    setTree(nextTree);
+    setProjectDraft({
+      name: nextTree.project.name,
+      description: nextTree.project.description ?? '',
+    });
+    setSpecDraft(projectSpecFromResources(nextTree.project, nextTree.spec));
+  }, [api, projectId]);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    Promise.all([api.getProject(projectId), api.getSpec(projectId)])
-      .then(async ([nextProject, nextSpec]) => {
-        const nextFeatures = await api.listFeatures(nextSpec.id);
+    setFeaturesLoading(true);
+    setError(null);
+    api
+      .getProjectArtifactTree(projectId)
+      .then((nextTree) => {
         if (!active) return;
-        setProject(nextProject);
-        setSpec(nextSpec);
+        setTree(nextTree);
         setProjectDraft({
-          name: nextProject.name,
-          description: nextProject.description ?? '',
+          name: nextTree.project.name,
+          description: nextTree.project.description ?? '',
         });
-        setSpecDraft(projectSpecFromResources(nextProject, nextSpec));
-        setFeatures(nextFeatures);
-        const routedFeature = routeFeatureId
-          ? nextFeatures.find((feature) => feature.id === routeFeatureId) ?? null
-          : null;
-        const selectedFeature = routedFeature ?? (!routeFeatureId ? nextFeatures[0] ?? null : null);
-        const missingRoutedFeature = Boolean(routeFeatureId && !routedFeature);
-        setMissingFeatureRouteId(missingRoutedFeature ? routeFeatureId! : null);
-        if (missingRoutedFeature) {
-          setActiveFeatureId(null);
-          setFeatureDraftId(null);
-          setFeatureDraft(emptyFeature());
-          setFeatureSaveState('idle');
-          setActiveDiagram(null);
-          setActiveDiagramBusinessKey(null);
-          setTab('features');
-        }
-        if (selectedFeature) {
-          setActiveFeatureId(selectedFeature.id);
-          setFeatureDraftId(selectedFeature.id);
-          setFeatureDraft(featureIntentFromResource(selectedFeature));
-          if (routeFeatureId !== selectedFeature.id) {
-            navigate(`/projects/${projectId}/features/${selectedFeature.id}`, { replace: true });
+        setSpecDraft(projectSpecFromResources(nextTree.project, nextTree.spec));
+        setLoading(false);
+        return api.listFeatures(nextTree.spec.id).then((nextFeatures) => {
+          if (active) {
+            setFeatureResources(nextFeatures);
+            setFeaturesLoading(false);
           }
+        });
+      })
+      .catch((reason) => {
+        if (active) {
+          setFeaturesLoading(false);
+          setError(reason instanceof Error ? reason.message : 'Không tải được project.');
         }
       })
-      .catch((reason) => active && setError(reason instanceof Error ? reason.message : 'Không tải được project.'))
-      .finally(() => active && setLoading(false));
+      .finally(() => {
+        if (active) setLoading(false);
+      });
     return () => {
       active = false;
     };
-  }, [api, navigate, projectId, routeFeatureId]);
+  }, [api, projectId]);
 
-  const activeFeature = features.find((feature) => feature.id === activeFeatureId) ?? null;
-  const useCaseScope = activeFeature
+  const activeArtifact = useMemo<ActiveArtifact>(() => {
+    if (routeKind === 'feature' && featureId) return { kind: 'feature', featureId };
+    if (routeKind === 'use-cases' && featureId) return { kind: 'use-cases', featureId };
+    if (routeKind === 'use-case' && featureId && useCaseId) {
+      return { kind: 'use-case', featureId, useCaseId };
+    }
+    if (routeKind === 'diagram' && featureId && useCaseId) {
+      return { kind: 'diagram', featureId, useCaseId };
+    }
+    if (routeKind === 'brd' && featureId && useCaseId) {
+      return { kind: 'brd', featureId, useCaseId };
+    }
+    return { kind: 'spec' };
+  }, [featureId, routeKind, useCaseId]);
+
+  useEffect(() => {
+    if (!tree || routeKind !== 'root') return;
+    navigate(artifactPath(projectId, { kind: 'spec' }), { replace: true });
+  }, [navigate, projectId, routeKind, tree]);
+
+  const activeTreeFeature =
+    activeArtifact.kind === 'spec'
+      ? null
+      : tree?.features.find((item) => item.id === activeArtifact.featureId) ?? null;
+  const activeTreeUseCase =
+    activeArtifact.kind === 'use-case' ||
+    activeArtifact.kind === 'diagram' ||
+    activeArtifact.kind === 'brd'
+      ? activeTreeFeature?.use_cases.find((item) => item.id === activeArtifact.useCaseId) ?? null
+      : null;
+  const activeFeature =
+    activeTreeFeature
+      ? featureResources.find((item) => item.id === activeTreeFeature.id) ?? null
+      : null;
+
+  useEffect(() => {
+    if (!tree || routeKind === 'root') return;
+    const invalidFeature = activeArtifact.kind !== 'spec' && !activeTreeFeature;
+    const invalidUseCase =
+      (activeArtifact.kind === 'use-case' ||
+        activeArtifact.kind === 'diagram' ||
+        activeArtifact.kind === 'brd') &&
+      !activeTreeUseCase;
+    if (invalidFeature || invalidUseCase) {
+      setRouteError('Artifact không tồn tại trong project này hoặc bạn không có quyền.');
+      setActiveDiagram(null);
+      setActiveDiagramBusinessKey(null);
+      return;
+    }
+    setRouteError(null);
+  }, [activeArtifact, activeTreeFeature, activeTreeUseCase, routeKind, tree]);
+
+  useEffect(() => {
+    if (!activeFeature) {
+      setUseCaseResources([]);
+      if (!creatingFeature) {
+        setFeatureDraftId(null);
+        setFeatureDraft(emptyFeature());
+      }
+      return;
+    }
+    if (featureDraftId !== activeFeature.id || featureSaveState !== 'dirty') {
+      setFeatureDraftId(activeFeature.id);
+      setFeatureDraft(featureIntentFromResource(activeFeature));
+      setFeatureSaveState('idle');
+    }
+    setCreatingFeature(false);
+    let active = true;
+    setContentLoading(true);
+    api
+      .listUseCases(activeFeature.id)
+      .then((items) => active && setUseCaseResources(items))
+      .catch((reason) => {
+        if (active) {
+          setError(reason instanceof Error ? reason.message : 'Không tải được Use Case.');
+        }
+      })
+      .finally(() => active && setContentLoading(false));
+    return () => {
+      active = false;
+    };
+  }, [activeFeature?.id, api]);
+
+  const useCasesScope = activeFeature
     ? makeUseCasesScope(activeFeature.id, `Use cases của ${activeFeature.name}`)
     : null;
+  const selectedUseCaseScope =
+    activeFeature && activeTreeUseCase
+      ? makeUseCaseScope(
+          activeFeature.id,
+          activeTreeUseCase.use_case_key,
+          activeTreeUseCase.title || activeTreeUseCase.use_case_key,
+        )
+      : null;
   const diagramScope =
     activeFeature && activeDiagramBusinessKey
       ? makeDiagramScope(activeFeature.id, activeDiagramBusinessKey)
       : null;
-  const brdScope = activeDiagram && activeFeature
-    ? makeBrdScope(activeDiagram.id, activeFeature.id, `BRD ${activeDiagram.title}`)
-    : null;
-  const useCaseSaveState = getScopeState(saveStateRegistry, useCaseScope);
+  const brdScope =
+    activeDiagram && activeFeature
+      ? makeBrdScope(activeDiagram.id, activeFeature.id, `BRD ${activeDiagram.title}`)
+      : null;
+  const useCaseSaveState = getScopeState(
+    saveStateRegistry,
+    selectedUseCaseScope ?? useCasesScope,
+  );
   const diagramSaveState = getScopeState(saveStateRegistry, diagramScope);
   const brdSaveState = getScopeState(saveStateRegistry, brdScope);
   const allDirtyScopes = dirtyScopes(saveStateRegistry);
@@ -150,71 +259,86 @@ export default function ProjectWorkspace() {
     return () => window.removeEventListener('beforeunload', guard);
   }, [hasUnsavedChanges]);
 
-  useEffect(() => {
-    if (!activeFeature) {
-      setUseCaseResources([]);
-      return;
-    }
-    let active = true;
-    api
-      .listUseCases(activeFeature.id)
-      .then((items) => active && setUseCaseResources(items))
-      .catch((reason) => active && setError(reason instanceof Error ? reason.message : 'Không tải được use case.'));
-    return () => {
-      active = false;
-    };
-  }, [activeFeature, api]);
-
   const setScopedSaveState = (scope: SaveScope | null, state: SaveState) => {
     setSaveStateRegistry((current) => setScopeState(current, scope, state));
   };
 
   const confirmDiscardActiveChanges = (message: string) => {
-    const details = allDirtyScopes.length > 0
-      ? `\n\nArtifact chưa lưu: ${formatDirtyScopes(allDirtyScopes)}`
-      : '';
+    const details =
+      allDirtyScopes.length > 0
+        ? `\n\nArtifact chưa lưu: ${formatDirtyScopes(allDirtyScopes)}`
+        : '';
     return !hasUnsavedChanges || window.confirm(`${message}${details}`);
   };
 
-  const selectFeature = (feature: FeatureIntentResource) => {
-    if (!confirmDiscardActiveChanges('Bỏ các thay đổi chưa lưu của feature hiện tại?')) return;
-    setSaveStateRegistry((current) => clearFeatureScopes(current, activeFeatureId));
-    setActiveFeatureId(feature.id);
-    setFeatureDraftId(feature.id);
-    setFeatureDraft(featureIntentFromResource(feature));
+  const resetDiscardedDrafts = () => {
+    if (tree) {
+      setProjectDraft({
+        name: tree.project.name,
+        description: tree.project.description ?? '',
+      });
+      setSpecDraft(projectSpecFromResources(tree.project, tree.spec));
+    }
+    if (activeFeature) {
+      setFeatureDraft(featureIntentFromResource(activeFeature));
+      setFeatureDraftId(activeFeature.id);
+    }
+    setProjectSaveState('idle');
+    setSpecSaveState('idle');
     setFeatureSaveState('idle');
-    setActiveDiagram(null);
-    setActiveDiagramBusinessKey(null);
-    setMissingFeatureRouteId(null);
-    setTab('editor');
-    navigate(`/projects/${projectId}/features/${feature.id}`);
+    setSaveStateRegistry((current) => clearFeatureScopes(current, activeFeature?.id ?? null));
+  };
+
+  const navigateToArtifact = (next: ActiveArtifact): boolean => {
+    if (sameArtifact(activeArtifact, next) && !creatingFeature) return true;
+    if (!confirmDiscardActiveChanges('Bỏ các thay đổi chưa lưu và chuyển sang artifact khác?')) {
+      return false;
+    }
+    const currentUseCaseContext =
+      activeArtifact.kind === 'use-case' ||
+      activeArtifact.kind === 'diagram' ||
+      activeArtifact.kind === 'brd'
+        ? `${activeArtifact.featureId}:${activeArtifact.useCaseId}`
+        : null;
+    const nextUseCaseContext =
+      next.kind === 'use-case' || next.kind === 'diagram' || next.kind === 'brd'
+        ? `${next.featureId}:${next.useCaseId}`
+        : null;
+    const preservesDiagramContext =
+      currentUseCaseContext !== null &&
+      currentUseCaseContext === nextUseCaseContext &&
+      (next.kind === 'diagram' || next.kind === 'brd');
+    resetDiscardedDrafts();
+    setCreatingFeature(false);
+    if (!preservesDiagramContext) {
+      setActiveDiagram(null);
+      setActiveDiagramBusinessKey(null);
+    }
+    navigate(artifactPath(projectId, next));
+    return true;
   };
 
   const startNewFeature = () => {
-    if (!confirmDiscardActiveChanges('Bỏ các thay đổi chưa lưu của feature hiện tại?')) return;
-    setSaveStateRegistry((current) => clearFeatureScopes(current, activeFeatureId));
+    if (!confirmDiscardActiveChanges('Bỏ các thay đổi chưa lưu và tạo Feature mới?')) return;
+    resetDiscardedDrafts();
+    setCreatingFeature(true);
     setFeatureDraftId(null);
     setFeatureDraft(emptyFeature());
     setFeatureSaveState('dirty');
-    setActiveDiagram(null);
-    setActiveDiagramBusinessKey(null);
-    setMissingFeatureRouteId(null);
-    setTab('features');
-    navigate(`/projects/${projectId}`);
   };
 
   const saveSpec = async () => {
-    if (!project || !spec || !specDraft) return;
+    if (!tree || !specDraft) return;
     setProjectSaveState('saving');
     setSpecSaveState('saving');
     setError(null);
     try {
       const [savedProject, savedSpec] = await Promise.all([
-        api.updateProject(project.id, {
+        api.updateProject(tree.project.id, {
           name: projectDraft.name,
           description: projectDraft.description || null,
         }),
-        api.updateSpec(project.id, {
+        api.updateSpec(tree.project.id, {
           project_summary: specDraft.project_summary,
           business_context: specDraft.business_context,
           target_users: specDraft.target_users,
@@ -222,70 +346,79 @@ export default function ProjectWorkspace() {
           glossary: specDraft.glossary,
         }),
       ]);
-      setProject(savedProject);
-      setSpec(savedSpec);
+      setTree((current) =>
+        current ? { ...current, project: savedProject, spec: savedSpec } : current,
+      );
       setSpecDraft(projectSpecFromResources(savedProject, savedSpec));
       setProjectSaveState('saved');
       setSpecSaveState('saved');
     } catch (reason) {
       setProjectSaveState('failed');
       setSpecSaveState('failed');
-      setError(reason instanceof Error ? reason.message : 'Không lưu được Spec.');
+      setError(reason instanceof Error ? reason.message : 'Không lưu được Project Spec.');
     }
   };
 
   const saveFeature = async () => {
-    if (!spec || !featureDraft.feature_name.trim() || !featureDraft.feature_summary.trim()) return;
+    if (!tree || !featureDraft.feature_name.trim() || !featureDraft.feature_summary.trim()) return;
     setFeatureSaveState('saving');
     setError(null);
     try {
       const saved = featureDraftId
         ? await api.updateFeature(featureDraftId, featurePayload(featureDraft))
-        : await api.createFeature(spec.id, featurePayload(featureDraft));
-      setFeatures((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+        : await api.createFeature(tree.spec.id, featurePayload(featureDraft));
+      setFeatureResources((current) => [
+        saved,
+        ...current.filter((item) => item.id !== saved.id),
+      ]);
       setFeatureDraftId(saved.id);
-      setActiveFeatureId(saved.id);
       setFeatureDraft(featureIntentFromResource(saved));
+      setCreatingFeature(false);
       setFeatureSaveState('saved');
-      setTab('editor');
-      navigate(`/projects/${projectId}/features/${saved.id}`, { replace: !featureDraftId });
+      await refreshArtifactTree();
+      navigate(artifactPath(projectId, { kind: 'feature', featureId: saved.id }), {
+        replace: !featureDraftId,
+      });
     } catch (reason) {
       setFeatureSaveState('failed');
       setError(reason instanceof Error ? reason.message : 'Không lưu được Feature Intent.');
     }
   };
 
-  const deleteFeature = async (feature: FeatureIntentResource) => {
-    if (!confirmDiscardActiveChanges('Bỏ các thay đổi chưa lưu trước khi xóa feature?')) return;
-    if (!window.confirm(`Xóa feature "${feature.name}" và toàn bộ use case liên quan?`)) return;
-    await api.deleteFeature(feature.id);
-    setSaveStateRegistry((current) => clearFeatureScopes(current, feature.id));
-    const next = features.filter((item) => item.id !== feature.id);
-    setFeatures(next);
-    const replacement = next[0] ?? null;
-    setActiveFeatureId(replacement?.id ?? null);
-    setFeatureDraftId(replacement?.id ?? null);
-    setFeatureDraft(replacement ? featureIntentFromResource(replacement) : emptyFeature());
-    setFeatureSaveState('idle');
-    setActiveDiagram(null);
-    setActiveDiagramBusinessKey(null);
-    setTab('features');
-    navigate(replacement ? `/projects/${projectId}/features/${replacement.id}` : `/projects/${projectId}`, {
-      replace: true,
-    });
+  const deleteFeature = async () => {
+    if (!activeFeature) return;
+    if (!confirmDiscardActiveChanges('Bỏ các thay đổi chưa lưu trước khi xóa Feature?')) return;
+    if (!window.confirm(`Xóa feature "${activeFeature.name}" và toàn bộ artifact liên quan?`)) {
+      return;
+    }
+    try {
+      await api.deleteFeature(activeFeature.id);
+      setSaveStateRegistry((current) => clearFeatureScopes(current, activeFeature.id));
+      setFeatureResources((current) => current.filter((item) => item.id !== activeFeature.id));
+      await refreshArtifactTree();
+      navigate(artifactPath(projectId, { kind: 'spec' }), { replace: true });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Không xóa được Feature.');
+    }
   };
 
   const contextValue = useMemo<WorkspacePersistence | null>(() => {
-    if (!project || !spec || !activeFeature) return null;
-    const projectSpec = projectSpecFromResources(project, spec);
+    if (!tree || !activeFeature) return null;
     return {
-      project,
-      spec,
+      project: tree.project,
+      spec: tree.spec,
       activeFeature,
-      projectSpec,
+      selectedArtifact: activeArtifact,
+      navigateToArtifact,
+      refreshArtifactTree,
+      projectSpec: projectSpecFromResources(tree.project, tree.spec),
       featureIntent: featureIntentFromResource(activeFeature),
-      openProjectSpecEditor: () => setTab('spec'),
-      openFeatureIntentEditor: () => setTab('features'),
+      openProjectSpecEditor: () => {
+        navigateToArtifact({ kind: 'spec' });
+      },
+      openFeatureIntentEditor: () => {
+        navigateToArtifact({ kind: 'feature', featureId: activeFeature.id });
+      },
       useCaseResources,
       useCaseSaveState,
       diagramSaveState,
@@ -293,11 +426,9 @@ export default function ProjectWorkspace() {
       dirtyScopes: allDirtyScopes,
       canSwitchDiagramScope: (nextBusinessKey) => {
         if (!activeDiagramBusinessKey || activeDiagramBusinessKey === nextBusinessKey) return true;
-        const currentDiagramScope = activeFeature
-          ? makeDiagramScope(activeFeature.id, activeDiagramBusinessKey)
-          : null;
+        const currentDiagramScope = makeDiagramScope(activeFeature.id, activeDiagramBusinessKey);
         const activeDirtyScopes = [
-          currentDiagramScope && getScopeState(saveStateRegistry, currentDiagramScope) === 'dirty'
+          getScopeState(saveStateRegistry, currentDiagramScope) === 'dirty'
             ? saveStateRegistry[currentDiagramScope.key]
             : null,
           brdScope && getScopeState(saveStateRegistry, brdScope) === 'dirty'
@@ -311,52 +442,120 @@ export default function ProjectWorkspace() {
           window.confirm,
         );
       },
-      markUseCasesDirty: () => setScopedSaveState(useCaseScope, 'dirty'),
+      markUseCasesDirty: () => setScopedSaveState(useCasesScope, 'dirty'),
+      markUseCaseDirty: (businessKey, label) =>
+        setScopedSaveState(makeUseCaseScope(activeFeature.id, businessKey, label), 'dirty'),
       markDiagramDirty: (businessKey) => {
         const key = businessKey ?? activeDiagramBusinessKey;
         if (key) setActiveDiagramBusinessKey(key);
-        setScopedSaveState(activeFeature && key ? makeDiagramScope(activeFeature.id, key) : null, 'dirty');
+        setScopedSaveState(key ? makeDiagramScope(activeFeature.id, key) : null, 'dirty');
       },
-      markBrdDirty: (diagramId) => setScopedSaveState(
-        diagramId || activeDiagram?.id
-          ? makeBrdScope(
-              diagramId || activeDiagram!.id,
-              activeFeature.id,
-              activeDiagram?.title ? `BRD ${activeDiagram.title}` : 'BRD',
-            )
-          : null,
-        'dirty',
-      ),
-      markBrdLoaded: (diagramId) => setScopedSaveState(
-        makeBrdScope(
-          diagramId,
-          activeFeature.id,
-          activeDiagram?.title ? `BRD ${activeDiagram.title}` : 'BRD',
+      markBrdDirty: (diagramId) =>
+        setScopedSaveState(
+          diagramId || activeDiagram?.id
+            ? makeBrdScope(
+                diagramId || activeDiagram!.id,
+                activeFeature.id,
+                activeDiagram?.title ? `BRD ${activeDiagram.title}` : 'BRD',
+              )
+            : null,
+          'dirty',
         ),
-        'idle',
-      ),
-      generateUseCases: (preference) => api.generateUseCases(activeFeature.id, preference),
-      saveUseCases: async (drafts: UseCaseDraft[]) => {
-        setScopedSaveState(useCaseScope, 'saving');
+      markBrdLoaded: (diagramId) =>
+        setScopedSaveState(
+          makeBrdScope(
+            diagramId,
+            activeFeature.id,
+            activeDiagram?.title ? `BRD ${activeDiagram.title}` : 'BRD',
+          ),
+          'idle',
+        ),
+      generateUseCases: async (preference) => {
+        const envelope = await api.generateUseCases(activeFeature.id, preference);
+        setFeatureResources((current) =>
+          current.map((feature) =>
+            feature.id === activeFeature.id
+              ? {
+                  ...feature,
+                  latest_usecase_generation: envelope.metadata ?? null,
+                }
+              : feature,
+          ),
+        );
+        return envelope;
+      },
+      saveUseCases: async (drafts: UseCaseDraft[], options) => {
+        const targetScopes =
+          options?.businessKeys && options.businessKeys.length > 0
+            ? options.businessKeys.map((businessKey) =>
+                makeUseCaseScope(
+                  activeFeature.id,
+                  businessKey,
+                  options.labelsByBusinessKey?.[businessKey] ?? businessKey,
+                ),
+              )
+            : useCasesScope
+              ? [useCasesScope]
+              : [];
+        setSaveStateRegistry((current) =>
+          targetScopes.reduce(
+            (next, scope) => setScopeState(next, scope, 'saving'),
+            current,
+          ),
+        );
         try {
           const saved = await api.saveUseCases(activeFeature.id, useCaseResources, drafts);
           setUseCaseResources(saved);
-          setScopedSaveState(useCaseScope, 'saved');
+          setTree((current) => {
+            if (!current) return current;
+            return {
+              ...current,
+              features: current.features.map((feature) => {
+                if (feature.id !== activeFeature.id) return feature;
+                const previousById = new Map(feature.use_cases.map((item) => [item.id, item]));
+                return {
+                  ...feature,
+                  use_cases: saved.map((item) => ({
+                    id: item.id,
+                    use_case_key: item.use_case_key,
+                    title: item.title,
+                    review_status: item.review_status,
+                    updated_at: item.updated_at,
+                    diagram: previousById.get(item.id)?.diagram ?? null,
+                  })),
+                };
+              }),
+            };
+          });
+          setSaveStateRegistry((current) =>
+            targetScopes.reduce(
+              (next, scope) => setScopeState(next, scope, 'saved'),
+              current,
+            ),
+          );
+          void refreshArtifactTree().catch(() => undefined);
           return saved;
         } catch (reason) {
-          setScopedSaveState(useCaseScope, 'failed');
+          setSaveStateRegistry((current) =>
+            targetScopes.reduce(
+              (next, scope) => setScopeState(next, scope, 'failed'),
+              current,
+            ),
+          );
           throw reason;
         }
       },
       generateDiagram: async (businessKey) => {
-        if (useCaseSaveState === 'dirty' || useCaseSaveState === 'saving' || useCaseSaveState === 'failed') {
+        if (
+          useCaseSaveState === 'dirty' ||
+          useCaseSaveState === 'saving' ||
+          useCaseSaveState === 'failed'
+        ) {
           throw new Error('Hãy lưu Use Case mới nhất trước khi sinh Diagram.');
         }
         const resource = useCaseResources.find((item) => item.use_case_key === businessKey);
         if (!resource) throw new Error('Hãy lưu Use Case trước khi sinh Diagram.');
-        const generated = await api.generateDiagram(resource.id);
-        setActiveDiagramBusinessKey(businessKey);
-        return generated;
+        return api.generateDiagram(resource.id);
       },
       loadDiagram: async (businessKey) => {
         const resource = useCaseResources.find((item) => item.use_case_key === businessKey);
@@ -372,18 +571,19 @@ export default function ProjectWorkspace() {
         const resource = useCaseResources.find((item) => item.use_case_key === businessKey);
         if (!resource) throw new Error('Hãy lưu Use Case trước khi lưu Diagram.');
         const nextDiagramScope = makeDiagramScope(activeFeature.id, businessKey);
-        setActiveDiagramBusinessKey(businessKey);
         setScopedSaveState(nextDiagramScope, 'saving');
         try {
           const saved = await api.saveDiagram(resource.id, {
-            title: useCaseResources.find((item) => item.use_case_key === businessKey)?.title || businessKey,
+            title: resource.title || businessKey,
             graph_data: graphData,
             lanes_data: lanes as unknown as Array<Record<string, unknown>>,
             lane_height: Math.round(laneHeight),
             semantic_edited: semanticEdited,
           });
+          setActiveDiagramBusinessKey(businessKey);
           setActiveDiagram(saved);
           setScopedSaveState(nextDiagramScope, 'saved');
+          await refreshArtifactTree();
           return saved;
         } catch (reason) {
           setScopedSaveState(nextDiagramScope, 'failed');
@@ -393,8 +593,8 @@ export default function ProjectWorkspace() {
       activeDiagram,
       setActiveDiagram,
       brdCacheScope:
-        user?.id && project && activeDiagram
-          ? { userId: user.id, projectId: project.id, diagramId: activeDiagram.id }
+        user?.id && activeDiagram
+          ? { userId: user.id, projectId: tree.project.id, diagramId: activeDiagram.id }
           : null,
       deleteUseCase: async (businessKey) => {
         const resource = useCaseResources.find((item) => item.use_case_key === businessKey);
@@ -407,13 +607,16 @@ export default function ProjectWorkspace() {
             (scope) =>
               scope.resourceId === businessKey ||
               scope.key.includes(`:diagram:${businessKey}`) ||
-              (activeDiagram?.use_case_id === resource.id && scope.resourceId === activeDiagram.id),
+              (activeDiagram?.use_case_id === resource.id &&
+                scope.resourceId === activeDiagram.id),
           ),
         );
         if (activeDiagram?.use_case_id === resource.id) {
           setActiveDiagram(null);
           setActiveDiagramBusinessKey(null);
         }
+        await refreshArtifactTree();
+        navigateToArtifact({ kind: 'use-cases', featureId: activeFeature.id });
       },
       loadBrd: (diagramId) => api.getBrd(diagramId),
       generateBrd: (diagramId, idempotencyKey, template) =>
@@ -427,7 +630,34 @@ export default function ProjectWorkspace() {
         setScopedSaveState(nextBrdScope, 'saving');
         try {
           const saved = await api.saveBrd(diagramId, payload);
+          setTree((current) => {
+            if (!current) return current;
+            return {
+              ...current,
+              features: current.features.map((feature) => ({
+                ...feature,
+                use_cases: feature.use_cases.map((useCase) =>
+                  useCase.diagram?.id === diagramId
+                    ? {
+                        ...useCase,
+                        diagram: {
+                          ...useCase.diagram,
+                          brd: {
+                            id: saved.id,
+                            title: saved.title,
+                            template: saved.template,
+                            is_outdated: saved.is_outdated,
+                            updated_at: saved.updated_at,
+                          },
+                        },
+                      }
+                    : useCase,
+                ),
+              })),
+            };
+          });
           setScopedSaveState(nextBrdScope, 'saved');
+          void refreshArtifactTree().catch(() => undefined);
           return saved;
         } catch (reason) {
           setScopedSaveState(nextBrdScope, 'failed');
@@ -436,26 +666,28 @@ export default function ProjectWorkspace() {
       },
     };
   }, [
+    activeArtifact,
     activeDiagram,
+    activeDiagramBusinessKey,
     activeFeature,
+    allDirtyScopes,
     api,
     brdSaveState,
     brdScope,
     diagramSaveState,
-    featureSaveState,
-    allDirtyScopes,
-    activeDiagramBusinessKey,
+    projectId,
+    refreshArtifactTree,
     saveStateRegistry,
-    project,
-    spec,
-    useCaseScope,
+    tree,
     useCaseResources,
     useCaseSaveState,
+    selectedUseCaseScope,
+    useCasesScope,
     user?.id,
   ]);
 
   if (loading) return <main className="workspace-loading">Đang tải project…</main>;
-  if (!project || !spec || !specDraft) {
+  if (!tree || !specDraft) {
     return <main className="workspace-loading">{error || 'Không tìm thấy project.'}</main>;
   }
 
@@ -464,13 +696,24 @@ export default function ProjectWorkspace() {
     navigate('/projects');
   };
 
+  const showFeatureEditor = creatingFeature || activeArtifact.kind === 'feature';
+  const showUseCaseList = !routeError && activeArtifact.kind === 'use-cases';
+  const showUseCaseEditor = !routeError && activeArtifact.kind === 'use-case';
+  const showDiagramEditor = !routeError && activeArtifact.kind === 'diagram';
+  const showBrdEditor = !routeError && activeArtifact.kind === 'brd';
+  const showCanvasEditor = showDiagramEditor || showBrdEditor;
+  const showMissingDiagramState =
+    showDiagramEditor && activeTreeUseCase != null && !activeTreeUseCase.diagram;
+  const artifactContentLoading =
+    contentLoading || (activeArtifact.kind !== 'spec' && featuresLoading);
+
   return (
     <main className="project-workspace">
       <header className="workspace-header compact">
         <div>
           <button className="workspace-back" onClick={leaveWorkspace}>← Projects</button>
-          <h1>{project.name}</h1>
-          <p>Spec → Feature Intent → Use Case → Diagram → BRD</p>
+          <h1>{tree.project.name}</h1>
+          <p>Project Spec → Feature Intent → Use Case → Diagram → BRD</p>
         </div>
         <div className="workspace-header__actions">
           {hasUnsavedChanges ? <span className="save-state dirty">Có thay đổi chưa lưu</span> : null}
@@ -478,118 +721,158 @@ export default function ProjectWorkspace() {
         </div>
       </header>
 
-      <nav className="workspace-tabs">
-        <button className={tab === 'spec' ? 'active' : ''} onClick={() => setTab('spec')}>1. Project Spec</button>
-        <button className={tab === 'features' ? 'active' : ''} onClick={() => setTab('features')}>2. Features</button>
-        <button
-          className={tab === 'editor' ? 'active' : ''}
-          disabled={!activeFeature}
-          onClick={() => setTab('editor')}
-        >
-          3. Use Case, Diagram & BRD
-        </button>
-      </nav>
-
       {error ? <p className="workspace-error workspace-error--floating">{error}</p> : null}
 
-      {missingFeatureRouteId ? (
-        <section className="workspace-error">
-          <strong>Feature không tồn tại trong project này hoặc bạn không có quyền.</strong>
-          <p>URL đang trỏ tới một feature không thuộc danh sách hiện tại. Chọn feature khác để tiếp tục.</p>
-          <div className="workspace-header__actions">
-            {features[0] ? (
-              <button className="workspace-button primary" onClick={() => selectFeature(features[0])}>
-                Mở feature đầu tiên
-              </button>
-            ) : null}
-            <button className="workspace-button" onClick={() => {
-              setMissingFeatureRouteId(null);
-              setTab('features');
-              navigate(`/projects/${projectId}`, { replace: true });
-            }}>
-              Về danh sách feature
-            </button>
-          </div>
-        </section>
-      ) : null}
+      <div className="artifact-workspace-shell">
+        <ArtifactTree
+          tree={tree}
+          active={activeArtifact}
+          onSelect={navigateToArtifact}
+          onCreateFeature={startNewFeature}
+        />
 
-      {tab === 'spec' ? (
-        <section className="workspace-form-card">
-          <div className="workspace-section-heading">
-            <div><h2>Project Spec</h2><p>Một project chỉ có một Spec, luôn ghi đè bản mới nhất.</p></div>
-            <SaveButton state={aggregateSaveState(projectSaveState, specSaveState)} onClick={() => void saveSpec()} />
-          </div>
-          <TextField label="Tên project" value={projectDraft.name} onChange={(name) => {
-            setProjectDraft((current) => ({ ...current, name }));
-            setSpecDraft((current) => current ? { ...current, project_name: name } : current);
-            setProjectSaveState('dirty');
-            setSpecSaveState('dirty');
-          }} />
-          <TextArea label="Tóm tắt project" value={specDraft.project_summary} onChange={(project_summary) => {
-            setSpecDraft({ ...specDraft, project_summary });
-            setSpecSaveState('dirty');
-          }} />
-          <TextArea label="Bối cảnh nghiệp vụ" value={specDraft.business_context ?? ''} onChange={(business_context) => {
-            setSpecDraft({ ...specDraft, business_context });
-            setSpecSaveState('dirty');
-          }} />
-          <ListField label="Người dùng mục tiêu" value={specDraft.target_users} onChange={(target_users) => {
-            setSpecDraft({ ...specDraft, target_users });
-            setSpecSaveState('dirty');
-          }} />
-          <ListField label="Business rules" value={specDraft.business_rules} onChange={(business_rules) => {
-            setSpecDraft({ ...specDraft, business_rules });
-            setSpecSaveState('dirty');
-          }} />
-          <ListField label="Glossary" value={specDraft.glossary} onChange={(glossary) => {
-            setSpecDraft({ ...specDraft, glossary });
-            setSpecSaveState('dirty');
-          }} />
-        </section>
-      ) : null}
+        <section className="artifact-workspace-content">
+          {routeError ? (
+            <ArtifactState
+              title="Không mở được artifact"
+              message={routeError}
+              actionLabel="Về Project Spec"
+              onAction={() => navigateToArtifact({ kind: 'spec' })}
+            />
+          ) : null}
 
-      {tab === 'features' ? (
-        <section className="feature-workspace">
-          <aside className="feature-list">
-            <button className="workspace-button primary" onClick={startNewFeature}>+ Feature</button>
-            {features.map((feature) => (
-              <div className={`feature-list-item ${featureDraftId === feature.id ? 'active' : ''}`} key={feature.id}>
-                <button onClick={() => selectFeature(feature)}>{feature.name}</button>
-                <button className="feature-delete" onClick={() => void deleteFeature(feature)}>×</button>
+          {!routeError && activeArtifact.kind === 'spec' && !creatingFeature ? (
+            <section className="workspace-form-card">
+              <div className="workspace-section-heading">
+                <div>
+                  <h2>Project Spec</h2>
+                  <p>Một project có một Spec và luôn lưu phiên bản mới nhất.</p>
+                </div>
+                <SaveButton
+                  state={aggregateSaveState(projectSaveState, specSaveState)}
+                  onClick={() => void saveSpec()}
+                />
               </div>
-            ))}
-          </aside>
-          <section className="workspace-form-card feature-editor">
-            <div className="workspace-section-heading">
-              <div><h2>{featureDraftId ? 'Feature Intent' : 'Feature mới'}</h2><p>Mỗi Spec có thể có nhiều Feature Intent.</p></div>
-              <SaveButton state={featureSaveState} onClick={() => void saveFeature()} />
-            </div>
-            <TextField label="Tên feature" value={featureDraft.feature_name} onChange={(feature_name) => updateFeatureDraft({ feature_name })} />
-            <TextArea label="Mô tả feature" value={featureDraft.feature_summary} onChange={(feature_summary) => updateFeatureDraft({ feature_summary })} />
-            <ListField label="Actors" value={featureDraft.actors ?? []} onChange={(actors) => updateFeatureDraft({ actors, primary_actor: actors[0] ?? null })} />
-            <TextField label="Trigger" value={featureDraft.trigger ?? ''} onChange={(trigger) => updateFeatureDraft({ trigger })} />
-            <ListField label="Inputs" value={featureDraft.inputs} onChange={(inputs) => updateFeatureDraft({ inputs })} />
-            <ListField label="Outputs" value={featureDraft.outputs} onChange={(outputs) => updateFeatureDraft({ outputs })} />
-            <ListField label="Constraints" value={featureDraft.constraints} onChange={(constraints) => updateFeatureDraft({ constraints })} />
-            <ListField label="Assumptions" value={featureDraft.assumptions} onChange={(assumptions) => updateFeatureDraft({ assumptions })} />
-            <ListField label="Systems involved" value={featureDraft.systems_involved} onChange={(systems_involved) => updateFeatureDraft({ systems_involved })} />
-            <TextField label="Success outcome" value={featureDraft.success_outcome ?? ''} onChange={(success_outcome) => updateFeatureDraft({ success_outcome })} />
-          </section>
-        </section>
-      ) : null}
+              <TextField label="Tên project" value={projectDraft.name} onChange={(name) => {
+                setProjectDraft((current) => ({ ...current, name }));
+                setSpecDraft((current) => current ? { ...current, project_name: name } : current);
+                setProjectSaveState('dirty');
+                setSpecSaveState('dirty');
+              }} />
+              <TextArea label="Tóm tắt project" value={specDraft.project_summary} onChange={(project_summary) => {
+                setSpecDraft({ ...specDraft, project_summary });
+                setSpecSaveState('dirty');
+              }} />
+              <TextArea label="Bối cảnh nghiệp vụ" value={specDraft.business_context ?? ''} onChange={(business_context) => {
+                setSpecDraft({ ...specDraft, business_context });
+                setSpecSaveState('dirty');
+              }} />
+              <ListField label="Người dùng mục tiêu" value={specDraft.target_users} onChange={(target_users) => {
+                setSpecDraft({ ...specDraft, target_users });
+                setSpecSaveState('dirty');
+              }} />
+              <ListField label="Business rules" value={specDraft.business_rules} onChange={(business_rules) => {
+                setSpecDraft({ ...specDraft, business_rules });
+                setSpecSaveState('dirty');
+              }} />
+              <ListField label="Glossary" value={specDraft.glossary} onChange={(glossary) => {
+                setSpecDraft({ ...specDraft, glossary });
+                setSpecSaveState('dirty');
+              }} />
+            </section>
+          ) : null}
 
-      {tab === 'editor' && contextValue ? (
-        <section className="editor-workspace">
-          <div className="editor-workspace__feature">
-            <span>Feature đang mở</span>
-            <strong>{activeFeature?.name}</strong>
-            <button className="workspace-button" onClick={() => setTab('features')}>Đổi feature</button>
-          </div>
-          <WorkspacePersistenceProvider value={contextValue}>
-            <App />
-          </WorkspacePersistenceProvider>
+          {!routeError && showFeatureEditor ? (
+            <section className="workspace-form-card feature-editor">
+              <div className="workspace-section-heading">
+                <div>
+                  <h2>{featureDraftId ? 'Feature Intent' : 'Feature mới'}</h2>
+                  <p>Mỗi Spec có thể có nhiều Feature Intent.</p>
+                </div>
+                <div className="workspace-header__actions">
+                  {featureDraftId ? (
+                    <button className="workspace-button danger" onClick={() => void deleteFeature()}>
+                      Xóa
+                    </button>
+                  ) : null}
+                  {featureDraftId ? (
+                    <button
+                      className="workspace-button"
+                      onClick={() =>
+                        navigateToArtifact({
+                          kind: 'use-cases',
+                          featureId: featureDraftId,
+                        })
+                      }
+                    >
+                      Use Cases
+                    </button>
+                  ) : null}
+                  <SaveButton state={featureSaveState} onClick={() => void saveFeature()} />
+                </div>
+              </div>
+              <TextField label="Tên feature" value={featureDraft.feature_name} onChange={(feature_name) => updateFeatureDraft({ feature_name })} />
+              <TextArea label="Mô tả feature" value={featureDraft.feature_summary} onChange={(feature_summary) => updateFeatureDraft({ feature_summary })} />
+              <ListField label="Actors" value={featureDraft.actors ?? []} onChange={(actors) => updateFeatureDraft({ actors, primary_actor: actors[0] ?? null })} />
+              <TextField label="Trigger" value={featureDraft.trigger ?? ''} onChange={(trigger) => updateFeatureDraft({ trigger })} />
+              <ListField label="Inputs" value={featureDraft.inputs} onChange={(inputs) => updateFeatureDraft({ inputs })} />
+              <ListField label="Outputs" value={featureDraft.outputs} onChange={(outputs) => updateFeatureDraft({ outputs })} />
+              <ListField label="Constraints" value={featureDraft.constraints} onChange={(constraints) => updateFeatureDraft({ constraints })} />
+              <ListField label="Assumptions" value={featureDraft.assumptions} onChange={(assumptions) => updateFeatureDraft({ assumptions })} />
+              <ListField label="Systems involved" value={featureDraft.systems_involved} onChange={(systems_involved) => updateFeatureDraft({ systems_involved })} />
+              <TextField label="Success outcome" value={featureDraft.success_outcome ?? ''} onChange={(success_outcome) => updateFeatureDraft({ success_outcome })} />
+            </section>
+          ) : null}
+
+          {(showUseCaseList || showUseCaseEditor || showCanvasEditor) && artifactContentLoading ? (
+            <ArtifactState title="Đang tải artifact" message="Đang tải dữ liệu thật từ server…" />
+          ) : null}
+
+          {(showUseCaseList || showUseCaseEditor || showMissingDiagramState) &&
+          !artifactContentLoading &&
+          contextValue ? (
+            <section className="artifact-workspace-content__section">
+              <WorkspacePersistenceProvider value={contextValue}>
+                <PersistedUseCaseWorkspace
+                  mode={
+                    showUseCaseList
+                      ? 'list'
+                      : showUseCaseEditor
+                        ? 'editor'
+                        : 'missing-diagram'
+                  }
+                  activeUseCaseResource={
+                    activeArtifact.kind === 'use-case' || activeArtifact.kind === 'diagram'
+                      ? useCaseResources.find((item) => item.id === activeArtifact.useCaseId) ?? null
+                      : null
+                  }
+                  activeTreeUseCase={activeTreeUseCase}
+                  treeUseCases={activeTreeFeature?.use_cases ?? []}
+                />
+              </WorkspacePersistenceProvider>
+            </section>
+          ) : null}
+
+          {showCanvasEditor && !showMissingDiagramState && !artifactContentLoading && contextValue ? (
+            <section className="editor-workspace">
+              <WorkspacePersistenceProvider value={contextValue}>
+                <App />
+              </WorkspacePersistenceProvider>
+            </section>
+          ) : null}
+
+          {(showUseCaseList || showUseCaseEditor || showCanvasEditor) &&
+          !artifactContentLoading &&
+          !contextValue ? (
+            <ArtifactState
+              title="Không tải được editor"
+              message="Feature nguồn chưa sẵn sàng hoặc không còn tồn tại."
+              actionLabel="Về Project Spec"
+              onAction={() => navigateToArtifact({ kind: 'spec' })}
+            />
+          ) : null}
         </section>
-      ) : null}
+      </div>
     </main>
   );
 
@@ -612,6 +895,30 @@ function SaveButton({ state, onClick }: { state: SaveState; onClick: () => void 
     <button className="workspace-button primary" onClick={onClick} disabled={state === 'saving'}>
       {state === 'saving' ? 'Đang lưu…' : state === 'saved' ? 'Đã lưu' : state === 'failed' ? 'Thử lưu lại' : 'Lưu'}
     </button>
+  );
+}
+
+function ArtifactState({
+  title,
+  message,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <section className="workspace-empty artifact-state">
+      <h2>{title}</h2>
+      <p>{message}</p>
+      {actionLabel && onAction ? (
+        <button className="workspace-button primary" onClick={onAction}>
+          {actionLabel}
+        </button>
+      ) : null}
+    </section>
   );
 }
 

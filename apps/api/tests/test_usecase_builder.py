@@ -169,6 +169,34 @@ def test_deprecated_function_name_and_glossary_do_not_change_generation() -> Non
     assert enriched == baseline
 
 
+def test_generate_use_case_drafts_preserve_technical_feature_actors_for_camera_reid_domains() -> None:
+    project_spec = ProjectSpec(
+        project_name="ReIDHub",
+        project_summary="Điều phối re-id camera cho trung tâm vận hành.",
+        target_users=["Ban quản lý"],
+    )
+    feature_intent = FeatureIntent(
+        feature_name="Tra cứu re-id camera",
+        feature_summary="Camera AI và dịch vụ re-id hỗ trợ nhận diện và đối chiếu đối tượng theo yêu cầu của ban quản lý.",
+        actors=["Ban quản lý", "Camera AI", "Dịch vụ Re-ID"],
+        primary_actor="Ban quản lý",
+        inputs=["Ảnh truy vấn", "Luồng camera"],
+        outputs=["Kết quả đối sánh re-id"],
+        systems_involved=["Camera AI", "Dịch vụ Re-ID"],
+        success_outcome="Kết quả đối sánh được trả về cho ban quản lý.",
+    )
+
+    use_cases = generate_use_case_drafts(project_spec, feature_intent)
+    technical_actors = {"Camera AI", "Dịch vụ Re-ID"}
+
+    assert all(technical_actors.issubset(set(use_case.supporting_actors)) for use_case in use_cases)
+    assert any(
+        step.actor_ref in technical_actors
+        for use_case in use_cases
+        for step in use_case.main_flow_steps
+    )
+
+
 @pytest.mark.parametrize(
     ("fixture_name", "expected_count", "expected_primary_actor", "expected_kinds"),
     [

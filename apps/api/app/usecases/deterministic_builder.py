@@ -11,6 +11,8 @@ from app.schemas.usecase import UseCaseAlternateFlow
 from app.schemas.usecase import UseCaseDraft
 from app.schemas.usecase import UseCaseFlowStep
 
+from .actor_signals import is_technical_actor
+
 
 def build_artifact_chain() -> list[ArtifactChainItem]:
     return [
@@ -64,11 +66,13 @@ def generate_use_case_drafts(
     feature_label = feature_intent.feature_name.strip()
     primary_actor = (
         feature_intent.primary_actor
+        or next(iter(feature_intent.actors), None)
         or next(iter(project_spec.target_users), None)
         or "Người dùng nghiệp vụ"
     )
     supporting_actors = unique_values(
         [
+            *feature_intent.actors,
             *project_spec.target_users,
             *feature_intent.systems_involved,
         ],
@@ -94,7 +98,9 @@ def generate_use_case_drafts(
                 primary_actor=primary_actor,
                 supporting_actors=supporting_actors,
                 preconditions=generic_preconditions,
-                happy_path_summary=build_intake_happy_path(primary_actor, feature_intent),
+                happy_path_summary=build_intake_happy_path(
+                    primary_actor, feature_intent, supporting_actors
+                ),
                 key_exceptions=build_intake_exceptions(feature_intent),
                 success_outcome=(
                     f"Yêu cầu hoặc tín hiệu đầu vào cho {feature_label.lower()} đã được ghi nhận đầy đủ "
@@ -121,7 +127,9 @@ def generate_use_case_drafts(
             primary_actor=primary_actor,
             supporting_actors=supporting_actors,
             preconditions=execution_preconditions,
-            happy_path_summary=build_execution_happy_path(primary_actor, feature_intent),
+            happy_path_summary=build_execution_happy_path(
+                primary_actor, feature_intent, supporting_actors
+            ),
             key_exceptions=build_execution_exceptions(feature_intent),
             success_outcome=(
                 feature_intent.success_outcome
@@ -145,7 +153,9 @@ def generate_use_case_drafts(
                 supporting_actors=supporting_actors,
                 preconditions=generic_preconditions
                 + ["Bước xử lý chính đã tạo ra trạng thái hoặc dữ liệu sẵn sàng cho phối hợp tiếp theo."],
-                happy_path_summary=build_coordination_happy_path(primary_actor, feature_intent),
+                happy_path_summary=build_coordination_happy_path(
+                    primary_actor, feature_intent, supporting_actors
+                ),
                 key_exceptions=build_coordination_exceptions(feature_intent),
                 success_outcome=build_coordination_success_outcome(feature_intent),
             )
@@ -165,7 +175,9 @@ def generate_use_case_drafts(
                 primary_actor=primary_actor,
                 supporting_actors=supporting_actors,
                 preconditions=generic_preconditions,
-                happy_path_summary=build_exception_happy_path(primary_actor, feature_intent),
+                happy_path_summary=build_exception_happy_path(
+                    primary_actor, feature_intent, supporting_actors
+                ),
                 key_exceptions=build_exception_exceptions(project_spec, feature_intent),
                 success_outcome=(
                     "Các trường hợp ngoại lệ đã được khép lại với trạng thái cuối, "
@@ -319,45 +331,82 @@ def build_generic_preconditions(
     return conditions
 
 
-def build_intake_happy_path(primary_actor: str, feature_intent: FeatureIntent) -> list[str]:
+def build_intake_happy_path(
+    primary_actor: str,
+    feature_intent: FeatureIntent,
+    supporting_actors: list[str],
+) -> list[str]:
     feature_label = feature_intent.feature_name.lower()
+    technical_actor = select_technical_actor(supporting_actors)
+    handoff_actor = technical_actor or select_supporting_actor(supporting_actors)
     return [
         f"{primary_actor} tiếp nhận đầu vào hoặc yêu cầu liên quan đến {feature_label}.",
         f"{primary_actor} kiểm tra tính đầy đủ và ngữ cảnh ban đầu của thông tin đầu vào.",
         f"{primary_actor} ghi nhận hoặc khởi tạo hồ sơ xử lý cho {feature_label}.",
-        "Hệ thống hoặc actor hỗ trợ được kích hoạt để chuẩn bị cho bước xử lý chính.",
+        (
+            f"{handoff_actor} được kích hoạt để chuẩn bị cho bước xử lý chính."
+            if handoff_actor
+            else "Hệ thống hoặc actor hỗ trợ được kích hoạt để chuẩn bị cho bước xử lý chính."
+        ),
     ]
 
 
-def build_execution_happy_path(primary_actor: str, feature_intent: FeatureIntent) -> list[str]:
+def build_execution_happy_path(
+    primary_actor: str,
+    feature_intent: FeatureIntent,
+    supporting_actors: list[str],
+) -> list[str]:
     feature_label = feature_intent.feature_name.lower()
     outputs = ", ".join(feature_intent.outputs) if feature_intent.outputs else "kết quả xử lý"
+    technical_actor = select_technical_actor(supporting_actors)
     return [
         f"{primary_actor} mở thông tin chi tiết cần xử lý cho {feature_label}.",
-        f"{primary_actor} thực hiện các hành động nghiệp vụ chính theo intent đã mô tả.",
-        f"Hệ thống cập nhật dữ liệu liên quan và đồng bộ {outputs}.",
+        (
+            f"{technical_actor} xử lý tín hiệu, dữ liệu, hoặc suy luận kỹ thuật cần thiết cho {feature_label}."
+            if technical_actor
+            else f"{primary_actor} thực hiện các hành động nghiệp vụ chính theo intent đã mô tả."
+        ),
+        f"{primary_actor} xác nhận kết quả xử lý và cập nhật {outputs}.",
         f"Các actor liên quan nhận được trạng thái hoặc kết quả cuối của {feature_label}.",
     ]
 
 
-def build_coordination_happy_path(primary_actor: str, feature_intent: FeatureIntent) -> list[str]:
+def build_coordination_happy_path(
+    primary_actor: str,
+    feature_intent: FeatureIntent,
+    supporting_actors: list[str],
+) -> list[str]:
     feature_label = feature_intent.feature_name.lower()
     systems = ", ".join(feature_intent.systems_involved) if feature_intent.systems_involved else "các hệ thống liên quan"
     outputs = ", ".join(feature_intent.outputs) if feature_intent.outputs else "đầu ra liên quan"
+    coordination_actor = select_supporting_actor(supporting_actors)
     return [
         f"{primary_actor} phối hợp với các actor hỗ trợ để hoàn tất các bước sau xử lý chính của {feature_label}.",
-        f"Hệ thống hoặc module liên quan ({systems}) nhận dữ liệu cập nhật từ luồng xử lý.",
+        (
+            f"{coordination_actor} nhận dữ liệu cập nhật từ luồng xử lý và đồng bộ với {systems}."
+            if coordination_actor
+            else f"Hệ thống hoặc module liên quan ({systems}) nhận dữ liệu cập nhật từ luồng xử lý."
+        ),
         f"Các đầu ra như {outputs} được đồng bộ hoặc gửi tới đúng bên liên quan.",
         "Trạng thái cuối được ghi nhận nhất quán cho toàn bộ các bên tham gia.",
     ]
 
 
-def build_exception_happy_path(primary_actor: str, feature_intent: FeatureIntent) -> list[str]:
+def build_exception_happy_path(
+    primary_actor: str,
+    feature_intent: FeatureIntent,
+    supporting_actors: list[str],
+) -> list[str]:
     feature_label = feature_intent.feature_name.lower()
+    technical_actor = select_technical_actor(supporting_actors)
     return [
         f"{primary_actor} phát hiện trường hợp không đủ điều kiện, lỗi dữ liệu, hoặc nhu cầu hủy/điều chỉnh của {feature_label}.",
         f"{primary_actor} xác nhận lý do ngoại lệ và chọn hướng xử lý phù hợp.",
-        "Hệ thống cập nhật trạng thái ngoại lệ, lưu lịch sử, và thông báo cho các bên liên quan nếu cần.",
+        (
+            f"{technical_actor} cập nhật trạng thái ngoại lệ, lưu lịch sử, và trả tín hiệu kỹ thuật cần thiết."
+            if technical_actor
+            else "Hệ thống cập nhật trạng thái ngoại lệ, lưu lịch sử, và thông báo cho các bên liên quan nếu cần."
+        ),
         "Quy trình được khép lại ở trạng thái rõ ràng hoặc trả về bước phù hợp để xử lý lại.",
     ]
 
@@ -522,6 +571,17 @@ def unique_values(values: list[str], exclude: set[str] | None = None) -> list[st
             continue
         result.append(normalized)
     return result
+
+
+def select_technical_actor(actors: list[str]) -> str | None:
+    for actor in actors:
+        if is_technical_actor(actor):
+            return actor
+    return None
+
+
+def select_supporting_actor(actors: list[str]) -> str | None:
+    return actors[0] if actors else None
 
 
 def slugify(value: str) -> str:

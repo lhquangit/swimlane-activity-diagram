@@ -136,6 +136,36 @@ def test_grounding_rejects_unknown_actor_and_evidence_ref() -> None:
     }
 
 
+def test_grounding_accepts_feature_actors_and_demands_technical_actor_coverage() -> None:
+    project, intent = project_and_intent()
+    intent = intent.model_copy(
+        update={
+            "actors": ["Ban quản lý", "Camera AI"],
+            "systems_involved": ["Dịch vụ Re-ID"],
+        }
+    )
+    payload = valid_synthesis_payload()
+    payload["use_cases"][0]["supporting_actors"] = ["Camera AI"]
+    payload["use_cases"][0]["main_flow_steps"][0]["actor"] = "Camera AI"
+    payload["use_cases"][0]["main_flow_steps"][0]["evidence_refs"] = ["feature.actors.1"]
+
+    issues = validate_grounding(
+        UseCaseSynthesisResult.model_validate(payload), project, intent
+    )
+
+    assert issues == []
+
+    payload_without_technical_actor = valid_synthesis_payload()
+    payload_without_technical_actor["use_cases"][0]["supporting_actors"] = ["Camera AI"]
+    issues_without_coverage = validate_grounding(
+        UseCaseSynthesisResult.model_validate(payload_without_technical_actor), project, intent
+    )
+
+    assert {issue.code for issue in issues_without_coverage} == {
+        "MISSING_TECHNICAL_ACTOR_COVERAGE"
+    }
+
+
 def test_quality_gate_rejects_generic_and_duplicate_flows() -> None:
     payload = valid_synthesis_payload()
     first = payload["use_cases"][0]
@@ -147,6 +177,26 @@ def test_quality_gate_rejects_generic_and_duplicate_flows() -> None:
 
     assert quality.status == "rejected"
     assert {"GENERIC_OUTPUT", "DUPLICATE_FLOW"} <= {
+        issue.code for issue in quality.issues
+    }
+
+
+def test_quality_gate_rejects_missing_technical_actor_coverage() -> None:
+    project, intent = project_and_intent()
+    intent = intent.model_copy(
+        update={
+            "actors": ["Ban quản lý", "Camera AI"],
+            "systems_involved": ["Dịch vụ Re-ID"],
+        }
+    )
+
+    quality = evaluate_synthesis(
+        UseCaseSynthesisResult.model_validate(valid_synthesis_payload()),
+        intent,
+    )
+
+    assert quality.status == "rejected"
+    assert "MISSING_TECHNICAL_ACTOR_COVERAGE" in {
         issue.code for issue in quality.issues
     }
 

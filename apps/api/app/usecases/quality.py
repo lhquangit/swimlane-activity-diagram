@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.schemas.usecase import FeatureIntent
+
+from .actor_signals import is_technical_actor
 from .synthesis_schema import UseCaseSynthesisResult
 
 
@@ -26,7 +29,10 @@ class QualityResult:
     score: float
 
 
-def evaluate_synthesis(synthesis: UseCaseSynthesisResult) -> QualityResult:
+def evaluate_synthesis(
+    synthesis: UseCaseSynthesisResult,
+    feature_intent: FeatureIntent | None = None,
+) -> QualityResult:
     issues: list[QualityIssue] = []
     titles = [use_case.title.casefold() for use_case in synthesis.use_cases]
     if len(set(titles)) != len(titles):
@@ -54,6 +60,32 @@ def evaluate_synthesis(synthesis: UseCaseSynthesisResult) -> QualityResult:
             issues.append(
                 QualityIssue("WEAK_OBJECTIVE", f"Use case '{use_case.title}' has a weak objective.")
             )
+
+    if feature_intent:
+        expected_technical_actors = {
+            actor.casefold()
+            for actor in [*feature_intent.actors, *feature_intent.systems_involved]
+            if actor and is_technical_actor(actor)
+        }
+        if expected_technical_actors:
+            realized_step_actors = {
+                step.actor.casefold()
+                for use_case in synthesis.use_cases
+                for step in use_case.main_flow_steps
+            }
+            realized_step_actors.update(
+                step.actor.casefold()
+                for use_case in synthesis.use_cases
+                for flow in use_case.alternate_flows
+                for step in flow.steps
+            )
+            if not expected_technical_actors.intersection(realized_step_actors):
+                issues.append(
+                    QualityIssue(
+                        "MISSING_TECHNICAL_ACTOR_COVERAGE",
+                        "Canonical input có actor kỹ thuật nhưng output không giao bước nào cho họ.",
+                    )
+                )
 
     if total_steps and generic_steps / total_steps >= 0.4:
         issues.append(

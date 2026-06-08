@@ -226,3 +226,41 @@
 - `TASK-164` through `TASK-168` are complete locally.
 - Keep real hosted Clerk persistence E2E as a separate environment-backed verification item rather
   than weakening the local auth boundary for tests.
+
+---
+
+## Task Summary
+
+- Task: Implement `TASK-170` through `TASK-178`
+- Requested by: User
+- Date: 2026-06-07
+- Affected modules: persistence tree read model, frontend routing/workspace shell, artifact editors,
+  sample runtime, dirty guards, docs and E2E coverage
+
+## Goal Reconstruction
+
+- Requested change: Replace tab/demo-oriented navigation with a real-data-only left artifact tree
+  for `Project Spec -> Feature -> Use Case -> Diagram -> BRD`.
+- Intended outcome: Every artifact is selectable and refreshable by UUID/deep-link, missing data is
+  explicit, and no normal route can display hardcoded sample content.
+- Hidden assumptions: Latest-state persistence remains canonical; Diagram/BRD bodies should stay
+  lazy; sample graphs may remain only as test fixtures.
+
+## Risk Assessment
+
+- Decision: IMPLEMENT_WITH_GUARDRAILS
+- Risk level: High
+- Main concerns: N+1 tree loading, stale resource identity during route switches, data loss through
+  dirty-state bypass, Strict Mode hydration races, and loss of canvas regression coverage.
+- Guardrails: metadata-only owned tree endpoint, one canonical route model, transactional lazy
+  hydration, scoped dirty transitions, and a production-inaccessible test harness.
+
+## Execution And Verification
+
+- Implemented: artifact-tree backend API, canonical routes, accessible left tree, persisted
+  Project/Feature/Use Case/Diagram/BRD integration, truthful empty/error/loading states, runtime
+  sample removal, test-only fixture injection, and full-chain real persistence E2E.
+- Regression fixes: LogicFlow hydration now waits for editor readiness under React Strict Mode;
+  Diagram identity is preserved/reloaded when switching from Diagram to BRD.
+- Verification target: backend pytest, frontend Vitest, full Playwright suite, production build,
+  runtime sample-label search, Browser deep-link smoke, and `git diff --check`.

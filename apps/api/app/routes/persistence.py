@@ -22,6 +22,7 @@ from app.schemas.persistence import (
     FeatureIntentResource,
     FeatureIntentUpdate,
     ProjectCreate,
+    ProjectArtifactTree,
     ProjectResource,
     ProjectUpdate,
     SpecResource,
@@ -46,6 +47,7 @@ from app.services.persistence_service import (
     get_owned_brd,
     get_owned_feature,
     get_owned_project,
+    get_owned_project_artifact_tree,
     get_owned_project_spec,
     get_owned_use_case_diagram,
     list_owned_features,
@@ -97,6 +99,15 @@ def get_project(
     db: Session = Depends(get_db),
 ) -> ProjectResource:
     return get_owned_project(db, current_user, project_id)
+
+
+@router.get("/projects/{project_id}/artifact-tree", response_model=ProjectArtifactTree)
+def get_project_artifact_tree(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_current_user),
+    db: Session = Depends(get_db),
+) -> ProjectArtifactTree:
+    return get_owned_project_artifact_tree(db, current_user, project_id)
 
 
 @router.put("/projects/{project_id}", response_model=ProjectResource)
@@ -198,7 +209,7 @@ def generate_feature_use_cases(
     db: Session = Depends(get_db),
 ) -> object:
     feature = require_feature(db, current_user, feature_id)
-    envelope = generate_feature_use_case_envelope(feature, generation_preference)
+    envelope = generate_feature_use_case_envelope(feature, generation_preference, db)
     return json_response_from_envelope(envelope, 200)
 
 

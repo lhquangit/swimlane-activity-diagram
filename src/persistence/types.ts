@@ -1,4 +1,4 @@
-import type { BrdSpec, ResponseEnvelope, WarningItem } from '../brd/types';
+import type { BrdSpec, ResponseEnvelope, ResponseMetadata, WarningItem } from '../brd/types';
 import type {
   DiagramGenerationResult,
   FeatureIntent,
@@ -42,6 +42,7 @@ export type FeatureIntentResource = {
   assumptions: string[];
   systems_involved: string[];
   success_outcome?: string | null;
+  latest_usecase_generation?: ResponseMetadata | null;
   created_at: string;
   updated_at: string;
 };
@@ -55,6 +56,45 @@ export type UseCaseResource = {
   review_status: UseCaseDraft['review_status'];
   created_at: string;
   updated_at: string;
+};
+
+export type ArtifactTreeBrd = {
+  id: string;
+  title: string;
+  template: 'default' | 'full';
+  is_outdated: boolean;
+  updated_at: string;
+};
+
+export type ArtifactTreeDiagram = {
+  id: string;
+  title: string;
+  semantic_edited: boolean;
+  is_outdated: boolean;
+  updated_at: string;
+  brd?: ArtifactTreeBrd | null;
+};
+
+export type ArtifactTreeUseCase = {
+  id: string;
+  use_case_key: string;
+  title: string;
+  review_status: UseCaseDraft['review_status'];
+  updated_at: string;
+  diagram?: ArtifactTreeDiagram | null;
+};
+
+export type ArtifactTreeFeature = {
+  id: string;
+  name: string;
+  updated_at: string;
+  use_cases: ArtifactTreeUseCase[];
+};
+
+export type ProjectArtifactTree = {
+  project: ProjectResource;
+  spec: SpecResource;
+  features: ArtifactTreeFeature[];
 };
 
 export type DiagramSavePayload = {

@@ -129,7 +129,7 @@ class UseCaseGenerationService:
                 grounding_issues = validate_grounding(
                     synthesis, project_spec, feature_intent
                 )
-                quality_result = evaluate_synthesis(synthesis)
+                quality_result = evaluate_synthesis(synthesis, feature_intent)
                 validation_codes = [
                     *(issue.code for issue in grounding_issues),
                     *(issue.code for issue in quality_result.issues),

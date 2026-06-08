@@ -53,9 +53,11 @@ Chuỗi này tồn tại để mọi bước AI/giao diện đều bám vào cù
 
 ## Ghi chú Phase 1
 
-- Repo đã implement `ProjectSpec + FeatureIntent -> UseCaseDraft -> DiagramDraft`.
-- `DiagramDraft` được giữ theo `use_case_id` trong frontend session, có trạng thái `outdated/diverged`, giữ orphan draft khi use case regenerate, và vẫn mở được artifact hiện tại nếu regenerate diagram thất bại; chưa có persistence database hoặc semantic merge ngược vào use case.
-- `FormalBRDDraft` tổng hợp từ portfolio use case/diagram vẫn là bước tiếp theo trong backlog.
+- Repo đã implement và persist latest state cho toàn chuỗi
+  `ProjectSpec -> FeatureIntent -> UseCaseDraft -> DiagramDraft -> FormalBRDDraft`.
+- Mỗi artifact được mở theo resource UUID/deep-link từ artifact tree; Diagram và BRD chỉ tải payload
+  khi được chọn.
+- Semantic merge ngược từ Diagram/BRD vào Use Case vẫn nằm ngoài scope MVP.
 
 ## Persistence MVP đã chốt
 
@@ -73,3 +75,31 @@ Quan hệ lưu trữ:
 - Chỉ lưu phiên bản mới nhất; user dùng nút `Lưu` cho từng phần.
 
 Xem [database-architecture.md](./database-architecture.md).
+
+## Workspace navigation đã chốt
+
+Authenticated project workspace dùng một left sidebar dạng tree làm navigation chính:
+
+```text
+Project
+├── Project Spec
+└── Features
+    └── Feature Intent
+        └── Use Cases
+            └── Use Case
+                ├── Diagram
+                └── BRD
+```
+
+Quy tắc:
+
+1. Tree chỉ hiển thị resource identity, title, trạng thái và quan hệ thật từ database.
+2. Không seed hoặc render Project Spec, Feature Intent, Diagram hay BRD mẫu trong normal runtime.
+3. Diagram graph và BRD body là payload nặng, chỉ tải khi user chọn node tương ứng.
+4. Artifact chưa tồn tại được trình bày bằng empty state/CTA rõ ràng, không dùng sample để lấp chỗ
+   trống.
+5. Artifact đang chọn phải có deep-link ổn định và mọi chuyển node phải đi qua scoped unsaved-change
+   guard.
+6. Sample fixtures chỉ được tồn tại trong test-only modules, không nằm trên user-facing route.
+
+Xem [UC-08](../use-cases/UC-08-dieu-huong-artifact-tree.md).

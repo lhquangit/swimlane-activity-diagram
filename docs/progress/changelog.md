@@ -5,6 +5,46 @@
 ## [Unreleased]
 
 ### Added
+- **Persisted use-case generation provenance on Feature Intent**: latest use-case generation
+  metadata now persists on the feature itself and is surfaced in the persisted Use Case list/editor
+  routes so reviewers can see `AI` vs `deterministic_fallback`, provider/model, rollout mode, and
+  prompt version after reload. Xem `apps/api/app/models.py`,
+  `apps/api/app/services/persistence_generation.py`, `apps/api/app/services/persistence_serializers.py`,
+  `apps/api/app/schemas/persistence.py`, `apps/api/alembic/versions/20260608_01_feature_usecase_generation_metadata.py`,
+  `src/application/ProjectWorkspace.tsx`, `src/usecases/PersistedUseCaseWorkspace.tsx`.
+- **Use-case prompt assets + technical actor grounding hardening**: prompt use-case đã được tách
+  khỏi hardcode sang markdown assets versioned, backend grounding/quality giờ giữ
+  `FeatureIntent.actors` như participant canonical, và deterministic fallback không còn collapse các
+  feature camera/AI/re-id thành một actor con người duy nhất. Xem
+  `apps/api/app/ai/prompts/assets/usecase_synthesis/1.1.0/system.md`,
+  `apps/api/app/ai/prompts/registry.py`, `apps/api/app/usecases/grounding.py`,
+  `apps/api/app/usecases/quality.py`, `apps/api/app/usecases/deterministic_builder.py`,
+  `apps/api/tests/test_prompt_registry.py`, `apps/api/tests/test_usecase_builder.py`,
+  `apps/api/tests/test_usecase_synthesis.py`.
+- **Persisted Use Case readability and lifecycle hardening**: persisted bulk save now honors
+  replace semantics and deletes omitted descendants, generated drafts can be retried without
+  re-running AI, diagram CTAs on the persisted Use Case route now use the shared lifecycle model,
+  and the editor itself has been redesigned as a read-first artifact page with compact step
+  summaries plus browser-level layout coverage on desktop/mobile. Xem
+  `apps/api/app/services/persistence_service.py`, `apps/api/tests/test_persistence_auth_matrix.py`,
+  `src/usecases/PersistedUseCaseWorkspace.tsx`, `src/usecases/PersistedUseCaseWorkspace.test.tsx`,
+  `src/styles.css`, `e2e/artifact-tree.spec.ts`, `docs/use-cases/UC-07-sinh-usecase-tu-spec.md`.
+- **Persisted Feature Intent -> Use Case -> Diagram workflow**: `Use Cases` now generates and
+  persists resource rows immediately, refreshes the left artifact tree, renders a dedicated list page
+  and single-Use-Case editor outside the canvas overlay, and exposes `Tạo diagram` directly on
+  approved Use Cases plus missing-Diagram routes. Added route regressions and a full persisted E2E
+  covering generate -> review -> approve -> create Diagram. Xem
+  `src/application/ProjectWorkspace.tsx`, `src/usecases/PersistedUseCaseWorkspace.tsx`,
+  `src/persistence/WorkspaceContext.tsx`, `src/persistence/save-state.ts`,
+  `src/application/ProjectWorkspace.test.tsx`, `src/usecases/PersistedUseCaseWorkspace.test.tsx`,
+  `e2e/artifact-tree.spec.ts`, `docs/use-cases/UC-07-sinh-usecase-tu-spec.md`.
+- **Persisted artifact tree workspace**: added one owned metadata-only artifact-tree API, canonical
+  deep-links for Spec/Feature/Use Case/Diagram/BRD, an accessible collapsible left tree, lazy
+  Diagram/BRD hydration, real empty/loading/error states, and guarded node transitions. A full
+  Playwright scenario now creates and saves the real Project-to-BRD chain. Xem
+  `apps/api/app/routes/persistence.py`, `apps/api/app/services/persistence_service.py`,
+  `src/application/ArtifactTree.tsx`, `src/application/ProjectWorkspace.tsx`, `src/App.tsx`,
+  `e2e/artifact-tree.spec.ts`.
 - **Persisted workspace transition hardening**: persisted Save scopes now carry feature ownership and
   clear only after explicit feature discard/new/delete decisions; invalid feature URLs unmount stale
   editor context; diagram load/generation switches commit only after success and guard both open and
@@ -13,6 +53,7 @@
   Xem `src/persistence/save-state.ts`, `src/application/ProjectWorkspace.tsx`,
   `src/application/ProjectWorkspace.test.tsx`, `src/brd/cache.ts`, `src/brd/BrdPanel.tsx`,
   `src/App.tsx`.
+
 - **Persisted workspace save-state registry**: added a resource-scoped Save-state registry so dirty Diagram/BRD scopes remain visible after context switches, guarded diagram switching with confirmation prompts, made invalid feature deep-links explicit, and preserved scoped BRD recovery drafts when server load fails. Railway staging rehearsal remains blocked by expired CLI OAuth and missing project link. Xem `src/persistence/save-state.ts`, `src/persistence/WorkspaceContext.tsx`, `src/application/ProjectWorkspace.tsx`, `src/App.tsx`, `docs/operations/railway-persistence-release.md`.
 - **Persistence hardening follow-up**: chuẩn hóa backend npm scripts qua `apps/api/.venv/bin/python`, thêm `api:python:smoke`, tách persistence route monolith thành serializer/CRUD/generation services, thêm Clerk auth matrix tests, saved diagram graph validator, scoped Save-state guards, persisted UseCasePanel read-only parent summaries, explicit UseCase delete, scoped BRD recovery cache, active feature deep links, and Docker API build/health rehearsal. Xem `package.json`, `apps/api/app/{auth,schemas/persistence.py,routes/persistence.py,services/persistence_*}.py`, `apps/api/tests/test_persistence_auth_matrix.py`, `src/application/*`, `src/persistence/*`, `src/usecases/UseCasePanel.tsx`, `src/brd/cache.ts`, `src/App.tsx`, `apps/api/pyproject.toml`.
 - **Latest-state PostgreSQL project persistence**: thêm SQLAlchemy/Alembic schema cho `app_users -> projects -> specs -> feature_intents -> use_cases -> diagrams -> brd_docs`, Clerk-authenticated ownership APIs, Railway deploy/readiness contract, protected project routes, Project Dashboard, Spec/Feature editors và explicit Save/Load cho Use Case, Diagram, BRD. Generation giờ có resource-scoped routes và chỉ dùng parent đã lưu; PostgreSQL integration test kiểm full chain cùng cross-user `404`. Xem `apps/api/app/{auth,db,models,persistence}.py`, `apps/api/app/routes/persistence.py`, `apps/api/alembic/*`, `src/application/*`, `src/persistence/*`, `src/App.tsx`, `railway.toml`, `docs/operations/railway-persistence-release.md`.
@@ -32,7 +73,18 @@
 - **Spec -> use case contract hardening v2**: derive review protection từ snapshot/fingerprint thật thay vì sticky dirty flag, chốt rõ boundary giữa frontend quick-guard và backend canonical validation, và thêm domain-grade golden fixtures cho segmentation (`GPS Device issuance`, `fire incident response`, `swimlane theme update`). Kèm route/UI/E2E regression mới cho normalize contract và flow hoàn tác spec mà không bị confirm oan. Xem `src/App.tsx`, `src/usecases/prevalidate.ts`, `src/usecases/UseCasePanel.tsx`, `apps/api/tests/test_usecase_routes.py`, `apps/api/tests/test_usecase_builder.py`, `e2e/brd-flow.spec.ts`, `docs/use-cases/UC-07-sinh-usecase-tu-spec.md`.
 - **Use case workspace redesign**: đổi `Use case drafts` thành `Use Case Workspace` với 3 vùng `Input / Use cases / Diagrams`, chuyển `Artifact chain` vào `Advanced traceability`, thêm diagram inventory gắn theo từng `use_case_id`, và thêm next action rõ ràng trên từng use case item để đi sang bước diagram. Kèm update UC-07, roadmap UX contract, component tests, và wiring state mới trong editor shell. Xem `src/App.tsx`, `src/usecases/UseCasePanel.tsx`, `src/usecases/types.ts`, `src/styles.css`, `src/usecases/UseCasePanel.test.tsx`, `e2e/brd-flow.spec.ts`, `docs/use-cases/UC-07-sinh-usecase-tu-spec.md`, `docs/roadmap/README.md`.
 
+### Removed
+- **User-visible sample runtime**: removed `/demo`, `Reset mẫu`, default fire-incident graph, and
+  default Project Spec/Feature Intent from normal runtime. Sample data now lives only in a
+  test fixture injected through the gated `/__test__/editor` harness. Xem
+  `src/test-fixtures/fire-incident.ts`, `src/test-harness/EditorTestHarness.tsx`,
+  `src/application/AppRouter.tsx`, `playwright.config.ts`.
+
 ### Fixed
+- **Persisted Use Case deep-link hydration state**: direct `Feature -> Use Case` routes no longer
+  flash the missing-editor error while feature resources are still hydrating from persistence; the
+  workspace now keeps a truthful loading state until the feature inventory is ready. Xem
+  `src/application/ProjectWorkspace.tsx`, `src/application/ProjectWorkspace.test.tsx`.
 - **Project Spec list input Space/Enter**: các textarea danh sách như `Người dùng mục tiêu`,
   `Business rules`, `Glossary` và Feature list fields giờ giữ raw text trong lúc nhập, nên space cuối
   từ và newline tạm thời không còn bị `trim/filter` xóa ngay; dữ liệu gửi lên persistence vẫn được

@@ -39,6 +39,7 @@ type UseCasePanelProps = {
   projectSpec: ProjectSpec;
   featureIntent: FeatureIntent;
   useCases: UseCaseDraft[];
+  focusedUseCaseId?: string | null;
   diagramInventory: UseCaseDiagramInventoryItem[];
   orphanedDiagrams: OrphanedDiagramInventoryItem[];
   artifactChain: ArtifactChainItem[];
@@ -80,6 +81,7 @@ export default function UseCasePanel({
   projectSpec,
   featureIntent,
   useCases,
+  focusedUseCaseId = null,
   diagramInventory,
   orphanedDiagrams,
   artifactChain,
@@ -141,9 +143,26 @@ export default function UseCasePanel({
           <h2>Không gian use case</h2>
           <p>{phaseLabel(phase)}</p>
         </div>
-        <button className="toolbar-btn" onClick={onClose} aria-label="Đóng không gian use case">
-          Đóng
-        </button>
+        <div className="usecase-panel__header-actions">
+          {onSave && activeSection !== 'input' ? (
+            <button
+              className="toolbar-btn primary"
+              onClick={onSave}
+              disabled={saveState === 'saving' || useCases.length === 0}
+            >
+              {saveState === 'saving'
+                ? 'Đang lưu…'
+                : saveState === 'saved'
+                  ? 'Đã lưu'
+                  : saveState === 'failed'
+                    ? 'Lưu lại'
+                    : 'Lưu use case'}
+            </button>
+          ) : null}
+          <button className="toolbar-btn" onClick={onClose} aria-label="Đóng không gian use case">
+            Đóng
+          </button>
+        </div>
       </div>
 
       <div className="usecase-panel__body">
@@ -365,7 +384,7 @@ export default function UseCasePanel({
                             project_name: event.target.value,
                           })
                         }
-                        placeholder="VD: V-PetSafe"
+                        placeholder="VD: Smart Diagram"
                       />
                     </label>
                     <label>
@@ -519,8 +538,9 @@ export default function UseCasePanel({
                   return (
                   <article
                     key={useCase.use_case_id}
-                    className="usecase-card"
+                    className={`usecase-card${focusedUseCaseId === useCase.use_case_id ? ' usecase-card--focused' : ''}`}
                     data-use-case-id={useCase.use_case_id}
+                    aria-current={focusedUseCaseId === useCase.use_case_id ? 'true' : undefined}
                   >
                     <div className="usecase-card__header">
                       <div>

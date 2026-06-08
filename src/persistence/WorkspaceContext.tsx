@@ -22,11 +22,15 @@ import type {
   WorkspaceGenerationResponse,
 } from './types';
 import type { SaveScopeEntry } from './save-state';
+import type { ActiveArtifact } from '../application/artifact-routing';
 
 export type WorkspacePersistence = {
   project: ProjectResource;
   spec: SpecResource;
   activeFeature: FeatureIntentResource;
+  selectedArtifact: ActiveArtifact;
+  navigateToArtifact: (artifact: ActiveArtifact) => boolean;
+  refreshArtifactTree: () => Promise<void>;
   projectSpec: ProjectSpec;
   featureIntent: FeatureIntent;
   openProjectSpecEditor: () => void;
@@ -38,13 +42,20 @@ export type WorkspacePersistence = {
   dirtyScopes: SaveScopeEntry[];
   canSwitchDiagramScope: (nextBusinessKey: string) => boolean;
   markUseCasesDirty: () => void;
+  markUseCaseDirty: (businessKey: string, label: string) => void;
   markDiagramDirty: (businessKey?: string | null) => void;
   markBrdDirty: (diagramId?: string | null) => void;
   markBrdLoaded: (diagramId: string) => void;
   generateUseCases: (
     preference: UseCaseGenerationPreference,
   ) => Promise<WorkspaceGenerationResponse>;
-  saveUseCases: (drafts: UseCaseDraft[]) => Promise<UseCaseResource[]>;
+  saveUseCases: (
+    drafts: UseCaseDraft[],
+    options?: {
+      businessKeys?: string[];
+      labelsByBusinessKey?: Record<string, string>;
+    },
+  ) => Promise<UseCaseResource[]>;
   generateDiagram: (businessKey: string) => Promise<WorkspaceDiagramGenerationResponse>;
   loadDiagram: (businessKey: string) => Promise<DiagramResource | null>;
   saveDiagram: (

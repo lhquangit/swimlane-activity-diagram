@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 from pydantic import ValidationError
+from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Diagram, FeatureIntentModel
@@ -22,6 +23,7 @@ generation_service = UseCaseGenerationService(settings)
 def generate_feature_use_case_envelope(
     feature: FeatureIntentModel,
     generation_preference: str,
+    db: Session,
 ) -> ResponseEnvelope:
     spec = feature.spec
     project = spec.project
@@ -52,6 +54,13 @@ def generate_feature_use_case_envelope(
         else "auto"
     )
     outcome = generation_service.generate(project_spec, intent, preference)
+    feature.latest_usecase_generation = outcome.metadata.model_dump(
+        mode="json",
+        exclude_none=True,
+    )
+    db.add(feature)
+    db.commit()
+    db.refresh(feature)
     result = UseCaseGenerationResult(
         generation_source=outcome.metadata.generation_source or "deterministic_fallback",
         artifact_chain=build_artifact_chain(),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.models import AppUser, BrdDoc, Diagram, FeatureIntentModel, Project, Spec, UseCaseModel
+from app.schemas.common import ResponseMetadata
 from app.schemas.persistence import (
     AppUserResource,
     BrdResource,
@@ -39,6 +40,11 @@ def feature_resource(model: FeatureIntentModel) -> FeatureIntentResource:
         assumptions=model.assumptions,
         systems_involved=model.systems_involved,
         success_outcome=model.success_outcome,
+        latest_usecase_generation=(
+            ResponseMetadata.model_validate(model.latest_usecase_generation)
+            if model.latest_usecase_generation
+            else None
+        ),
         created_at=model.created_at,
         updated_at=model.updated_at,
     )

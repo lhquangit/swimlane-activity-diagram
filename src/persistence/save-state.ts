@@ -1,6 +1,6 @@
 import type { SaveState } from './types';
 
-export type SaveScopeType = 'usecases' | 'diagram' | 'brd';
+export type SaveScopeType = 'usecases' | 'usecase' | 'diagram' | 'brd';
 
 export type SaveScope = {
   key: string;
@@ -21,6 +21,20 @@ export function makeUseCasesScope(featureId: string, label: string): SaveScope {
     key: `feature:${featureId}:usecases`,
     type: 'usecases',
     resourceId: featureId,
+    label,
+    featureId,
+  };
+}
+
+export function makeUseCaseScope(
+  featureId: string,
+  businessKey: string,
+  label: string,
+): SaveScope {
+  return {
+    key: `feature:${featureId}:usecase:${businessKey}`,
+    type: 'usecase',
+    resourceId: businessKey,
     label,
     featureId,
   };

@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { buildInitialData } from '../lf-config';
+import { buildFireIncidentGraph } from '../test-fixtures/fire-incident';
 import { DEFAULT_LANES, LANE_HEIGHT, withPositions } from '../lane-config';
 import { exportDrawioXml } from './drawio-export';
 import { importDrawioXml } from './drawio-import';
@@ -75,7 +75,7 @@ describe('draw.io XML interchange', () => {
   it('exports app graph into draw.io-like XML structure', () => {
     const lanes = withPositions(DEFAULT_LANES);
     const xml = exportDrawioXml(
-      buildInitialData() as unknown as EditorGraphData,
+      buildFireIncidentGraph() as unknown as EditorGraphData,
       lanes,
       LANE_HEIGHT,
       'Demo Diagram',
@@ -92,7 +92,7 @@ describe('draw.io XML interchange', () => {
   it('round-trips the repo sample through export -> import with core semantics preserved', () => {
     const lanes = withPositions(DEFAULT_LANES);
     const xml = exportDrawioXml(
-      buildInitialData() as unknown as EditorGraphData,
+      buildFireIncidentGraph() as unknown as EditorGraphData,
       lanes,
       LANE_HEIGHT,
       'Roundtrip Diagram',

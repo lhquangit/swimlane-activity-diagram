@@ -37,7 +37,7 @@ def test_opt_in_mode_returns_validated_ai_draft() -> None:
 
     assert outcome.metadata.generation_source == "ai"
     assert outcome.metadata.prompt_id == "usecase_synthesis"
-    assert outcome.metadata.prompt_version == "1.0.0"
+    assert outcome.metadata.prompt_version == "1.1.0"
     assert outcome.metadata.quality_status == "passed"
     assert outcome.use_cases[0].title == "Ban quản lý cấp phát thiết bị GPS"
 

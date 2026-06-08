@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import Field, field_validator, model_validator
 
-from app.schemas.common import StrictBaseModel, WarningItem
+from app.schemas.common import ResponseMetadata, StrictBaseModel, WarningItem
 from app.schemas.usecase import UseCaseDraft
 
 
@@ -136,6 +136,7 @@ class FeatureIntentUpdate(FeatureIntentCreate):
 class FeatureIntentResource(FeatureIntentCreate):
     id: UUID
     spec_id: UUID
+    latest_usecase_generation: ResponseMetadata | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -165,6 +166,45 @@ class UseCaseResource(StrictBaseModel):
     review_status: Literal["draft", "reviewed", "approved"]
     created_at: datetime
     updated_at: datetime
+
+
+class ArtifactTreeBrd(StrictBaseModel):
+    id: UUID
+    title: str
+    template: Literal["default", "full"]
+    is_outdated: bool
+    updated_at: datetime
+
+
+class ArtifactTreeDiagram(StrictBaseModel):
+    id: UUID
+    title: str
+    semantic_edited: bool
+    is_outdated: bool
+    updated_at: datetime
+    brd: ArtifactTreeBrd | None = None
+
+
+class ArtifactTreeUseCase(StrictBaseModel):
+    id: UUID
+    use_case_key: str
+    title: str
+    review_status: Literal["draft", "reviewed", "approved"]
+    updated_at: datetime
+    diagram: ArtifactTreeDiagram | None = None
+
+
+class ArtifactTreeFeature(StrictBaseModel):
+    id: UUID
+    name: str
+    updated_at: datetime
+    use_cases: list[ArtifactTreeUseCase] = Field(default_factory=list)
+
+
+class ProjectArtifactTree(StrictBaseModel):
+    project: ProjectResource
+    spec: SpecResource
+    features: list[ArtifactTreeFeature] = Field(default_factory=list)
 
 
 class DiagramSave(StrictBaseModel):

@@ -48,14 +48,16 @@
 
 | File | Trách nhiệm |
 |---|---|
-| `src/main.tsx` | Bootstrap React, mount `<App />` vào `#root`. |
-| `src/App.tsx` | Editor shell: toolbar, sidebar, khởi tạo LogicFlow, đăng ký event handler, cache BRD frontend, import/export XML draw.io, mở panel `Use case drafts`, và gọi backend AI (`/api/usecases/generate`, BRD APIs). |
+| `src/main.tsx` | Bootstrap React và Clerk, mount router vào `#root`. |
+| `src/application/*` | Project dashboard, canonical artifact routes, persisted workspace và left artifact tree. |
+| `src/App.tsx` | Diagram/Use Case/BRD editor shell: khởi tạo LogicFlow từ persisted/test-injected data, đăng ký event handler, cache BRD frontend, import/export XML và gọi backend generation/persistence APIs. |
 | `src/DndPanel.tsx` | Palette sidebar (render các shape có thể kéo vào canvas). |
 | `src/usecases/*` | Contract frontend cho `ProjectSpec`, `FeatureIntent`, `UseCaseDraft`, client gọi `/api/usecases/generate`, và panel review use case draft. |
 | `apps/api/app/routes/usecase_generate.py` | API deterministic cho `ProjectSpec + FeatureIntent -> UseCaseDraft[]` cùng artifact chain. |
 | `apps/api/app/services/usecase_builder.py` | Heuristic/service layer sinh use case draft từ project spec và feature intent. |
 | `src/nodes.ts` | Định nghĩa custom node types: `lane`, `start`, `end`, `activity`, `decision`, `sync-bar`, `note`. Bao gồm model (data + behavior) và view (SVG). |
-| `src/lf-config.ts` | Initial diagram data (`buildInitialData`), build lane node config (`buildLaneNodes`), snap-to-lane helper (`snapToLane`), LogicFlow options (`getLogicFlowOptions`). |
+| `src/lf-config.ts` | Build lane node config, snap-to-lane helper và LogicFlow options; không chứa runtime sample graph. |
+| `src/test-fixtures/*` | Sample graph/default inputs chỉ dành cho unit/E2E test. |
 | `src/styles.css` | Layout grid (header / sidebar / canvas), styling cho toolbar và palette. |
 
 ## 4. State model

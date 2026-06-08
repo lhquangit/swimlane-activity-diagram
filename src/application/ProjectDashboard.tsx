@@ -58,7 +58,7 @@ export default function ProjectDashboard() {
     <main className="project-dashboard">
       <header className="workspace-header">
         <div>
-          <span className="workspace-eyebrow">V-PetSafe</span>
+          <span className="workspace-eyebrow">Smart Diagram</span>
           <h1>Projects</h1>
           <p>Tạo project, hoàn thiện Spec, rồi đi lần lượt qua từng artifact.</p>
         </div>

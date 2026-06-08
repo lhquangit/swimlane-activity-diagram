@@ -3825,3 +3825,737 @@ Review snapshot:
 - Current notes: 2026-06-07 config smoke confirms a new backend Python process sees
   `CLERK_SECRET_KEY=<set>` and `AUTH_DISABLED=False`; if the running server still returns 503,
   restart it or confirm it is launched from this repository with `apps/api/.env` visible.
+
+## Artifact Tree And Real Data UI Review
+
+Review snapshot:
+[2026-06-07 artifact tree and real data UI review](./reviews/2026-06-07-artifact-tree-real-data-ui-review.md).
+
+### Now
+
+#### TASK-170 - Add owned project artifact-tree read contract
+- Priority: P1
+- Status: Done
+- Module: backend-persistence
+- Problem: The frontend can only list one persistence level at a time, so a complete project tree
+  would require N+1 requests for features, use cases, diagrams, and BRD existence.
+- Why it matters: The left tree needs one consistent snapshot of real resource identities without
+  downloading every Diagram graph and BRD body.
+- Implementation steps:
+  1. Add Pydantic summary schemas for project/spec, feature, use case, optional diagram, and optional
+     BRD tree nodes.
+  2. Add `GET /api/projects/{project_id}/artifact-tree` protected by the existing ownership rules.
+  3. Query the project hierarchy with bounded eager loading and deterministic feature/use-case
+     ordering.
+  4. Return IDs, titles, review/outdated status, timestamps, and child existence only; exclude
+     `graph_data`, `lanes_data`, `structured_spec`, and `markdown_content`.
+  5. Add service, serializer, ownership, empty-project, partial-chain, and full-chain tests.
+- Acceptance criteria:
+  - One authenticated request returns the complete metadata hierarchy for an owned project.
+  - Cross-user and unknown project requests return the same safe not-found response.
+  - Response size does not include Diagram graph or BRD document bodies.
+  - Empty and partially generated projects produce valid tree structures.
+- Dependencies: TASK-133, TASK-137, TASK-139, TASK-141, TASK-143
+- Verification: Run backend persistence/auth tests and inspect query count for a project with
+  multiple features and use cases.
+- Completion notes: Added the owned, eagerly loaded metadata-only tree endpoint plus full, partial,
+  empty, and cross-user auth coverage. Graph and BRD bodies are excluded from the response.
+
+#### TASK-171 - Define canonical artifact selection and deep-link routes
+- Priority: P1
+- Status: Done
+- Module: frontend-routing
+- Problem: Current navigation stores only `spec | features | editor` plus one feature ID, so Use
+  Case, Diagram, and BRD nodes cannot be addressed or refreshed independently.
+- Why it matters: A tree without a canonical selected-artifact identity will drift from the URL and
+  can reopen the wrong editor after refresh or browser navigation.
+- Implementation steps:
+  1. Introduce a discriminated `ActiveArtifact` model for project spec, feature, use case, diagram,
+     and BRD selections.
+  2. Define nested project routes that preserve project, feature, and use-case ancestry.
+  3. Parse the route against the artifact-tree response before mounting an editor.
+  4. Preserve safe invalid-route behavior without revealing cross-project ownership.
+  5. Support browser back/forward and direct refresh for every artifact type.
+- Acceptance criteria:
+  - Every selectable tree node has a stable URL.
+  - Refresh and browser history restore the same artifact.
+  - Invalid or stale artifact URLs do not silently select another artifact.
+  - Selection state has one source of truth shared by router and tree.
+- Dependencies: TASK-156, TASK-161, TASK-165, TASK-170
+- Verification: Router/component matrix for each artifact type, invalid ancestry, refresh, back, and
+  forward.
+- Completion notes: Added the `ActiveArtifact` route model and stable routes for Spec, Feature,
+  Use Case portfolio, Use Case, Diagram, and BRD with explicit invalid-route handling.
+
+#### TASK-172 - Build the accessible left artifact tree shell
+- Priority: P1
+- Status: Done
+- Module: frontend-workspace-shell
+- Problem: The workspace uses top tabs and a separate feature list instead of one hierarchy matching
+  the persisted artifact chain.
+- Why it matters: Users cannot understand or navigate the project as
+  Project Spec -> Feature -> Use Case -> Diagram -> BRD.
+- Implementation steps:
+  1. Extract an `ArtifactTree` component driven only by the tree read model and active route.
+  2. Render Project Spec, Features, Feature Intent, Use Cases, Diagram, and BRD with clear nesting,
+     active state, expand/collapse, status badges, and create affordances.
+  3. Replace `.workspace-tabs` and `.feature-list` with a two-column workspace shell.
+  4. Implement keyboard navigation and semantic tree/treeitem states.
+  5. Add a collapsible drawer behavior for narrow screens while keeping the active artifact visible.
+- Acceptance criteria:
+  - The left sidebar presents the complete real project hierarchy.
+  - Tabs and the duplicate feature navigation are removed.
+  - Tree selection is keyboard usable and visibly focused.
+  - Mobile users can open, select, and collapse the tree.
+- Dependencies: TASK-170, TASK-171
+- Verification: Component tests, accessibility assertions, responsive Browser smoke, and screenshot
+  comparison for empty/partial/full trees.
+- Completion notes: Replaced tabs/feature navigation with the collapsible artifact tree, semantic
+  tree roles, active/focus states, create affordance, mobile layout, and arrow/Home/End navigation.
+
+#### TASK-173 - Connect Project Spec and Feature editors to tree selection
+- Priority: P1
+- Status: Done
+- Module: frontend-project-feature
+- Problem: Project Spec and Feature editors are currently mounted through local tabs and feature
+  draft state that assumes a single active feature workflow.
+- Why it matters: The first usable tree increment must edit and save real Project/Spec/Feature data
+  without retaining the old tab navigation.
+- Implementation steps:
+  1. Render Project Spec content when the Project Spec node is active.
+  2. Render the selected Feature Intent editor from its resource UUID.
+  3. Keep create/save/delete operations using existing persistence APIs and latest-state semantics.
+  4. Refresh or patch tree metadata after feature create, rename, save, and delete.
+  5. Preserve Project/Spec/Feature dirty state and invalid-route handling.
+- Acceptance criteria:
+  - Selecting Project Spec or any Feature opens the correct real editor.
+  - Feature create/rename/delete updates the tree without stale labels or IDs.
+  - No top-tab or hidden feature-list state is required.
+  - Existing Save behavior and unsaved warnings still work.
+- Dependencies: TASK-172
+- Verification: ProjectWorkspace integration tests for select, create, save, rename, delete, reload,
+  and dirty cancel/continue.
+- Completion notes: Project Spec and Feature Intent now render by route identity, retain explicit
+  Save/delete behavior, and patch or reload tree metadata after mutations.
+
+### Next
+
+#### TASK-174 - Connect Use Case, Diagram, and BRD nodes to persisted editors
+- Priority: P1
+- Status: Done
+- Module: frontend-artifact-editors
+- Problem: Use Case, Diagram, and BRD are currently reached through controls inside the editor
+  monolith rather than selected directly from the project hierarchy.
+- Why it matters: The requested tree is incomplete unless each real child artifact opens its own
+  persisted context and correct resource UUID.
+- Implementation steps:
+  1. Focus the selected persisted Use Case in `UseCasePanel` by resource UUID.
+  2. Load a Diagram only after its tree node is selected; preserve the previous canvas until load
+     succeeds.
+  3. Load a BRD only after its tree node is selected and keep scoped recovery behavior.
+  4. Add explicit tree actions for generating a missing Diagram and generating a missing BRD.
+  5. Refresh diagram/BRD identity, outdated state, and timestamps in the tree after generate, save,
+     or delete.
+  6. Extract orchestration from `App.tsx` where needed so tree selection does not depend on opening
+     nested panels manually.
+- Acceptance criteria:
+  - Selecting a Use Case, Diagram, or BRD opens exactly that persisted artifact.
+  - Heavy Diagram/BRD payloads are lazy-loaded.
+  - Missing children expose valid CTAs and never display another artifact.
+  - Save/delete/generate operations update the selected node and tree metadata.
+- Dependencies: TASK-173, TASK-166, TASK-167
+- Verification: Component tests plus mocked API scenarios for partial and full artifact chains.
+- Completion notes: Use Case, Diagram, and BRD routes now focus/load real persisted resources.
+  Diagram/BRD payloads remain lazy, save operations refresh the tree, and direct BRD deep-links
+  hydrate the saved Diagram before generation.
+
+#### TASK-175 - Remove runtime sample data and user-visible demo behavior
+- Priority: P1
+- Status: Done
+- Module: editor-runtime
+- Problem: `App` always renders `buildInitialData()`, initializes sample Project Spec/Feature Intent,
+  exposes `Reset mẫu`, and is reachable at `/demo` in development.
+- Why it matters: Sample content can be mistaken for persisted project data and violates the rule
+  that the product only displays real data.
+- Implementation steps:
+  1. Replace `buildInitialData()` runtime bootstrap with an explicit blank graph state.
+  2. Remove `buildDefaultProjectSpec()` and `buildDefaultFeatureIntent()` from normal runtime state.
+  3. Remove the `Reset mẫu` toolbar action and sample-specific status copy.
+  4. Remove the user-visible `/demo` route.
+  5. Move any fire-incident graph needed by tests into a test-only fixture module that production
+     code cannot import.
+  6. Keep reusable lane builders separate from sample fixtures.
+- Acceptance criteria:
+  - Opening any normal route never renders hardcoded sample labels or graph nodes.
+  - A project with no Diagram shows no Diagram data.
+  - Production/runtime source has no sample reset action or default domain content.
+  - Test fixtures remain available only through the test environment.
+- Dependencies: TASK-174
+- Verification: Search runtime source for removed sample labels, run production build, and Browser
+  smoke a new project plus a project with a saved Diagram.
+- Completion notes: Normal runtime starts empty, `/demo` and `Reset mẫu` are removed, and the fire
+  graph/default inputs moved into test-only fixtures injected through a gated test harness.
+
+#### TASK-176 - Add truthful persisted loading, empty, and error states
+- Priority: P2
+- Status: Done
+- Module: frontend-state-ux
+- Problem: The sample graph currently masks the distinction between “not created”, “loading”,
+  “load failed”, and “loaded empty”.
+- Why it matters: After sample removal, users need explicit feedback and valid next actions for each
+  resource state.
+- Implementation steps:
+  1. Define per-artifact states for loading, absent, ready, outdated, failed, and dirty.
+  2. Add empty states for no features, no use cases, no Diagram, and no BRD.
+  3. Map each empty state to the correct create/generate CTA and prerequisite explanation.
+  4. Keep failed lazy loads retryable without replacing the previous selected content.
+  5. Ensure tree badges and content status are derived from the same state.
+- Acceptance criteria:
+  - Missing data is never represented by fixture or data from another resource.
+  - Every absent artifact has a clear, valid next action.
+  - Loading and failure states are distinguishable and retryable.
+  - Tree and content panel show consistent status.
+- Dependencies: TASK-174, TASK-175
+- Verification: State matrix tests and Browser smoke with mocked slow, absent, failed, outdated, and
+  successful responses.
+- Completion notes: Added project/artifact loading and error states plus truthful missing
+  Feature/Use Case/Diagram/BRD labels and CTAs derived from persisted metadata.
+
+#### TASK-177 - Route all tree transitions through scoped dirty guards
+- Priority: P1
+- Status: Done
+- Module: save-ux-integration
+- Problem: Existing dirty guards are attached to feature and diagram-specific handlers; a new tree
+  introduces additional transitions that could bypass them.
+- Why it matters: Clicking another Project Spec, Feature, Use Case, Diagram, or BRD node must not
+  silently discard unsaved work.
+- Implementation steps:
+  1. Centralize tree selection in one guarded transition function.
+  2. Resolve which Save scopes are being left before changing URL or editor context.
+  3. On cancel, keep the current route, active tree node, and loaded editor unchanged.
+  4. On confirmed discard, clear only scopes owned by the abandoned context.
+  5. On successful save/delete/generate, patch or reload the tree without clearing unrelated dirty
+     scopes.
+  6. Preserve `beforeunload` and project-exit aggregate warnings.
+- Acceptance criteria:
+  - Every tree-node switch respects the relevant dirty scopes.
+  - Cancel is transactional and does not partially update URL or content.
+  - Confirmed discard clears only abandoned scopes.
+  - Mutations do not erase unrelated dirty state.
+- Dependencies: TASK-159, TASK-160, TASK-164, TASK-166, TASK-171, TASK-174
+- Verification: Transition matrix covering each artifact pair, cancel/continue/save, failed load,
+  delete cascade, browser back, and project exit.
+- Completion notes: Tree selection now uses one guarded transition, preserves same-Use-Case Diagram
+  context for Diagram-to-BRD navigation, resets abandoned scopes, and retains aggregate unload/exit
+  protection.
+
+### Later
+
+#### TASK-178 - Migrate regression coverage away from sample runtime
+- Priority: P2
+- Status: Done
+- Module: frontend-e2e-docs
+- Problem: The main Playwright editor suite depends on `/demo`, hardcoded fire labels, and
+  `Reset mẫu`.
+- Why it matters: Removing the sample path must not reduce canvas, generation, import/export, Save,
+  or BRD regression coverage.
+- Implementation steps:
+  1. Replace `/demo` scenarios with authenticated mocked persisted project fixtures or an explicit
+     test-only harness unavailable in normal development/production.
+  2. Move sample graphs into E2E/unit fixture files and inject them through test setup.
+  3. Add scenarios for empty project, partial chain, full chain, invalid deep-link, and lazy load.
+  4. Add a negative assertion that normal project routes never show known sample labels.
+  5. Update stale use-case/architecture/roadmap references that describe sample startup or
+     `Reset mẫu` as product behavior.
+  6. Run the full UI, E2E, and production build suites.
+- Acceptance criteria:
+  - Existing editor capabilities retain automated coverage without a user-visible sample route.
+  - Normal runtime has a regression proving no sample data leakage.
+  - Documentation describes persisted artifact-tree behavior as canonical.
+- Dependencies: TASK-170 through TASK-177
+- Verification: Run `npm run test:ui-mock`, `npm run test:e2e-mock`, `npm run build`, and inspect the
+  production route table.
+- Completion notes: Existing editor E2E now runs through a test-only harness; a new full persisted
+  Project-to-BRD E2E proves real-data navigation and negative sample leakage. Canonical runtime docs
+  no longer instruct users to open/reset sample data.
+
+## Feature Intent to Use Case Sidebar Flow Update
+
+Review snapshot:
+[2026-06-07 Feature Intent to Use Case sidebar flow review](./reviews/2026-06-07-feature-intent-usecase-sidebar-flow-review.md).
+
+## Module Directions
+
+### frontend-workspace-shell
+
+- Current state: The left artifact tree and deep-links exist, but Use Case routes still mount the
+  canvas app and open the old use-case workspace overlay.
+- Main risks:
+  - Route identity says "Use Case" while the visible UX still behaves like one diagram editor with a
+    side panel.
+  - Generated use cases may not appear in the left tree until a separate save/refresh path runs.
+- Recommended direction: Refactor in place.
+- Why now: The database-backed artifact tree is already implemented; the remaining work is to make it
+  the primary UX for Feature Intent -> Use Case -> Diagram.
+
+### usecase-generation-ux
+
+- Current state: Use case generation works, but persisted mode still stages generated drafts inside
+  `App`/`UseCasePanel` before they become sidebar resources.
+- Main risks:
+  - User expectation after filling Feature Intent is immediate sidebar inventory; current state can
+    leave results hidden in a panel.
+  - Regenerate/replace semantics can drift between local drafts, saved use cases, and tree metadata.
+- Recommended direction: Redesign interface.
+- Why now: The new requested flow depends on generated use cases becoming navigable database
+  artifacts, not only local editor cards.
+
+### usecase-editor-surface
+
+- Current state: The structured editor is useful but list-oriented and overlay-mounted.
+- Main risks:
+  - Editing one use case lacks a clean resource page, save boundary, and diagram action placement.
+  - Focused use-case routing still renders the whole list.
+- Recommended direction: Split responsibilities.
+- Why now: The field editors can be reused, but list, single-use-case editor, and diagram inventory
+  should have separate ownership.
+
+### diagram-handoff
+
+- Current state: Per-use-case diagram generation and persistence APIs exist, but the main CTA is
+  buried in the old panel's diagram inventory.
+- Main risks:
+  - Users have to understand an extra workspace section before creating the requested diagram.
+  - Missing Diagram tree nodes do not yet behave like first-class generate surfaces.
+- Recommended direction: Refactor in place.
+- Why now: The backend contract is already available; the work is mostly orchestration and CTA
+  placement.
+
+## Prioritized Tasks
+
+### Now
+
+#### TASK-179 - Persist generated use cases and refresh the left tree immediately
+- Priority: P1
+- Status: Done
+- Module: usecase-generation-ux
+- Problem: In persisted mode, `handleGenerateUseCases` stores generated drafts in local `App` state
+  and marks the use-case scope dirty; the left artifact tree only renders persisted
+  `tree.features[].use_cases`.
+- Why it matters: The requested UX is that after the user fills Feature Intent, AI creates the use
+  case list and the list appears in the left bar. A hidden local draft list keeps the product feeling
+  like the old no-database diagram screen.
+- Implementation steps:
+  1. Decide the persisted-mode generate contract: either `Sinh use case` creates/replaces persisted
+     `UseCase` rows in one confirmed action, or it is renamed to `Sinh và lưu use cases` so the
+     persistence side effect is explicit.
+  2. Update the frontend generate path to call the generate API, canonicalize results, then save the
+     generated list through `saveUseCases` before presenting them as navigable resources.
+  3. Preserve the existing replace confirmation when current saved/staged use cases or diagrams would
+     be affected.
+  4. After save succeeds, refresh or patch the artifact tree and route to the `Use Cases` node or the
+     first generated Use Case.
+  5. Keep standalone/test-harness generation behavior separate so non-persisted tests can still stage
+     local drafts.
+  6. Surface partial failures clearly: generation failure must not alter saved use cases; save failure
+     must keep generated drafts visible with a retry-to-save action.
+- Acceptance criteria:
+  - From a saved Feature Intent, clicking the generate action creates visible Use Case nodes in the
+    left sidebar without requiring a separate hidden panel save.
+  - The tree count, labels, review status, and active route reflect the newly generated list.
+  - Canceling a replace prompt leaves existing saved use cases and diagrams unchanged.
+  - Failed generate/save paths do not silently drop prior saved use cases.
+- Dependencies: TASK-170, TASK-171, TASK-172, TASK-173
+- Verification: Add a `ProjectWorkspace` integration test for generate -> persisted save -> tree
+  refresh, plus a failure test for generate success/save failure. Run `npm run test:ui-mock`.
+- Completion notes: `PersistedUseCaseWorkspace` now generates, canonicalizes, saves, and refreshes
+  the artifact tree in one persisted action; save failures keep generated drafts visible with retry
+  affordance instead of dropping the result.
+
+#### TASK-180 - Split Use Case list and single Use Case editor out of the canvas overlay
+- Priority: P1
+- Status: Done
+- Module: usecase-editor-surface
+- Problem: `ProjectWorkspace` mounts `App` for Use Case routes, and `App` responds by opening
+  `UseCasePanel`; selecting one Use Case still renders the whole card list inside an overlay.
+- Why it matters: Use Cases are now database artifacts in the left bar. They need first-class content
+  pages, not a modal/panel nested inside the diagram editor.
+- Implementation steps:
+  1. Extract reusable structured editor pieces from `UseCasePanel` into route-friendly components,
+     for example `UseCaseListView`, `UseCaseEditor`, and shared flow field groups.
+  2. Render `UseCaseListView` directly in `ProjectWorkspace` for the `use-cases` route, driven by
+     `useCaseResources`.
+  3. Render `UseCaseEditor` directly in `ProjectWorkspace` for the `use-case` route, selecting by
+     resource UUID and editing only that use case.
+  4. Keep per-use-case dirty tracking with the existing save-state registry; avoid one dirty flag for
+     the whole list when only one use case is being edited.
+  5. Preserve review lifecycle rules: editing approved business content moves the item back to
+     `reviewed`, contract errors block approval, and delete warns about Diagram/BRD cascade.
+  6. Remove `Use Case` route dependence on `useCasePanelOpen`; keep `UseCasePanel` only for
+     standalone/test-harness or delete it after replacement if no runtime path needs it.
+- Acceptance criteria:
+  - Selecting the `Use Cases` tree node shows a list page in the main content area.
+  - Selecting a single Use Case tree node shows only that Use Case editor.
+  - The diagram canvas is not mounted for Use Case list/editor routes.
+  - Save, approval, delete, and dirty-cancel behavior still work by persisted resource identity.
+- Dependencies: TASK-179
+- Verification: Add route/component tests for `use-cases` and `use-case` selections, focused editing,
+  dirty cancel/continue, approve, delete, and invalid resource ID. Run `npm run test:ui-mock`.
+- Completion notes: persisted `use-cases` and `use-case` routes now render
+  `PersistedUseCaseWorkspace` directly in `ProjectWorkspace`, while the canvas app stays mounted only
+  for Diagram/BRD routes.
+
+#### TASK-181 - Put `Tạo diagram` on each approved Use Case and missing Diagram route
+- Priority: P1
+- Status: Done
+- Module: diagram-handoff
+- Problem: Per-use-case diagram generation exists, but its primary CTA is in the old use-case panel's
+  diagram inventory rather than on the selected Use Case and missing Diagram content surfaces.
+- Why it matters: The new flow is "edit each use case, then click a button to create its diagram."
+  Users should not have to open a separate diagram inventory panel to find that action.
+- Implementation steps:
+  1. Add a primary `Tạo diagram` action to the single `UseCaseEditor` when the use case is saved,
+     approved, valid, and has no current diagram.
+  2. Add `Mở diagram`, `Tạo lại diagram`, and outdated/diverged handling based on the same lifecycle
+     rules currently used by `buildDiagramInventory`.
+  3. For the `diagram` route with no saved diagram, render a missing-state page with the same
+     prerequisite-aware `Tạo diagram` action instead of trying to open a blank/sample canvas.
+  4. After generation succeeds, save or mark the diagram consistently, refresh the artifact tree, and
+     navigate to the created Diagram node.
+  5. Keep dirty-scope prompts before replacing an active canvas or regenerating over semantic edits.
+- Acceptance criteria:
+  - An approved Use Case page exposes `Tạo diagram` without opening the old panel.
+  - A non-approved or invalid Use Case explains the missing prerequisite and disables generation.
+  - A generated diagram appears under the correct Use Case in the left tree and opens on the canvas.
+  - Regenerate paths preserve the existing confirm behavior for outdated/diverged diagrams.
+- Dependencies: TASK-180, TASK-166, TASK-177
+- Verification: Add tests for approved/not-approved/invalid/missing-diagram/generated-diagram states
+  and tree refresh after generation. Run `npm run test:ui-mock` and the relevant E2E scenario.
+- Completion notes: approved Use Case pages and missing-Diagram states now expose the persisted
+  `Tạo diagram` handoff, save the generated graph immediately, refresh the tree, and navigate to the
+  created Diagram node.
+
+### Next
+
+#### TASK-182 - Remove the old "Không gian use case" as the primary persisted workflow
+- Priority: P2
+- Status: Done
+- Module: frontend-workspace-shell
+- Problem: The toolbar still presents `Không gian use case` from the canvas app, which reinforces the
+  old single-screen workflow even after the left tree exists.
+- Why it matters: As long as the old panel remains the main call to action, users can bypass the
+  intended database-backed artifact flow.
+- Implementation steps:
+  1. Remove or demote the canvas toolbar `Không gian use case` button in persisted workspace mode.
+  2. Replace it with contextual navigation actions: go to Feature Intent, go to Use Cases, or go to
+     active Use Case depending on the selected artifact.
+  3. Keep the button only in standalone/test-harness mode if those flows still need it.
+  4. Audit status copy and empty states for wording that describes a separate use-case workspace.
+  5. Ensure Project Spec, Feature Intent, Use Case, Diagram, and BRD all have tree-first navigation
+     paths with no hidden required panel.
+- Acceptance criteria:
+  - Persisted users can complete Feature Intent -> Use Cases -> Diagram without opening
+    `UseCasePanel`.
+  - No primary toolbar action points to the deprecated use-case workspace in persisted mode.
+  - Standalone/test-only behavior remains isolated and clearly gated.
+- Dependencies: TASK-180, TASK-181
+- Verification: Browser smoke the persisted flow and search runtime copy for `Không gian use case`
+  usages that remain user-facing.
+- Completion notes: persisted workspace mode no longer surfaces the old toolbar entry as a primary
+  action; navigation now routes through Feature Intent, Use Cases, and each Use Case artifact.
+
+#### TASK-183 - Lock the new Feature Intent -> Use Case -> Diagram flow with tests and docs
+- Priority: P2
+- Status: Done
+- Module: regression-docs
+- Problem: The documentation and tests still include wording and scenarios from the old
+  `UseCasePanel` workspace, including local draft and Phase 1 no-persistence assumptions.
+- Why it matters: Without tests and canonical workflow docs, future changes can drift back toward
+  the old "one diagram canvas plus side panel" UX.
+- Implementation steps:
+  1. Finalize `docs/use-cases/UC-07-sinh-usecase-tu-spec.md` after implementation so button labels,
+     route behavior, and persisted Use Case resources match the shipped flow exactly.
+  2. Update `docs/scope/artifact-chain.md` only if the artifact chain or persistence rules change
+     beyond the current latest-state model.
+  3. Add or update E2E coverage for saved Feature Intent -> generate persisted Use Cases -> left-tree
+     selection -> edit one Use Case -> approve -> generate Diagram -> route to Diagram.
+  4. Add negative coverage that normal persisted routes do not require `UseCasePanel` to be open.
+  5. Update `README.md` workflow steps if button labels or route behavior change.
+- Acceptance criteria:
+  - UC-07 describes the same flow users see in the product.
+  - Automated coverage fails if generated Use Cases do not appear in the left tree.
+  - Automated coverage fails if Use Case routes mount the canvas as the primary editor.
+  - README local test instructions remain accurate.
+- Dependencies: TASK-179, TASK-180, TASK-181, TASK-182
+- Verification: Run `npm run test:ui-mock`, `npm run test:e2e-mock`, and `npm run build`.
+- Completion notes: route/component regressions, the persisted artifact-tree E2E, README, and UC-07
+  now describe and enforce the shipped Feature Intent -> Use Case -> Diagram workflow.
+
+## Post-Implementation Follow-up
+
+Review snapshot:
+[2026-06-07 TASK-179 to TASK-183 implementation review](./reviews/2026-06-07-task-179-183-implementation-review.md).
+
+### Now
+
+#### TASK-184 - Make persisted use-case bulk save honor replace semantics
+- Priority: P1
+- Status: Done
+- Module: backend-bulk-save
+- Problem: The persisted generate flow warns that it will replace the current Use Case list, but the
+  backend `save_owned_use_cases` path only upserts submitted rows and never deletes or retires
+  omitted Use Cases.
+- Why it matters: Regenerating with fewer or different `use_case_id`s leaves stale Use Cases,
+  Diagrams, and BRDs in the database and left tree, so TASK-179's "tree reflects the generated list"
+  contract is false after the first replacement scenario.
+- Implementation steps:
+  1. Decide the canonical behavior for omitted persisted Use Cases during regenerate: hard delete,
+     soft supersede, or explicit outdated archive.
+  2. Encode that behavior in `save_owned_use_cases` as one transactional operation rather than
+     frontend-only copy.
+  3. Update the artifact tree serializer so replaced or retired children surface the intended state.
+  4. Align the replace confirmation copy in the frontend with the real backend behavior.
+  5. Add backend and UI coverage for regenerate-from-2-to-1 and rename/rekey scenarios.
+- Acceptance criteria:
+  - Regenerating a persisted Use Case list does not leave hidden stale rows that reappear after tree
+    refresh.
+  - The left tree matches the canonical post-regenerate backend state.
+  - Diagram/BRD descendants of omitted Use Cases follow the documented retention or deletion policy.
+- Dependencies: TASK-179
+- Verification: Add a backend test for omitted-row handling and a persisted workspace/E2E scenario
+  that regenerates from an existing list to a smaller replacement set.
+- Completion notes:
+  - `save_owned_use_cases` now treats the payload as the canonical replacement set, deletes omitted
+    persisted Use Cases transactionally, and updates `use_case_key` on retained rows.
+  - Added backend coverage for omit-and-delete descendants plus retained-row rekey behavior.
+
+#### TASK-185 - Add retry-to-save recovery for generate success / persist failure
+- Priority: P1
+- Status: Done
+- Module: persisted-usecase-surface
+- Problem: When `generateUseCases` succeeds and `saveUseCases` fails, the page keeps the drafts
+  visible but offers no direct retry-to-save action, despite the TASK-179 completion notes claiming
+  a retry affordance.
+- Why it matters: On a first-time generate failure, the user cannot persist the current drafts
+  without re-running generation and changing the content they were about to review.
+- Implementation steps:
+  1. Keep the latest generated drafts and generation metadata in stable local state after save
+     failure.
+  2. Add a dedicated `Lưu danh sách` / `Thử lưu lại` action that retries `saveUseCases` with the
+     existing drafts instead of calling generate again.
+  3. Make the failure state explicit when no persisted resources exist yet.
+  4. Add a regression for first-time generate success followed by save failure and successful retry.
+- Acceptance criteria:
+  - Users can retry persistence without regenerating content.
+  - The retry path works when zero persisted Use Cases currently exist.
+  - Success after retry refreshes the tree and enables normal `Sửa Use Case` navigation.
+- Dependencies: TASK-179
+- Verification: Run targeted UI tests for generate-success/save-failure/retry and the persisted E2E
+  happy path.
+- Completion notes:
+  - Generated drafts now stay in stable local state after save failure.
+  - The list route exposes `Lưu danh sách` / `Thử lưu lại` so the user can persist the current
+    drafts without re-running AI generation.
+
+#### TASK-186 - Unify persisted diagram CTA logic with the canonical lifecycle model
+- Priority: P1
+- Status: Done
+- Module: frontend-workspace-shell
+- Problem: `PersistedUseCaseWorkspace` derives diagram actions from `diagramExists` and
+  `is_outdated` only, so it ignores `diverged` and does not share one lifecycle source of truth with
+  the older diagram inventory logic.
+- Why it matters: The new persisted surface is now the primary flow. Missing `diverged` handling and
+  ambiguous post-generate routing create UX drift exactly where users move from Use Case to Diagram.
+- Implementation steps:
+  1. Reuse or extract the lifecycle decision logic so persisted editor and standalone inventory derive
+     the same CTA set from the same status model.
+  2. Include `diverged` in regenerate eligibility and preserve confirm behavior for both `outdated`
+     and `diverged`.
+  3. Decide whether `Tạo diagram` should auto-open the canvas or stay on the Use Case page with an
+     explicit `Mở diagram` step, then align docs and tests to that one contract.
+  4. Add browser coverage for `ready`, `outdated`, and `diverged` persisted states.
+- Acceptance criteria:
+  - Persisted editor CTAs match the documented lifecycle for `ready`, `outdated`, and `diverged`.
+  - The shipped post-generate route behavior is explicit and proven by E2E.
+  - Users do not lose access to regenerate after semantic diagram edits.
+- Dependencies: TASK-181
+- Verification: Run `npm run test:ui-mock`, a browser scenario covering diverged regenerate, and the
+  persisted artifact-tree E2E.
+- Completion notes:
+  - Persisted editor CTAs now derive from the shared lifecycle model, including `diverged`.
+  - Shipped contract is explicit: `Tạo diagram` saves the downstream artifact and keeps the user on
+    the Use Case page, where `Mở diagram` appears as the next step.
+
+### Next
+
+#### TASK-187 - Make artifact-tree E2E assertions artifact-specific instead of positional
+- Priority: P2
+- Status: Done
+- Module: regression-docs
+- Problem: `e2e/artifact-tree.spec.ts` still uses positional `.last()` selection for BRD nodes, so
+  the test can attach to the wrong Use Case subtree when multiple BRD placeholders are visible.
+- Why it matters: TASK-183 is supposed to lock the new flow, but flaky selectors weaken CI signal and
+  obscure whether a failure is a product bug or a test bug.
+- Implementation steps:
+  1. Scope BRD assertions to the specific generated Use Case subtree or persisted route under test.
+  2. Replace broad `.filter({ hasText: 'BRD' }).last()` style selectors with stable role/name or
+     subtree locators.
+  3. Keep the test validating the real persisted chain, not a simplified one-item tree.
+  4. Re-run the spec multiple times locally to check for ordering-related flakes.
+- Acceptance criteria:
+  - The artifact-tree E2E identifies the BRD node created by the scenario, not any BRD node in the
+    tree.
+  - Repeated local runs do not fail because of tree ordering.
+- Dependencies: TASK-183
+- Verification: Run `npm run test:e2e-mock -- e2e/artifact-tree.spec.ts` multiple times and confirm
+  stable pass behavior.
+- Completion notes:
+  - The persisted full-chain E2E now scopes Diagram/BRD assertions to the selected Use Case subtree
+    instead of positional `.last()` locators.
+
+## Use Case Presentation Review
+
+Review snapshot:
+[2026-06-07 persisted Use Case presentation review](./reviews/2026-06-07-usecase-presentation-review.md).
+
+### Now
+
+#### TASK-188 - Redesign the persisted Use Case route as a read-first artifact page
+- Priority: P1
+- Status: Done
+- Module: persisted-usecase-route
+- Problem: The persisted `use-case` route renders nearly the entire structured model as one long raw
+  form stack, so AI-generated Use Cases are hard to scan before the user even decides what to edit.
+- Why it matters: This route is now the primary review surface after AI generation. If it looks like
+  a raw payload editor, the whole Feature Intent -> Use Case flow feels noisy and low-confidence.
+- Implementation steps:
+  1. Split the page into read-first sections: overview, actors, objective/preconditions, main flow,
+     alternate flows, success outcome, and next actions.
+  2. Make the default state optimized for reading, with summary rows and collapsed detail blocks
+     instead of every field being fully open at once.
+  3. Keep edit affordances local to each section so the user can focus on one slice at a time.
+  4. Preserve existing review/approval/generate behavior while changing only the presentation model.
+- Acceptance criteria:
+  - A newly generated Use Case is readable at a glance without opening every nested field.
+  - The page clearly separates artifact content from edit controls.
+  - Users can still edit every required field without losing structured fidelity.
+- Dependencies: TASK-180, TASK-181
+- Verification: Browser-check the route with realistic AI-generated content on desktop and mobile,
+  then run `npm run test:ui-mock`.
+- Completion notes:
+  - The route now presents sections for actors, general information, main flow, alternate flows,
+    and next actions before exposing edit controls.
+
+#### TASK-189 - Create dedicated layout primitives for persisted Use Case steps and sections
+- Priority: P1
+- Status: Done
+- Module: shared-usecase-card-styles
+- Problem: The persisted editor reuses generic `usecase-card` styles that were not designed for a
+  full-page structured editor, so headings, metadata, controls, and step content have weak visual
+  hierarchy.
+- Why it matters: The current layout makes every row feel equally important, which is why the page
+  looks cramped and hard to parse in real AI output.
+- Implementation steps:
+  1. Introduce a persisted-editor-specific style namespace rather than extending shared
+     `usecase-card` classes indefinitely.
+  2. Give the page a stable section grid and dedicated artifact title styling.
+  3. Turn each main/alternate step into a two-zone layout: content body plus compact action rail.
+  4. Define consistent widths, spacing, textarea sizing, and control alignment for long Vietnamese
+     text.
+  5. Keep legacy `UseCasePanel` visuals isolated so this redesign does not accidentally regress the
+     standalone workspace.
+- Acceptance criteria:
+  - Step rows read as structured content first and controls second.
+  - Title, metadata, and section headings have clear hierarchy.
+  - Long generated text does not visually collide with labels or action buttons.
+- Dependencies: TASK-188
+- Verification: Review the route at multiple viewport widths and run targeted visual/browser smoke.
+- Completion notes:
+  - Added a dedicated `persisted-usecase__*` style namespace and moved the full-page editor away
+    from generic `usecase-card` layout assumptions.
+
+### Next
+
+#### TASK-190 - Add progressive disclosure and compact summaries for main and alternate flows
+- Priority: P2
+- Status: Done
+- Module: persisted-usecase-route
+- Problem: Every main-flow and alternate-flow item currently opens as a full editor block, even when
+  the user only needs to review or compare steps.
+- Why it matters: The step list is the densest part of the page and currently creates the strongest
+  sense of clutter.
+- Implementation steps:
+  1. Render each step with a compact summary line by default.
+  2. Move low-frequency fields such as `input_or_trigger` and `expected_result` behind expandable
+     detail panels.
+  3. Let users expand only the steps they are editing while preserving order and drag/reorder
+     controls.
+  4. Apply the same pattern to alternate flows and branch steps.
+- Acceptance criteria:
+  - The step list is scannable without expanding every item.
+  - Secondary fields remain accessible but do not dominate the default page.
+  - Editing one step does not visually explode the whole screen.
+- Dependencies: TASK-188, TASK-189
+- Verification: Browser smoke with a Use Case that has 4+ main steps and multiple alternate flows.
+- Completion notes:
+  - Main steps, alternate flows, and branch steps now default to compact summary rows with local
+    expand-to-edit panels for secondary fields.
+
+#### TASK-191 - Add visual regression checks for the persisted Use Case route
+- Priority: P2
+- Status: Done
+- Module: regression-layer
+- Problem: Current tests validate behavior only; they do not protect against the visual clutter the
+  user is reporting.
+- Why it matters: Once the route is redesigned, the team needs a guardrail to stop future CSS or
+  markup changes from collapsing hierarchy again.
+- Implementation steps:
+  1. Add a browser test fixture that opens a realistic persisted Use Case with long AI-generated text.
+  2. Assert key layout properties such as visible section headings, non-overlapping controls, and
+     stable action placement across desktop and mobile.
+  3. Capture screenshots or use structured layout assertions for the overview and step sections.
+  4. Keep the fixture deterministic so CI failures are actionable.
+- Acceptance criteria:
+  - The persisted Use Case route has automated coverage for readability-critical layout.
+  - Desktop and mobile regressions fail the suite when hierarchy collapses or controls overlap.
+- Dependencies: TASK-188, TASK-189, TASK-190
+- Verification: Run the targeted Playwright scenario and confirm failures when layout constraints are
+  intentionally broken.
+- Completion notes:
+  - Added a deterministic Playwright scenario that opens a long persisted Use Case on desktop and
+    mobile, verifies section visibility, and guards against step-copy/action overlap.
+
+## TASK-184 to TASK-191 Re-review
+
+Review snapshot:
+[2026-06-08 TASK-184..191 and use-case prompt review](./reviews/2026-06-08-task-184-191-and-usecase-prompt-review.md).
+
+### Next
+
+#### TASK-192 - Surface the active use-case generation mode and fallback more explicitly
+- Priority: P2
+- Status: Done
+- Module: usecase-generation-observability
+- Problem: Users can still believe they are reviewing an AI-generated use case when the service has
+  actually fallen back to deterministic generation or is running under a non-AI rollout mode.
+- Why it matters: This ambiguity slows down debugging of prompt quality, provider health, and domain
+  grounding because reviewers do not know which generation path they are evaluating.
+- Implementation steps:
+  1. Persist and display the latest generation source, fallback reason, provider, model, and prompt
+     version in the Use Case list/editor surfaces, not only the transient post-generate toast/state.
+  2. Add a visible hint when the current rollout mode is `deterministic` or when the latest result
+     is `deterministic_fallback`.
+  3. Document the recommended `apps/api/.env` settings for AI-first workflows such as camera re-id.
+  4. Add regression coverage for the new source/fallback visibility in the persisted route.
+- Acceptance criteria:
+  - A reviewer can tell from the persisted UI whether a Use Case came from AI or deterministic
+    fallback without re-running generation.
+  - The prompt version shown in UI matches the persisted metadata.
+  - Local AI-first setup guidance is discoverable from project docs.
+- Dependencies: TASK-184, TASK-185
+- Verification: `npm run test:ui-mock`, `npm run test:api-mock`, and one manual generate pass that
+  exercises both AI and deterministic-fallback states.
+- Completion notes:
+  - Persisted the latest use-case generation metadata on `Feature Intent` and surfaced it on both
+    the persisted Use Case list and single-item editor routes, including source, fallback note,
+    provider/model, generation mode, and prompt version when available.

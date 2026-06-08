@@ -18,7 +18,7 @@ export default defineConfig({
     },
     {
       command:
-        'VITE_BRD_API_URL=http://127.0.0.1:18000 npm run dev:ui -- --host 127.0.0.1 --port 4173',
+        'VITE_AUTH_DISABLED=true VITE_ENABLE_TEST_HARNESS=true VITE_BRD_API_URL=http://127.0.0.1:18000 npm run dev:ui -- --host 127.0.0.1 --port 4173',
       url: 'http://127.0.0.1:4173',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,

@@ -6,7 +6,16 @@
 | **Tên** | Sinh danh sách use case draft từ `ProjectSpec` và `FeatureIntent` |
 | **Actor** | BA / Solution Engineer (chính); Product Owner / QA (review) |
 | **Mục tiêu** | Có một workspace rõ ràng để nhập `ProjectSpec + FeatureIntent`, review/edit danh sách use case output, rồi nhìn thấy ngay inventory diagram tương ứng cho từng use case. |
-| **Trigger** | User mở `Use case workspace` và bắt đầu điền Input hoặc generate lại từ input hiện có. |
+| **Trigger** | User lưu `Feature Intent`, bấm sinh use case từ artifact đang chọn, rồi review từng Use Case xuất hiện trong left artifact tree. |
+
+## Cập nhật flow 2026-06-07
+
+- Flow canonical trong workspace persisted là:
+  `Project Spec -> Feature Intent -> Use Cases trong left bar -> Use Case editor -> Generate Diagram`.
+- Sau khi sinh từ `Feature Intent`, danh sách `Use Case` phải trở thành resource thật hoặc được lưu trong cùng một hành động rõ ràng để left bar refresh ngay.
+- Người dùng sửa từng `Use Case` bằng route/editor riêng; overlay `Use case workspace` không còn là primary UX cho persisted mode.
+- Nút `Tạo diagram` nằm trên Use Case đã lưu/phê duyệt và trên missing Diagram state tương ứng.
+- Persisted `Use Case` route là một trang đọc-trước-sửa-sau: actors, thông tin chung, luồng chính, luồng thay thế, và next actions đều có summary riêng trước khi bung editor chi tiết.
 
 ## Tiền điều kiện
 
@@ -16,12 +25,9 @@
 
 ## Bước thực hiện
 
-1. User mở `Use case workspace` từ toolbar.
-2. Workspace hiển thị 3 vùng rõ ràng:
-   - `Input`
-   - `Use cases`
-   - `Diagrams`
-3. Ở vùng `Input`, primary flow yêu cầu tên chức năng, mô tả chức năng, danh sách `Actors / swimlanes` và kết quả mong muốn. Tất cả actor user nhập đều là actor chính của quy trình; UI không phân cấp actor chính/phụ và không giấu actor trong `Thông tin bổ sung`.
+1. User mở hoặc tạo `Feature Intent` từ left artifact tree.
+2. User điền và lưu tên chức năng, mô tả chức năng, danh sách `Actors / swimlanes` và kết quả mong muốn. Tất cả actor user nhập đều là actor chính của quy trình; UI không phân cấp actor chính/phụ và không giấu actor trong `Thông tin bổ sung`.
+3. User bấm action sinh use case trên `Feature Intent` hoặc vùng `Use Cases` của feature đang chọn.
 4. Frontend chạy `quick guard` cục bộ cho các field bắt buộc:
    - `project_name`
    - `project_summary`
@@ -36,32 +42,36 @@
    - canonical normalize/trim/dedup ingestion payload
    - áp dụng rate limit
    - build `artifact_chain`
+   - giữ `FeatureIntent.actors` làm participant set canonical, không hạ cấp actor kỹ thuật như
+     camera, AI model, service, pipeline hoặc gateway thành actor con người chung chung
    - áp dụng rollout mode `deterministic / ai_shadow / ai_opt_in / ai_default`
-   - nếu gọi AI: render prompt version đã pin, synthesize semantic output, kiểm tra schema/evidence/quality và hydrate stable IDs
+   - nếu gọi AI: render prompt version đã pin từ asset markdown versioned, synthesize semantic
+     output, kiểm tra schema/evidence/quality và hydrate stable IDs
    - retry tối đa một lần với validation codes đã sanitize
    - fallback về deterministic builder khi provider hoặc output không đạt yêu cầu
-9. Frontend chuyển trọng tâm sang vùng `Use cases` và hiển thị:
+9. Frontend lưu hoặc cập nhật danh sách `Use Case` theo contract persisted, refresh left artifact tree, rồi hiển thị:
    - nguồn sinh `Bản nháp AI` hoặc `Bản nháp theo rule`, cùng lý do fallback
-   - danh sách use case draft có thể chỉnh sửa trực tiếp
+   - metadata lần sinh gần nhất trên persisted list/editor: provider, model, rollout mode, prompt version khi có
+   - danh sách use case đã persist và có thể mở từng item để chỉnh sửa
    - trạng thái review `draft / reviewed / approved`
    - next action rõ ràng trên từng item
-10. User chỉnh trực tiếp structured main/alternate flow; `happy_path_summary` và `key_exceptions` được derive, không phải nguồn edit thứ hai.
-11. Frontend validate detailed contract sau mỗi edit và chỉ cho phép `Đánh dấu đã rà soát`, `Phê duyệt`, `Phê duyệt tất cả`, hoặc `Tạo sơ đồ` khi actor/step/branch references, stable IDs, outcome mode và text bắt buộc đều hợp lệ.
-12. Khi use case đã `approved`, user có thể mở vùng `Diagrams` để xem inventory diagram gắn với từng `use_case_id`.
-13. Vùng `Diagrams` phải cho thấy:
+10. User chọn từng `Use Case` trong left artifact tree và chỉnh trực tiếp structured main/alternate flow; `happy_path_summary` và `key_exceptions` được derive, không phải nguồn edit thứ hai.
+11. Frontend validate detailed contract sau mỗi edit và chỉ cho phép `Đánh dấu đã rà soát`, `Phê duyệt`, hoặc `Tạo diagram` khi actor/step/branch references, stable IDs, outcome mode và text bắt buộc đều hợp lệ.
+12. Khi use case đã `approved`, editor của Use Case hiển thị action `Tạo diagram`, `Mở diagram`, hoặc `Tạo lại diagram` tương ứng từ cùng một lifecycle model với diagram inventory.
+13. Missing Diagram state và/hoặc diagram inventory phải cho thấy:
    - use case nào chưa sẵn sàng đi sang diagram
    - use case nào đã `approved` và sẵn sàng cho bước diagram
    - use case nào đang được xem trong inventory, tách biệt với use case đang gắn thật với canvas
-   - `Tạo sơ đồ` khi use case đã approved nhưng chưa có draft
-   - `Mở canvas` chỉ khi đã có `DiagramDraft` thật
-   - `Mở bản hiện tại` và `Tạo lại sơ đồ` khi draft đã outdated/diverged
+   - `Tạo diagram` khi use case đã approved nhưng chưa có draft
+   - `Mở diagram` chỉ khi đã có `DiagramDraft` thật
+   - `Tạo lại diagram` khi draft đã outdated/diverged
 14. `Artifact chain` không còn nằm giữa primary flow; nó được chuyển vào `Advanced traceability`.
-15. Khi user chọn `Tạo sơ đồ`, frontend gửi use case approved sang `POST /api/diagrams/generate`, chuyển `DiagramDraft` trả về thành LogicFlow graph, lưu workspace theo `use_case_id`, rồi render graph đó vào canvas.
+15. Khi user chọn `Tạo diagram`, frontend gửi use case approved sang endpoint generate diagram tương ứng, chuyển `DiagramDraft` trả về thành LogicFlow graph, lưu workspace theo `use_case_id`, refresh tree, giữ user ở lại Use Case page, rồi hiển thị action `Mở diagram` như bước tiếp theo rõ ràng.
 16. Mọi node/edge generated mang provenance versioned và source trace; element tạo tay mang provenance `manual`, còn metadata import không hợp lệ được đánh dấu `imported/untrusted`.
 
 ## Kết quả mong đợi
 
-- Có một workspace tách bạch giữa input, use case output, và diagram inventory.
+- Có một flow tách bạch giữa Feature Intent input, left-bar Use Case inventory, từng Use Case editor, và Diagram artifact.
 - User có thể sinh lần đầu mà không cần mở các field nâng cao hoặc hiểu raw schema.
 - Có danh sách use case draft đủ rõ để review mà không cần mở diagram trước.
 - Mỗi use case draft có tối thiểu:
@@ -77,7 +87,7 @@
   - `success_outcome`
   - `review_status`
 - `Artifact chain` vẫn tồn tại cho traceability, nhưng được đặt trong `Advanced traceability` thay vì chen vào luồng chính.
-- Vùng `Diagrams` hiển thị inventory tối thiểu gắn theo `use_case_id`, kể cả khi trạng thái ban đầu mới chỉ là “ready for diagram” hoặc “needs approval”.
+- Use Case editor và missing Diagram state hiển thị trạng thái tối thiểu gắn theo `use_case_id`, kể cả khi trạng thái ban đầu mới chỉ là “ready for diagram” hoặc “needs approval”.
 - Workspace vẫn duy trì artifact chain:
   - `ProjectSpec`
   - `FeatureIntent`
@@ -116,17 +126,11 @@
 - Nếu item đang `approved` mà user sửa nội dung nghiệp vụ, frontend tự chuyển item về `reviewed` để bắt buộc phê duyệt lại trước khi đi sang diagram.
 - Khi đổi danh sách actors, frontend migrate `actor_ref` chỉ khi mapping cũ-mới rõ ràng; actor hoặc step reference bị dangling sẽ tạo lỗi sát flow và khóa approval.
 
-### UC-07d — User approve toàn bộ
-
-- Frontend đổi toàn bộ `review_status` hiện có sang `approved`.
-- Đây là state tạm ở frontend cho Phase 1; chưa có persistence backend/database.
-
 ### UC-07d2 — User mở diagram inventory từ một use case đã approved
 
-- Trên mỗi use case item đã `approved`, action chính đổi thành `Mở ở vùng sơ đồ`.
-- Frontend chuyển workspace sang vùng `Diagrams` và chỉ focus/highlight item đang được xem; thao tác này không đổi canvas binding.
-- Khi chưa có draft, action chính là `Tạo sơ đồ`; action này sinh và render graph thật thay vì gắn use case vào sample canvas.
-- Khi đã có draft, user bấm `Mở canvas`; editor shell hiển thị context cố định gồm `use_case_id`, title, trạng thái review/diagram, và action quay lại vùng `Diagrams`.
+- Trên mỗi use case item đã `approved`, action chính là `Tạo diagram` nếu chưa có draft.
+- Khi đã có draft hiện hành, user bấm `Mở diagram`; editor shell hiển thị context cố định gồm `use_case_id`, title, trạng thái review/diagram, và action quay lại `Use Cases`.
+- Khi draft đã outdated/diverged, user có thể `Mở diagram` để xem bản hiện có hoặc `Tạo lại diagram` với confirm riêng.
 - Chỉ `activeCanvasUseCaseId` được phép biểu thị use case đang gắn với canvas; inventory focus không phải lifecycle status.
 - Label, note, style, và quyền action đều derive từ cùng một `diagram_status`. `outdated/diverged` cho phép mở bản hiện tại để bảo toàn chỉnh sửa, nhưng regenerate là action riêng có confirm; `needs_review/generating/failed` không được giả là draft sẵn sàng.
 - Nếu use case đang gắn với canvas bị sửa sau approve, diagram inventory không còn coi item đó là sẵn sàng mở canvas cho tới khi user phê duyệt lại.
@@ -190,15 +194,16 @@
 - `business_context` được gộp vào project description.
 - `business_rules` được gộp vào feature constraints.
 - `target_users`, `systems_involved`, và compatibility `primary_actor/supporting_actors` chỉ là chi tiết contract tạm thời; UI canonical phải là một danh sách actor ngang hàng.
+- Prompt use-case phải được quản lý như asset versioned trong `apps/api/app/ai/prompts/assets/usecase_synthesis/*`
+  thay vì hard-code trong Python module để BA/AI reviewer có thể audit và iterate độc lập.
 - `function_name`, `glossary`, và `assumptions` không còn được thu thập hoặc forward trong generation flow; schema vẫn giữ tạm để đọc payload cũ.
 
 ## Out of scope cho UC-07 ở Phase 1
 
-- Persistence database cho `ProjectSpec`, `FeatureIntent`, hoặc `UseCaseDraft`
 - Diff/version history giữa các lần generate
-- Tự động generate diagram ngay khi approve; user vẫn chủ động bấm `Tạo sơ đồ`
+- Tự động generate diagram ngay khi approve; user vẫn chủ động bấm `Tạo diagram`
 - Merge hai chiều ở cấp field giữa semantic edit trên diagram và `UseCaseDraft`; Phase 1 giữ trace và phát hiện divergence, không tự ghi ngược vào use case
-- Persistence `DiagramDraft` qua reload; workspace hiện được giữ trong frontend session
+- Diff/version history hoặc semantic merge tự động cho `DiagramDraft` đã persist
 
 ## Source liên quan
 

@@ -111,6 +111,7 @@ class FeatureIntentModel(TimestampMixin, Base):
     assumptions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     systems_involved: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     success_outcome: Mapped[str | None] = mapped_column(Text)
+    latest_usecase_generation: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     spec: Mapped[Spec] = relationship(back_populates="feature_intents")
     use_cases: Mapped[list[UseCaseModel]] = relationship(

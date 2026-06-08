@@ -129,6 +129,18 @@ Severity:
 
 ---
 
+## [FIXED] Camera / AI actor bị rơi khỏi use case synthesis nên flow bị lệch về "Ban quản lý" (severity: P1) {#fixed-usecase-technical-actor-collapse}
+
+- **ID**: KI-28
+- **Phát hiện**: 2026-06-08 by Codex (TASK-184..191 re-review + camera re-id defect report)
+- **Severity**: P1 — output có thể hợp schema nhưng sai actor nghiệp vụ, kéo lệch cả diagram và BRD ở các feature AI/vision.
+- **Reproduction**: Nhập `FeatureIntent` cho bài toán camera re-id với actor có `Camera AI`, `Dịch vụ Re-ID` hoặc system tương tự; generate use case và quan sát hầu hết main-flow step bị gán cho `Ban quản lý / Portal`.
+- **Root cause**: Grounding và deterministic fallback chỉ ưu tiên `target_users`, `primary_actor`, `systems_involved`, trong khi `FeatureIntent.actors` không được đối xử như participant canonical. Đồng thời prompt synthesis cũ bị hard-code và chưa ép coverage cho actor kỹ thuật trong domain camera/AI/re-id.
+- **Fix**: Giữ `FeatureIntent.actors` trong grounding catalog, actor allowlist, deterministic builder và quality gate; thêm rule bắt technical-actor coverage; chuyển prompt use-case sang markdown assets versioned và tăng cường prompt `usecase_synthesis@1.1.0` cho domain camera/AI/re-id.
+- **Verified**: 2026-06-08 by Codex — targeted pytest (`test_prompt_registry`, `test_usecase_synthesis`, `test_usecase_generation_service`, `test_usecase_builder`), full `npm run test:api-mock`, `npm run test:ui-mock`, `npm run build`.
+
+---
+
 ## [FIXED] Form đầu vào use case phơi raw schema và thu field không tạo giá trị (severity: P2) {#fixed-usecase-input-overcollection}
 
 - **ID**: KI-24

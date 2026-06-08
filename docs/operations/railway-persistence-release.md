@@ -2,7 +2,7 @@
 
 ## Scope
 
-Runbook này áp dụng cho FastAPI service và PostgreSQL service của V-PetSafe trên cùng Railway
+Runbook này áp dụng cho FastAPI service và PostgreSQL service của Smart Diagram trên cùng Railway
 project/environment. Application chỉ dùng một biến canonical `DATABASE_URL`.
 
 ## Required Variables
