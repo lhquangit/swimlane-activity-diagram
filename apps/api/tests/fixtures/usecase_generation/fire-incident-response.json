@@ -1,0 +1,35 @@
+{
+  "project_spec": {
+    "project_name": "Stadium Safety Hub",
+    "project_summary": "Hệ thống điều phối vận hành và an toàn trong sân vận động.",
+    "business_context": "VOC cần tiếp nhận tín hiệu cháy, điều phối xác minh hiện trường, và thông báo cho các lực lượng liên quan.",
+    "target_users": [
+      "Nhân sự vận hành liên lạc (VOC)",
+      "Trưởng điều phối khán giả (VOC)",
+      "Nhân viên hiện trường"
+    ],
+    "business_rules": [
+      "Mọi tín hiệu cháy phải được ghi log với thời điểm và nguồn phát hiện.",
+      "Nếu xác minh báo sai vẫn phải thông báo kết quả cho các actor trong VOC."
+    ],
+    "glossary": ["VOC", "Bộ đàm", "Tín hiệu cháy"]
+  },
+  "feature_intent": {
+    "feature_name": "Xử lý sự cố cháy",
+    "function_name": "fire-incident-response",
+    "feature_summary": "Tiếp nhận tín hiệu cháy, xác minh hiện trường, điều phối xử lý nhanh hoặc escalte khi cần.",
+    "primary_actor": "Nhân sự vận hành liên lạc (VOC)",
+    "trigger": "Có tín hiệu nghi ngờ cháy từ một trong các nguồn phát hiện đầu tiên.",
+    "inputs": ["Tín hiệu cháy", "Vị trí sơ bộ", "Nguồn báo tin"],
+    "outputs": ["Nhật ký sự cố", "Kết quả xác minh", "Thông báo điều phối"],
+    "constraints": ["Phải điều phối nhân viên hiện trường gần nhất trước khi escalte diện rộng."],
+    "assumptions": ["Nhân viên hiện trường có thể liên lạc qua bộ đàm."],
+    "systems_involved": ["VOC console", "Hotline nội bộ"],
+    "success_outcome": "Tín hiệu cháy được xác minh nhanh và quy trình được khép an toàn theo kết quả thực tế."
+  },
+  "expected": {
+    "count": 4,
+    "primary_actor": "Nhân sự vận hành liên lạc (VOC)",
+    "kinds": ["intake", "execution", "coordination", "exception"]
+  }
+}

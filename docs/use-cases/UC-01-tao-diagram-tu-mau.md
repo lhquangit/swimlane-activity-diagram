@@ -1,4 +1,8 @@
-# UC-01 — Tạo diagram từ mẫu mặc định
+# UC-01 — Tạo diagram từ mẫu mặc định (đã ngừng dùng)
+
+> Trạng thái: Deprecated từ 2026-06-07. Normal runtime không còn sample diagram hoặc
+> `Reset mẫu`. Luồng canonical hiện tại là chọn Use Case đã lưu, generate Diagram, sau đó lưu
+> Diagram. Xem [UC-08](./UC-08-dieu-huong-artifact-tree.md).
 
 
 | Field        | Value                                                                   |
@@ -50,6 +54,5 @@
 
 ## Source liên quan
 
-- `src/lf-config.ts` — hàm `buildInitialData()`.
-- `src/App.tsx` — `useEffect` khởi tạo (line ~120 trở đi).
-
+- Lịch sử trước đây dùng `src/lf-config.ts`.
+- Fixture tương đương hiện chỉ tồn tại tại `src/test-fixtures/fire-incident.ts` cho automated tests.

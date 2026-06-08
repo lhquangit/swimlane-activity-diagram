@@ -15,11 +15,24 @@ export type ErrorObject = {
 };
 
 export type ResponseMetadata = {
+  capability?: string | null;
   provider?: string | null;
   model?: string | null;
+  generation_source?: 'ai' | 'deterministic_fallback' | null;
+  generation_mode?: string | null;
+  fallback_reason?: string | null;
+  prompt_id?: string | null;
+  prompt_version?: string | null;
+  prompt_fingerprint?: string | null;
+  quality_status?: string | null;
+  quality_score?: number | null;
+  shadow_status?: string | null;
   attempt_count?: number | null;
   latency_ms?: number | null;
   estimated_cost_usd?: number | null;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_tokens?: number | null;
   cached?: boolean | null;
   first_request_at?: string | null;
 };
@@ -171,6 +184,7 @@ export type BrdPanelPhase =
 
 export type BrdWorkspaceCacheEntry = {
   version: 'v1';
+  dirty?: boolean;
   draft: string;
   spec: BrdSpec | null;
   warnings: WarningItem[];

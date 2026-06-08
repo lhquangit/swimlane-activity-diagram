@@ -10,8 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.idempotency import IdempotencyStore, utc_now
-from app.providers.mock_provider import MockProvider
-from app.providers.openrouter_provider import OpenRouterProvider, OpenRouterProviderError
+from app.ai.providers import OpenRouterProvider, OpenRouterProviderError, build_provider
 from app.rate_limit import InMemoryRateLimiter, parse_rate_limit
 from app.runtime_contract import (
     SUPPORTED_SCHEMA_VERSION,
@@ -146,24 +145,26 @@ def generate_brd(
         def build_mock_payload():
             return deterministic_spec_payload
 
-        if settings.provider == "mock":
-            provider = MockProvider(build_mock_payload)
-        else:
-            if not settings.openrouter_api_key:
-                envelope = ResponseEnvelope(
-                    request_id=request_id,
-                    status="failed",
-                    idempotency_key=idempotency_key,
-                    warnings=warnings,
-                    error=ErrorObject(
-                        code="PROVIDER_UNAVAILABLE",
-                        message="Backend chưa có BRD_OPENROUTER_API_KEY.",
-                        retryable=False,
-                    ),
-                    metadata=ResponseMetadata(provider=settings.provider, model=model_name),
-                )
-                return json_response_from_envelope(envelope, 503)
-            provider = OpenRouterProvider(settings)
+        if settings.provider != "mock" and not settings.openrouter_api_key:
+            envelope = ResponseEnvelope(
+                request_id=request_id,
+                status="failed",
+                idempotency_key=idempotency_key,
+                warnings=warnings,
+                error=ErrorObject(
+                    code="PROVIDER_UNAVAILABLE",
+                    message="Backend chưa có AI_OPENROUTER_API_KEY.",
+                    retryable=False,
+                ),
+                metadata=ResponseMetadata(provider=settings.provider, model=model_name),
+            )
+            return json_response_from_envelope(envelope, 503)
+        provider = build_provider(
+            settings.provider,
+            settings,
+            build_mock_payload,
+            OpenRouterProvider,
+        )
 
         system_prompt = ""
         user_content = ""

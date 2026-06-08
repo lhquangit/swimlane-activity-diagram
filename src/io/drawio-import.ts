@@ -5,6 +5,10 @@ import {
   parseStyleString,
   readGeometryNumber,
 } from './drawio-shared';
+import {
+  deserializeProvenance,
+  provenanceProperties,
+} from './provenance';
 
 type LaneDraft = {
   id: string;
@@ -91,13 +95,19 @@ export function importDrawioXml(xml: string): DrawioImportResult {
 
   const edges = parsedCells
     .filter((cell) => cell.edge && cell.source && cell.target)
-    .map((cell) => ({
+    .map((cell) => {
+      const provenance = deserializeProvenance(
+        cell.element.getAttribute('data-lf-provenance'),
+      );
+      return {
       id: cell.id,
       type: 'polyline',
       sourceNodeId: cell.source!,
       targetNodeId: cell.target!,
       text: edgeLabels.has(cell.id) ? { value: edgeLabels.get(cell.id)! } : undefined,
-    }));
+      properties: provenanceProperties(provenance),
+      };
+    });
 
   const incomingCount = new Map<string, number>();
   const outgoingCount = new Map<string, number>();
@@ -133,7 +143,12 @@ export function importDrawioXml(xml: string): DrawioImportResult {
         x,
         y,
         text: type === 'sync-bar' || type === 'start' || type === 'end' ? undefined : { value: text, x, y },
-        properties: buildNodeProperties(type, lane.id, width, height),
+        properties: {
+          ...buildNodeProperties(type, lane.id, width, height),
+          ...provenanceProperties(
+            deserializeProvenance(cell.element.getAttribute('data-lf-provenance')),
+          ),
+        },
       };
     })
     .filter(Boolean) as NonNullable<EditorGraphData['nodes']>[number][];

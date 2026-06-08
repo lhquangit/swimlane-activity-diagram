@@ -31,6 +31,7 @@ export type EditorEdgeData = {
   sourceNodeId: string;
   targetNodeId: string;
   text?: EditorEdgeText;
+  properties?: Record<string, unknown>;
 };
 
 export type EditorGraphData = {

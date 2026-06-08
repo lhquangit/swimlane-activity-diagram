@@ -3,11 +3,12 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { buildInitialData } from '../lf-config';
+import { buildFireIncidentGraph } from '../test-fixtures/fire-incident';
 import { DEFAULT_LANES, LANE_HEIGHT, withPositions } from '../lane-config';
 import { exportDrawioXml } from './drawio-export';
 import { importDrawioXml } from './drawio-import';
 import type { EditorGraphData } from './drawio-types';
+import { generatedProvenance, readProvenance } from './provenance';
 
 describe('draw.io XML interchange', () => {
   it('imports the bomb draw.io fixture into lanes, nodes, and edges', () => {
@@ -30,12 +31,51 @@ describe('draw.io XML interchange', () => {
       const text = typeof edge.text === 'string' ? edge.text : edge.text?.value;
       return Boolean(text);
     })).toBe(true);
+    expect(
+      readProvenance(result.graph.nodes?.find((node) => node.type !== 'lane')?.properties),
+    ).toMatchObject({ origin: 'imported', trusted: false });
+  });
+
+  it('preserves generated trace metadata through export and import', () => {
+    const lanes = withPositions(DEFAULT_LANES.slice(0, 1));
+    const trace = {
+      use_case_id: 'UC-01',
+      source_kind: 'main_step' as const,
+      source_id: 'UC-01-S01',
+    };
+    const graph: EditorGraphData = {
+      nodes: [
+        {
+          id: 'n-traced',
+          type: 'activity',
+          x: lanes[0].x,
+          y: 200,
+          text: { value: 'Bước có trace' },
+          properties: {
+            laneId: lanes[0].id,
+            provenance: generatedProvenance(trace),
+          },
+        },
+      ],
+      edges: [],
+    };
+
+    const imported = importDrawioXml(
+      exportDrawioXml(graph, lanes, LANE_HEIGHT, 'Trace Roundtrip'),
+    );
+    const provenance = readProvenance(imported.graph.nodes?.[0]?.properties);
+
+    expect(provenance).toMatchObject({
+      origin: 'generated',
+      trusted: true,
+      trace,
+    });
   });
 
   it('exports app graph into draw.io-like XML structure', () => {
     const lanes = withPositions(DEFAULT_LANES);
     const xml = exportDrawioXml(
-      buildInitialData() as unknown as EditorGraphData,
+      buildFireIncidentGraph() as unknown as EditorGraphData,
       lanes,
       LANE_HEIGHT,
       'Demo Diagram',
@@ -52,7 +92,7 @@ describe('draw.io XML interchange', () => {
   it('round-trips the repo sample through export -> import with core semantics preserved', () => {
     const lanes = withPositions(DEFAULT_LANES);
     const xml = exportDrawioXml(
-      buildInitialData() as unknown as EditorGraphData,
+      buildFireIncidentGraph() as unknown as EditorGraphData,
       lanes,
       LANE_HEIGHT,
       'Roundtrip Diagram',

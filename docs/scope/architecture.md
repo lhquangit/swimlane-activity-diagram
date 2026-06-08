@@ -48,11 +48,16 @@
 
 | File | Trách nhiệm |
 |---|---|
-| `src/main.tsx` | Bootstrap React, mount `<App />` vào `#root`. |
-| `src/App.tsx` | Editor shell: toolbar, sidebar, khởi tạo LogicFlow, đăng ký event handler, cache BRD frontend, import/export XML draw.io, và gọi backend BRD. |
+| `src/main.tsx` | Bootstrap React và Clerk, mount router vào `#root`. |
+| `src/application/*` | Project dashboard, canonical artifact routes, persisted workspace và left artifact tree. |
+| `src/App.tsx` | Diagram/Use Case/BRD editor shell: khởi tạo LogicFlow từ persisted/test-injected data, đăng ký event handler, cache BRD frontend, import/export XML và gọi backend generation/persistence APIs. |
 | `src/DndPanel.tsx` | Palette sidebar (render các shape có thể kéo vào canvas). |
+| `src/usecases/*` | Contract frontend cho `ProjectSpec`, `FeatureIntent`, `UseCaseDraft`, client gọi `/api/usecases/generate`, và panel review use case draft. |
+| `apps/api/app/routes/usecase_generate.py` | API deterministic cho `ProjectSpec + FeatureIntent -> UseCaseDraft[]` cùng artifact chain. |
+| `apps/api/app/services/usecase_builder.py` | Heuristic/service layer sinh use case draft từ project spec và feature intent. |
 | `src/nodes.ts` | Định nghĩa custom node types: `lane`, `start`, `end`, `activity`, `decision`, `sync-bar`, `note`. Bao gồm model (data + behavior) và view (SVG). |
-| `src/lf-config.ts` | Initial diagram data (`buildInitialData`), build lane node config (`buildLaneNodes`), snap-to-lane helper (`snapToLane`), LogicFlow options (`getLogicFlowOptions`). |
+| `src/lf-config.ts` | Build lane node config, snap-to-lane helper và LogicFlow options; không chứa runtime sample graph. |
+| `src/test-fixtures/*` | Sample graph/default inputs chỉ dành cho unit/E2E test. |
 | `src/styles.css` | Layout grid (header / sidebar / canvas), styling cho toolbar và palette. |
 
 ## 4. State model
@@ -63,6 +68,10 @@
 |---|---|---|
 | `lanes` | `LaneConfig[]` | Cấu hình lane đang hiển thị. Đổi tên / thêm / xoá lane đều cập nhật state này. |
 | `status` | `string` | Status bar text (thông báo cho user). |
+| `projectSpec` | `ProjectSpec` | Input spec cấp dự án cho pipeline `spec -> use case`. |
+| `featureIntent` | `FeatureIntent` | Intent chức năng user muốn build. |
+| `useCaseDrafts` | `UseCaseDraft[]` | Danh sách use case draft đang review ở frontend. |
+| `useCasePhase` | `idle \| generating \| ready \| failed` | Runtime state của panel use case. |
 | `activeLaneId` | `string \| null` | Lane đang được chọn để hiện toolbar/resize handle. |
 | `activeNodeId` | `string \| null` | Shape đang được chọn để hiện resize handle. |
 | `lanesRef` | `useRef<LaneConfig[]>` | Mirror của `lanes`, dùng trong các LF event handler (đăng ký 1 lần với `useEffect([])`). |
@@ -132,14 +141,30 @@ Xem chi tiết bug & fix tại [progress/known-issues.md](../progress/known-issu
 ```bash
 npm install          # cài deps
 npm run dev          # vite dev server (port 5173)
+npm run dev:api      # FastAPI local backend (port 8000)
 npm run build        # tsc -b && vite build → dist/
 npm run preview      # preview dist/ qua port 4173
 ```
 
 Output trong `dist/` là static files — deploy được lên Vercel / Netlify / nginx / S3.
 
-## 9. Phụ thuộc bên ngoài cần lưu ý
+## 9. Artifact chain hiện tại
+
+Target mới của repo không còn dừng ở `diagram -> BRD`. Chain chuẩn hiện tại là:
+
+`ProjectSpec -> FeatureIntent -> UseCaseDraft -> DiagramDraft -> FormalBRDDraft`
+
+Chi tiết contract tại [artifact-chain.md](./artifact-chain.md).
+
+## 10. Phụ thuộc bên ngoài cần lưu ý
 
 - **LogicFlow Apache-2.0** — có thể fork/sửa nếu cần.
-- Không có backend, không có database — toàn bộ state ở client.
-- Lưu trữ tạm: chỉ qua download JSON (chưa dùng `localStorage` hay IndexedDB).
+- Có backend FastAPI cục bộ cho AI workflows (`usecases`, `brd`), nhưng chưa có database bền.
+- Lưu trữ tạm hiện gồm:
+  - `localStorage` cho BRD draft cache
+  - in-memory state cho `ProjectSpec`, `FeatureIntent`, và `UseCaseDraft`
+
+Thiết kế persistence MVP đã được chốt tại
+[database-architecture.md](./database-architecture.md): PostgreSQL + SQLAlchemy/Alembic trên FastAPI
+hiện có, Clerk JWT ở backend, ownership trực tiếp user/project, chỉ lưu phiên bản mới nhất và dùng
+nút `Lưu` cho từng phần.

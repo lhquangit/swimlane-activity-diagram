@@ -1,0 +1,28 @@
+{
+  "project_spec": {
+    "project_name": "Swimlane Activity Diagram",
+    "project_summary": "Công cụ nội bộ để vẽ và chỉnh sửa swimlane activity diagram.",
+    "business_context": "Nhóm sản phẩm muốn một capability nhỏ để cập nhật giao diện mặc định của lane trong editor.",
+    "target_users": ["Product designer"],
+    "business_rules": [],
+    "glossary": ["Lane", "Theme token"]
+  },
+  "feature_intent": {
+    "feature_name": "Cập nhật theme lane mặc định",
+    "function_name": "lane-theme-defaults",
+    "feature_summary": "Cho phép đổi theme mặc định áp dụng cho lane mới trong editor.",
+    "primary_actor": "Product designer",
+    "trigger": null,
+    "inputs": [],
+    "outputs": ["Theme lane mặc định"],
+    "constraints": [],
+    "assumptions": [],
+    "systems_involved": [],
+    "success_outcome": "Theme lane mặc định mới được lưu và được áp dụng cho các lane tạo sau đó."
+  },
+  "expected": {
+    "count": 1,
+    "primary_actor": "Product designer",
+    "kinds": ["execution"]
+  }
+}

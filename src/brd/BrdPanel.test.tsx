@@ -36,7 +36,7 @@ const baseSpec: BrdSpec = {
   warnings: [],
 };
 
-function BrdPanelHarness() {
+function BrdPanelHarness({ onLoadServerVersion = null }: { onLoadServerVersion?: (() => void) | null }) {
   const [tab, setTab] = useState<BrdTabId>('warnings');
   const [draft, setDraft] = useState('# Demo draft');
 
@@ -62,6 +62,7 @@ function BrdPanelHarness() {
       onCopy={vi.fn()}
       onExport={vi.fn()}
       onRetry={vi.fn()}
+      onLoadServerVersion={onLoadServerVersion}
       onAcknowledgeOutdated={vi.fn()}
       metadata={{
         model: 'openai/gpt-5.5',
@@ -95,5 +96,15 @@ describe('BrdPanel', () => {
 
     fireEvent.change(textarea, { target: { value: '# Draft da sua' } });
     expect(textarea.value).toBe('# Draft da sua');
+  });
+
+  it('requires an explicit action before replacing local recovery with the server version', () => {
+    const onLoadServerVersion = vi.fn();
+    render(<BrdPanelHarness onLoadServerVersion={onLoadServerVersion} />);
+
+    expect(screen.getByText('Có BRD đã lưu trên server')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Dùng bản server' }));
+
+    expect(onLoadServerVersion).toHaveBeenCalledOnce();
   });
 });
