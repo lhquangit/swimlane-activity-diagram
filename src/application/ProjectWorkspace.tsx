@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import App from '../App';
+import PersistedBrdWorkspace from '../brd/PersistedBrdWorkspace';
+import type { ResponseMetadata } from '../brd/types';
 import { featurePayload, usePersistenceApi } from '../persistence/api';
 import {
   clearFeatureScopes,
@@ -46,6 +48,8 @@ export type WorkspaceRouteKind =
   | 'diagram'
   | 'brd';
 
+const ARTIFACT_SIDEBAR_COLLAPSED_STORAGE_KEY = 'artifact-sidebar:collapsed';
+
 const emptyFeature = (): FeatureIntent => ({
   feature_name: '',
   feature_summary: '',
@@ -88,6 +92,16 @@ export default function ProjectWorkspace({
   const [featureSaveState, setFeatureSaveState] = useState<SaveState>('idle');
   const [saveStateRegistry, setSaveStateRegistry] = useState<SaveStateRegistry>({});
   const [activeDiagramBusinessKey, setActiveDiagramBusinessKey] = useState<string | null>(null);
+  const [artifactSidebarCollapsed, setArtifactSidebarCollapsed] = useState(() =>
+    readArtifactSidebarCollapsed(),
+  );
+  const [pendingUseCaseGenerationByFeature, setPendingUseCaseGenerationByFeature] = useState<
+    Record<string, { metadata: ResponseMetadata; requestId: string | null }>
+  >({});
+
+  useEffect(() => {
+    writeArtifactSidebarCollapsed(artifactSidebarCollapsed);
+  }, [artifactSidebarCollapsed]);
 
   const refreshArtifactTree = useCallback(async () => {
     const nextTree = await api.getProjectArtifactTree(projectId);
@@ -259,9 +273,9 @@ export default function ProjectWorkspace({
     return () => window.removeEventListener('beforeunload', guard);
   }, [hasUnsavedChanges]);
 
-  const setScopedSaveState = (scope: SaveScope | null, state: SaveState) => {
+  const setScopedSaveState = useCallback((scope: SaveScope | null, state: SaveState) => {
     setSaveStateRegistry((current) => setScopeState(current, scope, state));
-  };
+  }, []);
 
   const confirmDiscardActiveChanges = (message: string) => {
     const details =
@@ -395,6 +409,12 @@ export default function ProjectWorkspace({
       await api.deleteFeature(activeFeature.id);
       setSaveStateRegistry((current) => clearFeatureScopes(current, activeFeature.id));
       setFeatureResources((current) => current.filter((item) => item.id !== activeFeature.id));
+      setPendingUseCaseGenerationByFeature((current) => {
+        if (!(activeFeature.id in current)) return current;
+        const next = { ...current };
+        delete next[activeFeature.id];
+        return next;
+      });
       await refreshArtifactTree();
       navigate(artifactPath(projectId, { kind: 'spec' }), { replace: true });
     } catch (reason) {
@@ -402,8 +422,26 @@ export default function ProjectWorkspace({
     }
   };
 
+  const loadDiagram = useCallback(
+    async (businessKey: string) => {
+      if (!activeFeature) return null;
+      const resource = useCaseResources.find((item) => item.use_case_key === businessKey);
+      if (!resource) return null;
+      const saved = await api.getDiagram(resource.id);
+      if (!saved) return null;
+      setActiveDiagramBusinessKey(businessKey);
+      setActiveDiagram(saved);
+      setScopedSaveState(makeDiagramScope(activeFeature.id, businessKey), 'idle');
+      return saved;
+    },
+    [activeFeature?.id, api, setScopedSaveState, useCaseResources],
+  );
+
+  const loadBrd = useCallback((diagramId: string) => api.getBrd(diagramId), [api]);
+
   const contextValue = useMemo<WorkspacePersistence | null>(() => {
     if (!tree || !activeFeature) return null;
+    const pendingUseCaseGeneration = pendingUseCaseGenerationByFeature[activeFeature.id] ?? null;
     return {
       project: tree.project,
       spec: tree.spec,
@@ -470,17 +508,25 @@ export default function ProjectWorkspace({
           ),
           'idle',
         ),
+      pendingUseCaseGenerationMetadata: pendingUseCaseGeneration?.metadata ?? null,
+      pendingUseCaseGenerationRequestId: pendingUseCaseGeneration?.requestId ?? null,
       generateUseCases: async (preference) => {
         const envelope = await api.generateUseCases(activeFeature.id, preference);
-        setFeatureResources((current) =>
-          current.map((feature) =>
-            feature.id === activeFeature.id
-              ? {
-                  ...feature,
-                  latest_usecase_generation: envelope.metadata ?? null,
-                }
-              : feature,
-          ),
+        setPendingUseCaseGenerationByFeature((current) =>
+          envelope.metadata
+            ? {
+                ...current,
+                [activeFeature.id]: {
+                  metadata: envelope.metadata,
+                  requestId: envelope.request_id,
+                },
+              }
+            : (() => {
+                if (!(activeFeature.id in current)) return current;
+                const next = { ...current };
+                delete next[activeFeature.id];
+                return next;
+              })(),
         );
         return envelope;
       },
@@ -504,8 +550,31 @@ export default function ProjectWorkspace({
           ),
         );
         try {
-          const saved = await api.saveUseCases(activeFeature.id, useCaseResources, drafts);
+          const saved = await api.saveUseCases(
+            activeFeature.id,
+            useCaseResources,
+            drafts,
+            options?.generationMetadata,
+          );
           setUseCaseResources(saved);
+          if (options?.generationMetadata) {
+            setFeatureResources((current) =>
+              current.map((feature) =>
+                feature.id === activeFeature.id
+                  ? {
+                      ...feature,
+                      latest_usecase_generation: options.generationMetadata ?? null,
+                    }
+                  : feature,
+              ),
+            );
+            setPendingUseCaseGenerationByFeature((current) => {
+              if (!(activeFeature.id in current)) return current;
+              const next = { ...current };
+              delete next[activeFeature.id];
+              return next;
+            });
+          }
           setTree((current) => {
             if (!current) return current;
             return {
@@ -557,16 +626,7 @@ export default function ProjectWorkspace({
         if (!resource) throw new Error('Hãy lưu Use Case trước khi sinh Diagram.');
         return api.generateDiagram(resource.id);
       },
-      loadDiagram: async (businessKey) => {
-        const resource = useCaseResources.find((item) => item.use_case_key === businessKey);
-        if (!resource) return null;
-        const saved = await api.getDiagram(resource.id);
-        if (!saved) return null;
-        setActiveDiagramBusinessKey(businessKey);
-        setActiveDiagram(saved);
-        setScopedSaveState(makeDiagramScope(activeFeature.id, businessKey), 'idle');
-        return saved;
-      },
+      loadDiagram,
       saveDiagram: async (businessKey, graphData, lanes, laneHeight, semanticEdited) => {
         const resource = useCaseResources.find((item) => item.use_case_key === businessKey);
         if (!resource) throw new Error('Hãy lưu Use Case trước khi lưu Diagram.');
@@ -618,7 +678,7 @@ export default function ProjectWorkspace({
         await refreshArtifactTree();
         navigateToArtifact({ kind: 'use-cases', featureId: activeFeature.id });
       },
-      loadBrd: (diagramId) => api.getBrd(diagramId),
+      loadBrd,
       generateBrd: (diagramId, idempotencyKey, template) =>
         api.generateBrd(diagramId, idempotencyKey, template),
       saveBrd: async (diagramId, payload) => {
@@ -675,7 +735,10 @@ export default function ProjectWorkspace({
     brdSaveState,
     brdScope,
     diagramSaveState,
+    loadBrd,
+    loadDiagram,
     projectId,
+    pendingUseCaseGenerationByFeature,
     refreshArtifactTree,
     saveStateRegistry,
     tree,
@@ -701,7 +764,7 @@ export default function ProjectWorkspace({
   const showUseCaseEditor = !routeError && activeArtifact.kind === 'use-case';
   const showDiagramEditor = !routeError && activeArtifact.kind === 'diagram';
   const showBrdEditor = !routeError && activeArtifact.kind === 'brd';
-  const showCanvasEditor = showDiagramEditor || showBrdEditor;
+  const showCanvasEditor = showDiagramEditor;
   const showMissingDiagramState =
     showDiagramEditor && activeTreeUseCase != null && !activeTreeUseCase.diagram;
   const artifactContentLoading =
@@ -723,12 +786,18 @@ export default function ProjectWorkspace({
 
       {error ? <p className="workspace-error workspace-error--floating">{error}</p> : null}
 
-      <div className="artifact-workspace-shell">
+      <div
+        className={`artifact-workspace-shell${
+          artifactSidebarCollapsed ? ' artifact-workspace-shell--sidebar-collapsed' : ''
+        }`}
+      >
         <ArtifactTree
           tree={tree}
           active={activeArtifact}
           onSelect={navigateToArtifact}
           onCreateFeature={startNewFeature}
+          sidebarCollapsed={artifactSidebarCollapsed}
+          onToggleSidebar={() => setArtifactSidebarCollapsed((current) => !current)}
         />
 
         <section className="artifact-workspace-content">
@@ -824,7 +893,8 @@ export default function ProjectWorkspace({
             </section>
           ) : null}
 
-          {(showUseCaseList || showUseCaseEditor || showCanvasEditor) && artifactContentLoading ? (
+          {(showUseCaseList || showUseCaseEditor || showCanvasEditor || showBrdEditor) &&
+          artifactContentLoading ? (
             <ArtifactState title="Đang tải artifact" message="Đang tải dữ liệu thật từ server…" />
           ) : null}
 
@@ -842,12 +912,28 @@ export default function ProjectWorkspace({
                         : 'missing-diagram'
                   }
                   activeUseCaseResource={
-                    activeArtifact.kind === 'use-case' || activeArtifact.kind === 'diagram'
+                    activeArtifact.kind === 'use-case' ||
+                    activeArtifact.kind === 'diagram'
                       ? useCaseResources.find((item) => item.id === activeArtifact.useCaseId) ?? null
                       : null
                   }
                   activeTreeUseCase={activeTreeUseCase}
                   treeUseCases={activeTreeFeature?.use_cases ?? []}
+                />
+              </WorkspacePersistenceProvider>
+            </section>
+          ) : null}
+
+          {showBrdEditor && !artifactContentLoading && contextValue ? (
+            <section className="artifact-workspace-content__section">
+              <WorkspacePersistenceProvider value={contextValue}>
+                <PersistedBrdWorkspace
+                  activeUseCaseResource={
+                    activeArtifact.kind === 'brd'
+                      ? useCaseResources.find((item) => item.id === activeArtifact.useCaseId) ?? null
+                      : null
+                  }
+                  activeTreeUseCase={activeTreeUseCase}
                 />
               </WorkspacePersistenceProvider>
             </section>
@@ -861,7 +947,7 @@ export default function ProjectWorkspace({
             </section>
           ) : null}
 
-          {(showUseCaseList || showUseCaseEditor || showCanvasEditor) &&
+          {(showUseCaseList || showUseCaseEditor || showCanvasEditor || showBrdEditor) &&
           !artifactContentLoading &&
           !contextValue ? (
             <ArtifactState
@@ -896,6 +982,24 @@ function SaveButton({ state, onClick }: { state: SaveState; onClick: () => void 
       {state === 'saving' ? 'Đang lưu…' : state === 'saved' ? 'Đã lưu' : state === 'failed' ? 'Thử lưu lại' : 'Lưu'}
     </button>
   );
+}
+
+function readArtifactSidebarCollapsed() {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(ARTIFACT_SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function writeArtifactSidebarCollapsed(collapsed: boolean) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(ARTIFACT_SIDEBAR_COLLAPSED_STORAGE_KEY, String(collapsed));
+  } catch {
+    // Ignore localStorage write failures so the workspace stays usable.
+  }
 }
 
 function ArtifactState({

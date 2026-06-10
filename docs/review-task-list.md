@@ -4559,3 +4559,259 @@ Review snapshot:
   - Persisted the latest use-case generation metadata on `Feature Intent` and surfaced it on both
     the persisted Use Case list and single-item editor routes, including source, fallback note,
     provider/model, generation mode, and prompt version when available.
+
+## TASK-192 Re-review
+
+Review snapshot:
+[2026-06-08 TASK-192 implementation review](./reviews/2026-06-08-task-192-implementation-review.md).
+
+### Next
+
+#### TASK-193 - Commit use-case generation provenance only with the saved portfolio revision
+- Priority: P1
+- Status: Done
+- Module: usecase-generation-observability
+- Problem: `latest_usecase_generation` is currently persisted during the generate call, before the
+  generated Use Case list has been saved successfully. After a save failure, the feature can show
+  metadata for a generation run that never became the persisted portfolio.
+- Why it matters: The new `Lần sinh gần nhất` UI becomes misleading after reload, which undermines
+  the whole goal of provenance clarity.
+- Implementation steps:
+  1. Move committed provenance persistence out of the generate endpoint and into the successful
+     persisted portfolio save path, or introduce separate `pending` vs `committed` generation
+     metadata fields.
+  2. Ensure reload surfaces only the metadata that matches the portfolio currently stored in DB.
+  3. Keep session-local visibility for a fresh generate result even before save succeeds, but label
+     it as pending if needed.
+  4. Add API and UI regressions for `generate success -> save fail -> reload`.
+- Acceptance criteria:
+  - Reload never shows provenance for a generation run that failed to save its Use Case list.
+  - Session-local retry flows still show the newest generate result without losing context.
+  - Persisted metadata corresponds to a committed Use Case portfolio revision.
+- Dependencies: TASK-192
+- Verification: `npm run test:ui-mock`, `npm run test:api-mock`, plus a targeted regression for the
+  failed-save reload path.
+- Completion notes:
+  - Moved committed provenance persistence from the generate endpoint into the successful bulk
+    `saveUseCases` path, added explicit `committed_generation_metadata` on the save contract, and
+    kept session-local visibility via pending metadata that is labeled as not yet attached to the
+    persisted Use Case revision.
+
+#### TASK-194 - Invalidate or mark provenance stale when Feature Intent changes after generation
+- Priority: P2
+- Status: Todo
+- Module: usecase-generation-observability
+- Problem: Editing Feature Intent fields currently leaves `latest_usecase_generation` untouched, so
+  the UI can show old provider/prompt metadata for newer source inputs.
+- Why it matters: Prompt/provider provenance is only useful if it still describes the current source
+  state that the reviewer is looking at.
+- Implementation steps:
+  1. Define which Feature Intent fields are generation-relevant for provenance invalidation.
+  2. On updates to those fields, either clear committed provenance or keep it with an explicit stale
+     marker plus source fingerprint comparison.
+  3. Update the persisted Use Case list/editor card to show `stale` or `needs regenerate` copy when
+     the current feature no longer matches the last generated input.
+  4. Add API/UI regression tests for `generate -> edit feature -> revisit use-case route`.
+- Acceptance criteria:
+  - After changing generation-relevant feature inputs, the UI no longer presents old provenance as
+    fresh/current.
+  - Reviewers can tell whether the displayed Use Cases came from the current Feature Intent revision.
+- Dependencies: TASK-192, TASK-193
+- Verification: `npm run test:ui-mock`, `npm run test:api-mock`, and one manual persisted flow
+  where actors/trigger are edited after generate.
+
+## Diagram / BRD Flow Re-review
+
+Review snapshot:
+[2026-06-09 diagram screen and BRD flow review](./reviews/2026-06-09-diagram-screen-and-brd-flow-review.md).
+
+### Now
+
+#### TASK-195 - Prune the persisted diagram toolbar to primary diagram actions only
+- Priority: P2
+- Status: Todo
+- Module: diagram-canvas-workspace
+- Problem: The persisted diagram toolbar still mixes primary editor actions with BRD recovery/debug
+  actions such as `Open last BRD draft` and `Discard cached BRD`, plus secondary export controls.
+- Why it matters: The canvas is harder to scan, and the extra controls compete with `Lưu diagram`
+  and `Generate BRD`, which are the actions users actually need in the main flow.
+- Implementation steps:
+  1. Audit the diagram toolbar and classify each control as primary, secondary, or debug/recovery.
+  2. Remove `Open last BRD draft` and `Discard cached BRD` from the primary toolbar in persisted
+     mode.
+  3. Move any remaining low-frequency actions into a compact overflow/menu or the BRD artifact
+     surface.
+  4. Keep the toolbar width stable after the cleanup on desktop and mobile.
+- Acceptance criteria:
+  - The persisted diagram toolbar foregrounds diagram save/generate actions and no longer exposes
+    BRD cache-management actions at top level.
+  - Toolbar layout remains stable without wrapping collisions at common desktop widths.
+- Dependencies: None
+- Verification: `npm run test:ui-mock`, plus one browser pass on the diagram route at desktop width.
+
+#### TASK-196 - Remove the right-side BRD popup from the persisted artifact workflow
+- Priority: P1
+- Status: Done
+- Module: brd-artifact-surface
+- Problem: BRD already exists as an artifact in the left tree, but selecting it or generating it
+  still opens a right-side popup panel inside the canvas.
+- Why it matters: This duplicates the artifact model, hides BRD behind a transient overlay, and
+  conflicts directly with the expected persisted workflow.
+- Implementation steps:
+  1. Stop auto-opening `BrdPanel` in persisted routes when the selected artifact is `brd` or when
+     `Generate BRD` is clicked from the saved diagram workspace.
+  2. Define a dedicated persisted BRD surface that is owned by the `brd` artifact route rather than
+     by the canvas overlay.
+  3. Keep standalone/non-persisted BRD draft behavior only if still needed, but isolate it from the
+     persisted project workspace.
+  4. Ensure left-tree BRD selection opens the canonical BRD artifact experience.
+- Acceptance criteria:
+  - `Generate BRD` in persisted mode does not trigger a right-side popup.
+  - Selecting BRD from the left tree opens a persisted BRD artifact surface, not a canvas overlay.
+  - BRD remains reachable from the artifact tree after generation/saving.
+- Dependencies: TASK-195
+- Verification: `npm run test:ui-mock`, `npm run test:e2e-mock`, plus one browser pass on the
+  persisted diagram → BRD route.
+- Completion notes:
+  - Persisted `brd` routes now render a dedicated `PersistedBrdWorkspace` surface instead of
+    mounting the canvas `App` + `BrdPanel` overlay.
+  - `Generate BRD` from the persisted diagram canvas no longer opens the right-side popup; it
+    generates and saves BRD directly into the artifact tree.
+  - Browser verification on `2026-06-09` confirmed `hasBrdPanel = false`, `hasCanvas = false` on
+    the `brd` route, and left-tree BRD visibility after generation.
+
+#### TASK-197 - Make persisted BRD generation deterministic/mock-safe for local and test workflows
+- Priority: P1
+- Status: Done
+- Module: brd-backend-generation
+- Problem: Persisted `/api/diagrams/{id}/brd/generate` currently fails hard when the live provider
+  is unavailable or unconfigured, and local tests do not pin the provider mode.
+- Why it matters: Users cannot trust `Generate BRD` in local/dev, and automated persistence-chain
+  tests are coupled to machine env instead of a stable backend contract.
+- Implementation steps:
+  1. Decide and document the canonical local/test behavior for BRD generation: `mock`, deterministic
+     fallback, or explicit skip.
+  2. Pin `apps/api/tests/test_persistence_chain.py` and related persisted-flow tests to that mode.
+  3. If persisted BRD generation is meant to support fallback, implement it in the route instead of
+     returning provider failure directly.
+  4. Surface configuration failures as explicit product-facing errors before the user hits the live
+     provider path.
+- Acceptance criteria:
+  - `test_persistence_chain.py` no longer depends on ambient provider env to pass.
+  - Local persisted BRD generation has a documented and testable behavior when AI provider is not
+    available.
+  - User-facing errors distinguish config/provider failure from diagram validation failure.
+- Dependencies: None
+- Verification: `PYTHONPATH=apps/api apps/api/.venv/bin/python -m pytest apps/api/tests/test_persistence_chain.py -q -vv`,
+  `npm run test:api-mock`.
+- Completion notes:
+  - Persisted `/api/diagrams/{id}/brd/generate` now falls back to deterministic BRD generation when
+    provider config is missing or the provider request fails, while raw `/api/brd/generate`
+    preserves the explicit provider-failure contract.
+  - Persistence-chain coverage now locks both fallback reasons: `provider_unavailable_config` and
+    `provider_request_failed`.
+  - Browser verification on `2026-06-09` confirmed the persisted diagram toolbar can generate and
+    save BRD into the artifact tree without provider-facing runtime failure in local auth-disabled
+    mode.
+
+#### TASK-199 - Stop the persisted BRD load effect from refetching its own diagram
+- Priority: P1
+- Status: Done
+- Module: brd-artifact-lifecycle
+- Problem: `PersistedBrdWorkspace` loads the source diagram in an effect that depends on the entire
+  mutable `workspace` context object. `loadDiagram()` updates parent state, recreates that object,
+  and restarts the effect indefinitely.
+- Why it matters: Opening a saved BRD floods the API with diagram requests and prevents the BRD
+  artifact from reaching a stable loaded state.
+- Implementation steps:
+  1. Add a failing integration test that mounts real `ProjectWorkspace` and
+     `PersistedBrdWorkspace` components with a mocked persistence API.
+  2. Assert a stable BRD deep link calls `getDiagram(useCaseId)` once and
+     `getBrd(diagramId)` once, including after `activeDiagram` and save-state updates.
+  3. Refactor the load effect to depend only on stable resource identity and stable load commands,
+     not the full workspace object.
+  4. Stabilize the relevant context commands with callbacks or expose a dedicated read service if
+     command identity cannot otherwise remain stable.
+  5. Keep cancellation/stale-response protection when navigating between different Use Cases.
+- Acceptance criteria:
+  - Opening a persisted BRD sends no repeated diagram requests.
+  - Diagram and BRD each load once for an unchanged deep link.
+  - Navigating to another BRD loads the new resources exactly once and ignores stale responses.
+  - Existing generate, edit and save behavior remains intact.
+- Dependencies: TASK-196
+- Verification: Focused Vitest integration regression, full `npm run test:ui-mock`, and browser/API
+  smoke confirming request count remains stable after the page settles.
+- Completion notes:
+  - Added a real `ProjectWorkspace` + `PersistedBrdWorkspace` integration regression that fails if
+    a stable BRD deep link calls Diagram or BRD persistence more than once.
+  - Stabilized `loadDiagram` and `loadBrd` with `useCallback`; the BRD load effect now depends on
+    those commands and the selected Use Case identity instead of the full mutable context object.
+  - Added a stale-response regression for switching between BRD resources.
+  - Focused lifecycle tests pass `11/11`, full UI tests pass `95/95`, and production build passes.
+  - Browser/API smoke was not run because no local UI or API server was available in this session.
+
+#### TASK-200 - Redesign persisted BRD artifact page as a reader-first document
+- Priority: P1
+- Status: Done
+- Module: brd-artifact-presentation
+- Problem: The persisted BRD route currently foregrounds `Structured Spec` JSON and a raw markdown
+  textarea. The actual BRD is not presented as a polished document, and the two-column layout can
+  leave a large empty gutter while debug JSON dominates the viewport.
+- Why it matters: A BRD artifact is a business document. If users see raw JSON/debug payload first,
+  they cannot review or present the generated BRD confidently even when generation succeeded.
+- Implementation steps:
+  1. Rework `PersistedBrdWorkspace` into a reader-first layout with a primary document surface at
+     the top of the artifact route.
+  2. Render `markdown_content` as styled document HTML/React elements instead of showing only a raw
+     textarea. Use a small local markdown renderer or a constrained parser; do not inject untrusted
+     HTML.
+  3. Keep editing available, but move it behind an `Edit markdown` mode, side-by-side editor, or
+     explicit disclosure so the default state remains read-focused.
+  4. Move `Structured Spec` into a collapsed `Debug / Structured Spec` disclosure or secondary tab,
+     and ensure long JSON lines wrap or scroll inside a bounded panel.
+  5. Improve responsive CSS so the first viewport contains the BRD title/summary/document content
+     without a large blank left column; use one-column layout when width is constrained.
+  6. Add clear document chrome: title, source use case/diagram, updated time, outdated badge,
+     generation source, warning count, and save/edit state.
+  7. Preserve existing generate, regenerate, save and dirty-state behavior.
+- Acceptance criteria:
+  - Opening a saved BRD shows rendered document content before debug JSON.
+  - `Structured Spec` is not visible by default in the primary viewport.
+  - Raw markdown editing remains possible and save behavior still works.
+  - Long structured-spec lines cannot overflow the page horizontally.
+  - Desktop and narrow/mobile layouts do not show the large empty gutter from the screenshot.
+  - The route still passes the request-count regression from `TASK-199`.
+- Dependencies: TASK-196, TASK-199
+- Verification: Focused `PersistedBrdWorkspace` tests, `ProjectWorkspace.brd` tests, full
+  `npm run test:ui-mock`, `npm run build`, and one browser or Playwright screenshot/regression on
+  the persisted BRD route confirming reader-first presentation.
+- Implementation notes:
+  - Added a constrained local markdown renderer and made the persisted BRD route show rendered
+    document content first, with title/source/save-state/warning chrome in the primary surface.
+  - Moved raw markdown editing behind an explicit `Chỉnh sửa markdown` mode and moved
+    `Structured Spec` into a collapsed disclosure with bounded overflow behavior.
+  - Updated BRD deep-link regressions so they assert the rendered document rather than the old
+    debug-first textarea view.
+  - Verification passed for focused BRD tests, `ProjectWorkspace.brd`, full UI tests `96/96`,
+    production build, and `git diff --check`. Browser screenshot/regression was not run in this
+    session because no local browser/app server path was exercised.
+
+### Next
+
+#### TASK-198 - Add persisted BRD flow regressions for “no popup” and left-tree visibility
+- Priority: P2
+- Status: Todo
+- Module: regression-coverage
+- Problem: Existing tests do not encode the intended product decision that BRD generation in the
+  persisted workspace should update the artifact flow without opening a sidecar popup.
+- Why it matters: Even if the UX is cleaned up once, it can regress back to the old overlay model
+  without tests catching it.
+- Implementation steps:
+  1. Add UI tests that assert `Generate BRD` does not open the side panel in persisted mode.
+  2. Add route/browser tests that confirm BRD appears in or updates through the left artifact tree.
+  3. Add backend/contract assertions that generation + save refreshes the BRD subtree as expected.
+- Acceptance criteria:
+  - A failing test appears if the persisted flow reintroduces the right-side BRD popup.
+  - Artifact-tree BRD visibility is covered in at least one browser-level regression.
+- Dependencies: TASK-196, TASK-197
+- Verification: `npm run test:ui-mock`, `npm run test:e2e-mock`.

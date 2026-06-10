@@ -333,16 +333,36 @@ def test_feature_resources_persist_latest_usecase_generation_metadata(
             params={"generation_preference": "deterministic"},
         )
         assert generated.status_code == 200
+        generated_payload = generated.json()
 
         feature_response = client.get(f"/api/feature-intents/{feature_id}", headers=headers)
         assert feature_response.status_code == 200
         feature_payload = feature_response.json()
+        assert feature_payload["latest_usecase_generation"] is None
+
+        save_use_cases = client.put(
+            f"/api/feature-intents/{feature_id}/use-cases",
+            headers=headers,
+            json={
+                "items": [
+                    {"id": None, "content": item}
+                    for item in generated_payload["result"]["use_cases"]
+                ],
+                "committed_generation_metadata": generated_payload["metadata"],
+            },
+        )
+        assert save_use_cases.status_code == 200
+
+        committed_feature_response = client.get(
+            f"/api/feature-intents/{feature_id}",
+            headers=headers,
+        )
+        assert committed_feature_response.status_code == 200
+        committed_feature_payload = committed_feature_response.json()
         assert (
-            feature_payload["latest_usecase_generation"]["generation_source"]
+            committed_feature_payload["latest_usecase_generation"]["generation_source"]
             == "deterministic_fallback"
         )
-        assert feature_payload["latest_usecase_generation"]["provider"] == "deterministic"
-        assert feature_payload["latest_usecase_generation"]["model"] == "spec-usecase-builder-v1"
 
         list_response = client.get(f"/api/specs/{spec_id}/feature-intents", headers=headers)
         assert list_response.status_code == 200
@@ -350,6 +370,10 @@ def test_feature_resources_persist_latest_usecase_generation_metadata(
         assert (
             listed_feature["latest_usecase_generation"]["generation_source"]
             == "deterministic_fallback"
+        )
+        assert listed_feature["latest_usecase_generation"]["provider"] == "deterministic"
+        assert (
+            listed_feature["latest_usecase_generation"]["model"] == "spec-usecase-builder-v1"
         )
     finally:
         clear_tables()

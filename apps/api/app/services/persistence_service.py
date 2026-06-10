@@ -273,7 +273,7 @@ def save_owned_use_cases(
     feature_id: UUID,
     payload: UseCaseBulkSave,
 ) -> list[UseCaseResource]:
-    require_feature(db, current_user, feature_id)
+    feature = require_feature(db, current_user, feature_id)
     existing_rows = db.scalars(
         select(UseCaseModel).where(UseCaseModel.feature_intent_id == feature_id)
     ).all()
@@ -313,6 +313,11 @@ def save_owned_use_cases(
         row.content = draft.model_dump(mode="json")
         row.review_status = draft.review_status
         result.append(row)
+    if payload.committed_generation_metadata is not None:
+        feature.latest_usecase_generation = payload.committed_generation_metadata.model_dump(
+            mode="json",
+            exclude_none=True,
+        )
     db.commit()
     for row in result:
         db.refresh(row)

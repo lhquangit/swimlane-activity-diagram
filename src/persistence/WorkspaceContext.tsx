@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 
-import type { BrdSpec, WarningItem } from '../brd/types';
+import type { BrdSpec, ResponseMetadata, WarningItem } from '../brd/types';
 import type { BrdWorkspaceCacheScope } from '../brd/cache';
 import type { GenerateResult, ResponseEnvelope } from '../brd/types';
 import type { LaneConfig } from '../lane-config';
@@ -46,6 +46,8 @@ export type WorkspacePersistence = {
   markDiagramDirty: (businessKey?: string | null) => void;
   markBrdDirty: (diagramId?: string | null) => void;
   markBrdLoaded: (diagramId: string) => void;
+  pendingUseCaseGenerationMetadata: ResponseMetadata | null;
+  pendingUseCaseGenerationRequestId: string | null;
   generateUseCases: (
     preference: UseCaseGenerationPreference,
   ) => Promise<WorkspaceGenerationResponse>;
@@ -53,6 +55,7 @@ export type WorkspacePersistence = {
     drafts: UseCaseDraft[],
     options?: {
       businessKeys?: string[];
+      generationMetadata?: ResponseMetadata | null;
       labelsByBusinessKey?: Record<string, string>;
     },
   ) => Promise<UseCaseResource[]>;

@@ -14,6 +14,7 @@
 - Backend `POST /api/brd/validate` và `POST /api/brd/generate` đang sẵn sàng (xem `docs/scope/architecture-brd-backend.md`).
 - `BRD_OPENROUTER_API_KEY` đã cấu hình ở backend; **frontend không cầm key**.
 - User chấp nhận policy privacy hiện tại (xem Section 14 của `docs/product/ai-brd-description-feature.md`).
+- Với persisted project workspace, Diagram nguồn đã được lưu thành artifact dưới Use Case.
  
 ## Bước thực hiện
  
@@ -23,7 +24,11 @@
    - tối thiểu 1 start + 1 end
    - mọi node activity / decision đều thuộc 1 lane
    - mọi edge có source + target hợp lệ
-4. Nếu validate sơ bộ fail → frontend mở panel BRD ở trạng thái `blocking`, hiển thị lỗi ngay trên UI, và **chưa gọi backend**.
+4. Nếu validate sơ bộ fail:
+   - standalone editor: frontend mở panel BRD ở trạng thái `blocking`, hiển thị lỗi ngay trên UI,
+     và **chưa gọi backend**.
+   - persisted workspace: frontend giữ user ở diagram route, hiển thị lỗi inline/status và **chưa
+     gọi backend**.
 5. Nếu pass, frontend normalize graph thành `DiagramSemanticRequest` (Section 9.1 của feature doc) và gọi `POST /api/brd/validate`.
 6. Backend chạy Step 1-3 của pipeline (Extract, Normalize, Validate) và trả:
    - `warnings[]` cấp deep semantic (cycle, decision unlabeled, sync-bar span thiếu, orphan note...)
@@ -35,18 +40,20 @@
    - Gọi model sinh `DiagramBRDSpec` (structured spec) theo schema cố định
    - Render BRD markdown từ structured spec
    - Post-check rule-based (actor lạ, step không trace được, decision bịa outcome)
-10. Frontend mở side panel với 3 tab:
-    - `Warnings` — bao gồm warnings + open questions + assumptions
-    - `Structured Spec` — JSON view, read-only
-    - `BRD Draft` — markdown editor, **có thể chỉnh sửa**
-11. User review, chỉnh sửa BRD markdown trực tiếp trong tab `BRD Draft` nếu cần.
-12. Frontend persist last BRD snapshot vào `localStorage` sau khi generate thành công và sau các lần user chỉnh draft.
-13. Nếu user đóng panel, user có thể bấm `Open last BRD draft` trên toolbar để mở lại snapshot đã cache mà không generate mới.
+10. Frontend hiển thị kết quả theo mode:
+    - standalone editor: mở side panel với 3 tab `Warnings`, `Structured Spec`, `BRD Draft`.
+    - persisted workspace: lưu BRD ngay vào artifact tree và route `/diagram/brd` trở thành surface
+      canonical để review/chỉnh sửa.
+11. User review, chỉnh sửa BRD markdown trực tiếp trong tab/persisted page `BRD Draft` nếu cần.
+12. Frontend persist last BRD snapshot vào `localStorage` cho standalone flow; persisted flow ưu
+    tiên artifact BRD đã lưu trên server.
+13. Nếu user đóng panel ở standalone flow, user có thể bấm `Open last BRD draft` trên toolbar để mở lại snapshot đã cache mà không generate mới.
 14. User bấm `Export markdown` để tải file `.md` reader-facing mặc định, hoặc `Copy` để copy vào clipboard.
  
 ## Kết quả mong đợi
  
-- Panel hiển thị BRD draft với đầy đủ 10 section của template Phase 1 (process overview → context / assumptions / open questions).
+- Standalone flow hiển thị BRD draft trong side panel; persisted flow hiển thị BRD như một artifact
+  riêng dưới Diagram trong left tree.
 - `Main workflow` được render theo format mở rộng cho từng bước, không chỉ là danh sách một dòng.
 - `Actors` có thể kèm responsibilities nếu hệ thống suy diễn đủ rõ từ diagram.
 - `Scope` mô tả trigger, điểm bắt đầu xử lý, điểm kết thúc chính, và phạm vi bao phủ.

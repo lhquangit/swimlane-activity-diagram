@@ -148,6 +148,7 @@ class UseCaseSaveItem(StrictBaseModel):
 
 class UseCaseBulkSave(StrictBaseModel):
     items: list[UseCaseSaveItem]
+    committed_generation_metadata: ResponseMetadata | None = None
 
     @model_validator(mode="after")
     def unique_keys(self) -> "UseCaseBulkSave":

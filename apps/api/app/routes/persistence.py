@@ -209,7 +209,7 @@ def generate_feature_use_cases(
     db: Session = Depends(get_db),
 ) -> object:
     feature = require_feature(db, current_user, feature_id)
-    envelope = generate_feature_use_case_envelope(feature, generation_preference, db)
+    envelope = generate_feature_use_case_envelope(feature, generation_preference)
     return json_response_from_envelope(envelope, 200)
 
 
@@ -312,7 +312,13 @@ def generate_saved_diagram_brd(
 ) -> object:
     diagram = require_diagram(db, current_user, diagram_id)
     payload = stored_generate_request(diagram, template)
-    return generate_brd(request, payload, "2026-05-31", idempotency_key)
+    return generate_brd(
+        request,
+        payload,
+        "2026-05-31",
+        idempotency_key,
+        fallback_on_provider_failure=True,
+    )
 
 
 @router.get("/diagrams/{diagram_id}/brd", response_model=BrdResource | None)
