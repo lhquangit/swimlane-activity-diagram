@@ -69,6 +69,23 @@ vi.mock('../usecases/PersistedUseCaseWorkspace', async () => {
   };
 });
 
+vi.mock('../brd/PersistedBrdWorkspace', async () => {
+  const { useWorkspacePersistence } = await import('../persistence/WorkspaceContext');
+  return {
+    default: function PersistedBrdWorkspaceProbe() {
+      const workspace = useWorkspacePersistence();
+      if (!workspace) return null;
+      return (
+        <div data-testid="brd-workspace-probe">
+          <span data-testid="active-feature">{workspace.activeFeature.id}</span>
+          <span data-testid="active-artifact">{workspace.selectedArtifact.kind}</span>
+          <span data-testid="brd-save-state">{workspace.brdSaveState}</span>
+        </div>
+      );
+    },
+  };
+});
+
 const project = {
   id: 'project-1',
   name: 'Demo project',
@@ -237,6 +254,10 @@ function renderWorkspace(
           path="/projects/:projectId/features/:featureId/use-cases/:useCaseId/diagram"
           element={<ProjectWorkspace routeKind="diagram" />}
         />
+        <Route
+          path="/projects/:projectId/features/:featureId/use-cases/:useCaseId/diagram/brd"
+          element={<ProjectWorkspace routeKind="brd" />}
+        />
       </Routes>
     </MemoryRouter>,
   );
@@ -245,6 +266,7 @@ function renderWorkspace(
 describe('ProjectWorkspace artifact-tree transitions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     api.getProjectArtifactTree.mockResolvedValue(tree);
     api.listFeatures.mockResolvedValue(features);
     api.listUseCases.mockImplementation((featureId: string) =>
@@ -273,6 +295,14 @@ describe('ProjectWorkspace artifact-tree transitions', () => {
 
     expect(await screen.findByTestId('usecase-workspace-probe')).toBeVisible();
     expect(screen.getByTestId('active-artifact')).toHaveTextContent('use-case');
+    expect(screen.queryByTestId('workspace-probe')).not.toBeInTheDocument();
+  });
+
+  it('renders the persisted brd workspace without mounting the canvas overlay on brd routes', async () => {
+    renderWorkspace('/projects/project-1/features/feature-1/use-cases/usecase-1/diagram/brd');
+
+    expect(await screen.findByTestId('brd-workspace-probe')).toBeVisible();
+    expect(screen.getByTestId('active-artifact')).toHaveTextContent('brd');
     expect(screen.queryByTestId('workspace-probe')).not.toBeInTheDocument();
   });
 
@@ -334,5 +364,23 @@ describe('ProjectWorkspace artifact-tree transitions', () => {
 
     fireEvent.change(targetUsers, { target: { value: 'Ban quản lý OCP2\n' } });
     expect(targetUsers).toHaveValue('Ban quản lý OCP2\n');
+  });
+
+  it('persists the collapsed artifact sidebar across workspace reloads', async () => {
+    const firstRender = renderWorkspace('/projects/project-1/features/feature-1/use-cases/usecase-1/diagram');
+    expect(await screen.findByTestId('workspace-probe')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Thu gọn thanh điều hướng artifact' }));
+
+    expect(window.localStorage.getItem('artifact-sidebar:collapsed')).toBe('true');
+    expect(screen.queryByRole('tree', { name: 'Cấu trúc project' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mở thanh điều hướng artifact' })).toBeVisible();
+
+    firstRender.unmount();
+
+    renderWorkspace('/projects/project-1/features/feature-1/use-cases/usecase-1/diagram');
+
+    expect(await screen.findByRole('button', { name: 'Mở thanh điều hướng artifact' })).toBeVisible();
+    expect(screen.queryByRole('tree', { name: 'Cấu trúc project' })).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from uuid import UUID
 
 from fastapi.testclient import TestClient
@@ -9,6 +10,8 @@ from app.auth import CurrentUser, require_current_user
 from app.db import get_session_factory
 from app.main import app
 from app.models import AppUser, BrdDoc, Diagram, FeatureIntentModel, Project, Spec, UseCaseModel
+from app.routes import brd_generate
+from app.providers.openrouter_provider import OpenRouterProviderError
 
 
 def clear_persistence_tables() -> None:
@@ -18,9 +21,7 @@ def clear_persistence_tables() -> None:
         db.commit()
 
 
-def test_latest_state_chain_and_owner_isolation(client: TestClient) -> None:
-    clear_persistence_tables()
-
+def create_persisted_chain(client: TestClient) -> tuple[str, str, str, str]:
     project = client.post(
         "/api/projects",
         json={"name": "V-PetSafe", "description": "Pet safety operations"},
@@ -123,12 +124,31 @@ def test_latest_state_chain_and_owner_isolation(client: TestClient) -> None:
     )
     assert saved_diagram.status_code == 200
     diagram_id = saved_diagram.json()["id"]
+    return project_id, feature_id, use_case_id, diagram_id
+
+
+def test_latest_state_chain_and_owner_isolation(client: TestClient, monkeypatch) -> None:
+    clear_persistence_tables()
+    monkeypatch.setattr(
+        brd_generate,
+        "settings",
+        SimpleNamespace(
+            provider="openrouter",
+            model_primary="openai/gpt-5.5",
+            openrouter_api_key="",
+        ),
+    )
+    project_id, _feature_id, use_case_id, diagram_id = create_persisted_chain(client)
 
     generated_brd = client.post(
         f"/api/diagrams/{diagram_id}/brd/generate",
         headers={"Idempotency-Key": "persistence-chain-test"},
     )
     assert generated_brd.status_code == 200
+    assert generated_brd.json()["metadata"]["generation_source"] == "deterministic_fallback"
+    assert (
+        generated_brd.json()["metadata"]["fallback_reason"] == "provider_unavailable_config"
+    )
     brd_result = generated_brd.json()["result"]
 
     saved_brd = client.put(
@@ -167,3 +187,36 @@ def test_latest_state_chain_and_owner_isolation(client: TestClient) -> None:
     finally:
         app.dependency_overrides.pop(require_current_user, None)
         clear_persistence_tables()
+
+
+def test_saved_brd_generation_falls_back_when_provider_request_fails(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    clear_persistence_tables()
+    monkeypatch.setattr(
+        brd_generate,
+        "settings",
+        SimpleNamespace(
+            provider="openrouter",
+            model_primary="openai/gpt-5.5",
+            openrouter_api_key="configured",
+        ),
+    )
+
+    class FailingProvider:
+        def generate_structured(self, *_args, **_kwargs):
+            raise OpenRouterProviderError("Transient provider issue.", retryable=True)
+
+    monkeypatch.setattr(brd_generate, "build_provider", lambda *_args, **_kwargs: FailingProvider())
+    _project_id, _feature_id, _use_case_id, diagram_id = create_persisted_chain(client)
+
+    generated_brd = client.post(
+        f"/api/diagrams/{diagram_id}/brd/generate",
+        headers={"Idempotency-Key": "provider-request-failed-test"},
+    )
+
+    assert generated_brd.status_code == 200
+    assert generated_brd.json()["metadata"]["generation_source"] == "deterministic_fallback"
+    assert generated_brd.json()["metadata"]["fallback_reason"] == "provider_request_failed"
+    clear_persistence_tables()

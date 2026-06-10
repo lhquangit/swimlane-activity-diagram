@@ -21,6 +21,48 @@ Severity:
 
 ---
 
+## [FIXED] Persisted BRD page ưu tiên JSON debug và không hiển thị như tài liệu đọc được (severity: P1) {#fixed-persisted-brd-presentation-debug-first}
+
+- **ID**: KI-43
+- **Phát hiện**: 2026-06-10 by Codex (user screenshot)
+- **Severity**: P1 — user mở BRD artifact nhưng thấy JSON `Structured Spec` chiếm phần chính, còn
+  nội dung BRD đọc được bị đẩy xuống/dạng raw textarea.
+- **Reproduction**:
+  1. Mở BRD artifact trong persisted workspace sau khi đã generate/lưu BRD.
+  2. Quan sát viewport đầu: các nút hành động ở trên, khoảng trắng lớn bên trái, `Structured Spec`
+     JSON chiếm cột phải, phần tài liệu BRD không phải nội dung chính.
+  3. Long JSON/code text có thể tràn ngang và làm page nhìn như debug view.
+- **Root cause**: `PersistedBrdWorkspace` render theo thứ tự metadata → `Structured Spec` → raw
+  textarea `BRD Markdown`; CSS dùng grid hai cột bằng nhau nên debug payload có cùng ưu tiên với
+  tài liệu business-facing.
+- **Fix**: Hoàn thành qua `TASK-200`: persisted BRD route giờ render markdown như tài liệu chính,
+  đưa raw markdown editing vào explicit edit mode, chuyển `Structured Spec` vào disclosure phụ có
+  overflow bounded, và thêm regressions cho deep-link/document-first presentation.
+- **Verified**: `npm run test:ui-mock` (`96/96`), `npm run build`, `git diff --check` on
+  2026-06-10. Browser screenshot/regression chưa chạy trong session này.
+
+---
+
+## [FIXED] Persisted BRD deep link lặp vô hạn request tải diagram (severity: P1) {#fixed-persisted-brd-repeat-diagram-fetch}
+
+- **ID**: KI-42
+- **Phát hiện**: 2026-06-10 by Codex (user report)
+- **Severity**: P1 — chặn user xem BRD đã lưu và tạo tải request liên tục lên API.
+- **Reproduction**:
+  1. Mở route BRD của một Use Case đã có Diagram.
+  2. Quan sát backend liên tục nhận `GET /api/use-cases/{use_case_id}/diagram`.
+  3. BRD page không ổn định ở trạng thái đã tải.
+- **Root cause**: Effect trong `PersistedBrdWorkspace` phụ thuộc toàn bộ object `workspace` nhưng
+  lại gọi `workspace.loadDiagram()`. Hàm này cập nhật `activeDiagram`, business key và save-state
+  registry trong `ProjectWorkspace`, làm `contextValue` đổi identity và kích hoạt lại effect.
+- **Fix**: `TASK-199` ổn định `loadDiagram`/`loadBrd` bằng `useCallback`, thu hẹp dependency của BRD
+  load effect theo command và resource identity, đồng thời giữ cancellation guard khi đổi Use Case.
+- **Verified**: 2026-06-10 by Codex — integration regression khóa đúng một request Diagram và một
+  request BRD cho deep link ổn định; stale response không ghi đè resource mới; full UI suite pass
+  `95/95`; production build pass. Browser/API smoke chưa chạy vì local servers không hoạt động.
+
+---
+
 ## [FIXED] Project Spec list textarea không giữ Space và Enter (severity: P1) {#fixed-project-spec-list-input-space-enter}
 
 - **ID**: KI-33
@@ -130,6 +172,33 @@ Severity:
 - **Root cause**: update `Feature Intent` chưa invalidate hoặc mark stale cho `latest_usecase_generation` đã commit.
 - **Fix**: Todo — `TASK-194` clear hoặc mark stale provenance khi Feature Intent thay đổi ở các field ảnh hưởng generation.
 - **Verified**: 2026-06-08 by Codex — `TASK-193` đã chặn nhánh unsaved-generate drift; stale-after-edit path vẫn còn mở.
+
+---
+
+## [FIXED] Persisted BRD generate depended on live provider availability and failed in local/test flow (severity: P1) {#fixed-persisted-brd-provider-fragility}
+
+- **ID**: KI-41
+- **Phát hiện**: 2026-06-09 by Codex (diagram screen + BRD flow review)
+- **Severity**: P1 — user có thể bấm `Generate BRD` trên diagram hợp lệ nhưng vẫn fail vì config/provider, và
+  local persistence-chain test không còn ổn định.
+- **Reproduction**:
+  1. Lưu một diagram hợp lệ trong persisted workspace.
+  2. Gọi `/api/diagrams/{id}/brd/generate` khi `BRD_PROVIDER` không phải `mock` và provider/key
+     không sẵn hoặc transport lỗi.
+  3. Route trả `503` nếu thiếu key, hoặc `502` nếu provider retryable fail.
+- **Root cause**: persisted BRD route chỉ proxy sang `generate_brd()` và route đó không có
+  local/test-safe fallback; thêm vào đó nhánh `provider_request_failed` ban đầu còn dereference
+  `traceable_node_ids` trước khi variable này được bind.
+- **Fix**:
+  1. Thêm deterministic fallback chỉ cho persisted route khi provider thiếu config hoặc request fail.
+  2. Giữ nguyên raw `/api/brd/generate` contract để route-level tests và operator signals không bị
+     mờ đi.
+  3. Bổ sung persistence-chain regressions cho cả `provider_unavailable_config` và
+     `provider_request_failed`.
+- **Verified**:
+  - 2026-06-09 by Codex — `PYTHONPATH=apps/api apps/api/.venv/bin/python -m pytest apps/api/tests/test_persistence_chain.py -q -vv` pass `2/2`.
+  - 2026-06-09 by Codex — browser verify persisted diagram route: `Generate BRD` returns success
+    status and BRD appears in the left artifact tree without opening a side panel.
 
 ---
 

@@ -98,4 +98,24 @@ describe('ArtifactTree', () => {
     fireEvent.keyDown(items[1], { key: 'End' });
     expect(items[items.length - 1]).toHaveFocus();
   });
+
+  it('renders a collapsed rail that can reopen the artifact tree', () => {
+    const onToggleSidebar = vi.fn();
+    render(
+      <ArtifactTree
+        tree={tree}
+        active={{ kind: 'spec' }}
+        onSelect={vi.fn()}
+        onCreateFeature={vi.fn()}
+        sidebarCollapsed
+        onToggleSidebar={onToggleSidebar}
+      />,
+    );
+
+    expect(screen.queryByRole('tree', { name: 'Cấu trúc project' })).not.toBeInTheDocument();
+    expect(screen.getByText('SD')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mở thanh điều hướng artifact' }));
+    expect(onToggleSidebar).toHaveBeenCalledTimes(1);
+  });
 });

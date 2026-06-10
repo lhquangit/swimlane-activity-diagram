@@ -40,6 +40,7 @@ def generate_brd(
     payload: GenerateRequest,
     x_schema_version: str | None = Header(default=None, alias="X-Schema-Version"),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    fallback_on_provider_failure: bool = False,
 ) -> object:
     request_id = f"req_{uuid4().hex[:12]}"
     if x_schema_version != SUPPORTED_SCHEMA_VERSION:
@@ -146,6 +147,20 @@ def generate_brd(
             return deterministic_spec_payload
 
         if settings.provider != "mock" and not settings.openrouter_api_key:
+            if fallback_on_provider_failure:
+                return deterministic_fallback_response(
+                    request_id=request_id,
+                    idempotency_key=idempotency_key,
+                    payload_hash=payload_hash,
+                    deterministic_spec_payload=deterministic_spec_payload,
+                    payload_template=payload.template,
+                    warnings=warnings,
+                    traceable_node_ids=interpreted["traceable_node_ids"],
+                    model_name=model_name,
+                    started_at=started_at,
+                    fallback_reason="provider_unavailable_config",
+                    generation_mode=settings.provider,
+                )
             envelope = ResponseEnvelope(
                 request_id=request_id,
                 status="failed",
@@ -168,6 +183,7 @@ def generate_brd(
 
         system_prompt = ""
         user_content = ""
+        traceable_node_ids = interpreted["traceable_node_ids"]
         if settings.provider != "mock":
             system_prompt, user_content = build_generation_prompts(
                 normalized.model_dump(mode="python"), interpreted
@@ -194,6 +210,23 @@ def generate_brd(
 
         if provider_error is not None or provider_result is None:
             exc = provider_error or OpenRouterProviderError("Unknown provider error.", retryable=False)
+            if fallback_on_provider_failure:
+                return deterministic_fallback_response(
+                    request_id=request_id,
+                    idempotency_key=idempotency_key,
+                    payload_hash=payload_hash,
+                    deterministic_spec_payload=deterministic_spec_payload,
+                    payload_template=payload.template,
+                    warnings=warnings,
+                    traceable_node_ids=traceable_node_ids,
+                    model_name=model_name,
+                    started_at=started_at,
+                    fallback_reason=(
+                        "provider_request_failed" if exc.retryable else "provider_unavailable_request"
+                    ),
+                    generation_mode=settings.provider,
+                    attempt_count=attempt_count,
+                )
             envelope = ResponseEnvelope(
                 request_id=request_id,
                 status="failed",
@@ -213,7 +246,6 @@ def generate_brd(
             )
             return json_response_from_envelope(envelope, 502 if exc.retryable else 503)
 
-        traceable_node_ids = interpreted["traceable_node_ids"]
         spec = harmonize_generated_spec(provider_result.output, deterministic_spec_payload)
         postcheck_warnings = postcheck_spec(spec, traceable_node_ids=traceable_node_ids)
         all_warnings = [*warnings, *postcheck_warnings]
@@ -248,3 +280,51 @@ def generate_brd(
     finally:
         if release_idempotency:
             idempotency_store.release(idempotency_key, payload_hash)
+
+
+def deterministic_fallback_response(
+    *,
+    request_id: str,
+    idempotency_key: str,
+    payload_hash: str,
+    deterministic_spec_payload: dict[str, object],
+    payload_template: str,
+    warnings: list,
+    traceable_node_ids: list[str],
+    model_name: str,
+    started_at: float,
+    fallback_reason: str,
+    generation_mode: str,
+    attempt_count: int = 0,
+) -> object:
+    spec = DiagramBRDSpec.model_validate(deterministic_spec_payload)
+    postcheck_warnings = postcheck_spec(spec, traceable_node_ids=traceable_node_ids)
+    all_warnings = [*warnings, *postcheck_warnings]
+    markdown = render_brd_markdown(spec, payload_template)
+    latency_ms = int((time.perf_counter() - started_at) * 1000)
+    envelope = ResponseEnvelope(
+        request_id=request_id,
+        status="completed",
+        idempotency_key=idempotency_key,
+        warnings=all_warnings,
+        result=GenerateResult(
+            spec=spec.model_dump(mode="json"),
+            brd_markdown=markdown,
+            draft_status="Draft",
+            review_status="Warnings present" if all_warnings else "No blocking warnings",
+        ).model_dump(mode="json"),
+        metadata=ResponseMetadata(
+            provider="deterministic",
+            model=spec.metadata.generator_version or model_name,
+            generation_source="deterministic_fallback",
+            generation_mode=generation_mode,
+            fallback_reason=fallback_reason,
+            attempt_count=attempt_count,
+            latency_ms=latency_ms,
+            cached=False,
+            first_request_at=utc_now(),
+        ),
+    )
+    body = envelope.model_dump(mode="json")
+    idempotency_store.complete(idempotency_key, payload_hash, 200, body)
+    return json_response_from_envelope(envelope, 200)

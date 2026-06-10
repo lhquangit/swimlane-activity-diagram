@@ -9,6 +9,8 @@ type ArtifactTreeProps = {
   active: ActiveArtifact;
   onSelect: (artifact: ActiveArtifact) => void;
   onCreateFeature: () => void;
+  sidebarCollapsed?: boolean;
+  onToggleSidebar?: () => void;
 };
 
 export default function ArtifactTree({
@@ -16,6 +18,8 @@ export default function ArtifactTree({
   active,
   onSelect,
   onCreateFeature,
+  sidebarCollapsed = false,
+  onToggleSidebar,
 }: ArtifactTreeProps) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const treeRef = useRef<HTMLDivElement>(null);
@@ -40,6 +44,25 @@ export default function ArtifactTree({
     items[nextIndex]?.focus();
   };
 
+  if (sidebarCollapsed) {
+    return (
+      <aside className="artifact-sidebar artifact-sidebar--collapsed">
+        <button
+          type="button"
+          className="artifact-sidebar__collapse-toggle"
+          onClick={onToggleSidebar}
+          aria-label="Mở thanh điều hướng artifact"
+          title="Mở thanh điều hướng artifact"
+        >
+          <span aria-hidden="true">{'>'}</span>
+        </button>
+        <div className="artifact-sidebar__rail-badge" aria-hidden="true">
+          {projectInitials(tree.project.name)}
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside className="artifact-sidebar">
       <div className="artifact-sidebar__header">
@@ -49,22 +72,36 @@ export default function ArtifactTree({
         </div>
         <button
           type="button"
-          className="artifact-tree__toggle"
-          onClick={() => toggle('project')}
-          aria-label={collapsed.project ? 'Mở cây project' : 'Thu gọn cây project'}
+          className="artifact-sidebar__collapse-toggle"
+          onClick={onToggleSidebar}
+          aria-label="Thu gọn thanh điều hướng artifact"
+          title="Thu gọn thanh điều hướng artifact"
         >
-          {collapsed.project ? '›' : '⌄'}
+          <span aria-hidden="true">{'<'}</span>
         </button>
       </div>
 
-      {!collapsed.project ? (
-        <div
-          ref={treeRef}
-          className="artifact-tree"
-          role="tree"
-          aria-label="Cấu trúc project"
-          onKeyDown={handleTreeKeyDown}
-        >
+      <div
+        ref={treeRef}
+        className="artifact-tree"
+        role="tree"
+        aria-label="Cấu trúc project"
+        onKeyDown={handleTreeKeyDown}
+      >
+        <div className="artifact-tree__branch-heading artifact-tree__branch-heading--project">
+          <button
+            type="button"
+            className="artifact-tree__toggle"
+            onClick={() => toggle('project')}
+            aria-expanded={!collapsed.project}
+            aria-label={collapsed.project ? 'Mở cây project' : 'Thu gọn cây project'}
+          >
+            {collapsed.project ? '>' : 'v'} Project
+          </button>
+        </div>
+
+        {!collapsed.project ? (
+          <>
           <TreeItem
             label="Project Spec"
             meta="Bối cảnh dự án"
@@ -225,10 +262,20 @@ export default function ArtifactTree({
               </div>
             ) : null}
           </div>
-        </div>
-      ) : null}
+          </>
+        ) : null}
+      </div>
     </aside>
   );
+}
+
+function projectInitials(projectName: string) {
+  return projectName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase() ?? '')
+    .join('');
 }
 
 function TreeItem({

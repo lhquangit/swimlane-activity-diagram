@@ -2,6 +2,51 @@
 
 ## Task Summary
 
+- Task: Implement `TASK-199`
+- Requested by: User
+- Date: 2026-06-10
+- Affected modules: persisted BRD lifecycle, workspace persistence context, frontend integration
+  tests
+
+## Goal Reconstruction
+
+- Requested change: Stop the BRD deep link from repeatedly fetching its source Diagram.
+- Intended outcome: An unchanged BRD route loads Diagram and BRD once, while navigation still
+  cancels stale responses.
+- Hidden assumption: The persistence API contract remains unchanged; the defect is caused by React
+  context identity, not backend polling.
+
+## Risk Assessment
+
+- Decision: IMPLEMENT_WITH_GUARDRAILS
+- Risk level: Medium
+- Main concerns: stale closures after stabilizing callbacks, losing cancellation behavior, and
+  tests that mock away the parent-child lifecycle.
+- Guardrails: keep the API contract unchanged, stabilize only the two read commands, mount the real
+  BRD component under the real workspace in regression coverage, and explicitly test stale response
+  handling.
+
+## Execution And Verification
+
+- Implemented stable `loadDiagram` and `loadBrd` callbacks in `ProjectWorkspace`.
+- Narrowed the BRD load effect dependencies to stable commands and Use Case identity.
+- Added integration request-count coverage and resource-switch stale-response coverage.
+- Verification:
+  - Focused lifecycle tests: `11/11`.
+  - Full UI suite: `95/95`.
+  - Production build: passed with the existing large-chunk warning.
+  - Browser/API smoke: not run because ports `5173` and `8000` had no running servers.
+
+## Final Recommendation
+
+- `TASK-199` is complete locally.
+- Keep the new integration test as the canonical regression because isolated component tests do not
+  reproduce context identity feedback loops.
+
+---
+
+## Task Summary
+
 - Task: Implement `TASK-129` through `TASK-147`
 - Requested by: User
 - Date: 2026-06-07

@@ -2255,8 +2255,12 @@ export default function App({ seed }: { seed?: AppSeed }) {
       lastIdempotencyKey;
     const idempotencyKey = shouldReuseIdempotencyKey ? lastIdempotencyKey! : makeIdempotencyKey();
 
-    setBrdPanelOpen(true);
-    setUseCasePanelOpen(false);
+    if (workspace) {
+      setBrdPanelOpen(false);
+    } else {
+      setBrdPanelOpen(true);
+      setUseCasePanelOpen(false);
+    }
     setBrdPhase('validating');
     setBrdTab('warnings');
     setBrdError(null);
@@ -2289,6 +2293,7 @@ export default function App({ seed }: { seed?: AppSeed }) {
         }
         setBrdPhase('generating');
         setBrdRuntimeStatus('generating');
+        setStatus('Đang sinh BRD từ diagram đã lưu…');
         const payload = await workspace.generateBrd(
           workspace.activeDiagram.id,
           idempotencyKey,
@@ -2312,8 +2317,36 @@ export default function App({ seed }: { seed?: AppSeed }) {
         setLastGeneratedRevision(diagramRevision);
         setLastIdempotencyKey(idempotencyKey);
         setLastGenerateFingerprint(requestFingerprint);
-        workspace.markBrdDirty(workspace.activeDiagram.id);
-        setStatus('Đã sinh BRD draft từ diagram đã lưu.');
+        try {
+          await workspace.saveBrd(workspace.activeDiagram.id, {
+            title:
+              payload.result.spec.metadata.diagram_name || 'Business Requirements Document',
+            structured_spec: payload.result.spec,
+            markdown_content: payload.result.brd_markdown,
+            warnings: payload.warnings,
+            template: 'default',
+          });
+          clearBrdWorkspaceCache(workspace.brdCacheScope);
+          setPendingServerBrd(null);
+          setBrdPanelOpen(false);
+          setStatus('Đã sinh và lưu BRD vào artifact tree.');
+        } catch (saveError) {
+          workspace.markBrdDirty(workspace.activeDiagram.id);
+          setBrdError({
+            code: 'PERSISTED_BRD_SAVE_FAILED',
+            message:
+              saveError instanceof Error
+                ? `${saveError.message} BRD draft chưa lưu đã được giữ lại trong session.`
+                : 'Không thể lưu BRD vừa sinh. BRD draft chưa lưu đã được giữ lại trong session.',
+            retryable: true,
+            related_node_ids: [],
+          });
+          setStatus(
+            saveError instanceof Error
+              ? saveError.message
+              : 'Không thể lưu BRD vừa sinh vào artifact tree.',
+          );
+        }
         return;
       }
 

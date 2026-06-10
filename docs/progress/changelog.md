@@ -5,6 +5,13 @@
 ## [Unreleased]
 
 ### Added
+- **Persisted BRD artifact page + no-popup workspace flow**: persisted `brd` routes now open a
+  dedicated `PersistedBrdWorkspace` page instead of the legacy canvas sidecar, and `Generate BRD`
+  from the persisted diagram toolbar now saves directly into the left artifact tree without opening
+  the right-side popup. Added route/component regressions for the new surface. Xem
+  `src/brd/PersistedBrdWorkspace.tsx`, `src/brd/PersistedBrdWorkspace.test.tsx`,
+  `src/application/ProjectWorkspace.tsx`, `src/application/ProjectWorkspace.test.tsx`,
+  `src/App.tsx`, `src/styles.css`.
 - **Persisted use-case generation provenance on Feature Intent**: latest use-case generation
   metadata now persists on the feature itself and is surfaced in the persisted Use Case list/editor
   routes so reviewers can see `AI` vs `deterministic_fallback`, provider/model, rollout mode, and
@@ -47,6 +54,11 @@
   succeeds. Xem `apps/api/app/{routes/persistence.py,schemas/persistence.py,services/persistence_generation.py,services/persistence_service.py}`,
   `apps/api/tests/test_persistence_auth_matrix.py`,
   `src/{application/ProjectWorkspace.tsx,persistence/WorkspaceContext.tsx,persistence/api.ts,usecases/PersistedUseCaseWorkspace.tsx,usecases/PersistedUseCaseWorkspace.test.tsx,styles.css}`.
+- **Artifact sidebar can now collapse into a slim rail while editing diagrams**: the persisted
+  workspace shell now lets users collapse the left artifact tree into a remembered narrow rail so
+  the diagram canvas can claim more horizontal space, with a one-click restore path and regression
+  coverage for the remembered state. Xem
+  `src/{application/ArtifactTree.tsx,application/ArtifactTree.test.tsx,application/ProjectWorkspace.tsx,application/ProjectWorkspace.test.tsx,styles.css}`.
 - **Persisted artifact tree workspace**: added one owned metadata-only artifact-tree API, canonical
   deep-links for Spec/Feature/Use Case/Diagram/BRD, an accessible collapsible left tree, lazy
   Diagram/BRD hydration, real empty/loading/error states, and guarded node transitions. A full
@@ -90,6 +102,26 @@
   `src/application/AppRouter.tsx`, `playwright.config.ts`.
 
 ### Fixed
+- **Persisted BRD reader-first presentation**: saved BRD artifacts no longer open into a debug-first
+  view with raw JSON and textarea dominating the first viewport. The route now renders a styled
+  BRD document surface, keeps markdown editing behind an explicit toggle, collapses
+  `Structured Spec` into a bounded disclosure, and updates deep-link regressions to assert the
+  rendered document experience. Xem `src/brd/PersistedBrdWorkspace.tsx`,
+  `src/brd/markdown.tsx`, `src/brd/PersistedBrdWorkspace.test.tsx`,
+  `src/application/ProjectWorkspace.brd.test.tsx`, `src/styles.css`.
+- **Persisted BRD repeat-fetch loop**: opening a saved BRD no longer recreates its own load effect
+  after the source Diagram updates workspace state. Diagram/BRD load commands now keep stable
+  identities, the effect keys off the selected Use Case, and stale responses are ignored when users
+  switch artifacts. Added a real workspace integration regression that locks one Diagram request
+  and one BRD request per stable deep link. Xem `src/application/ProjectWorkspace.tsx`,
+  `src/application/ProjectWorkspace.brd.test.tsx`, `src/brd/PersistedBrdWorkspace.tsx`,
+  `src/brd/PersistedBrdWorkspace.test.tsx`.
+- **Persisted BRD generation fallback contract**: persisted `/api/diagrams/{id}/brd/generate` no
+  longer fails hard in local/dev when provider config is missing or a provider request errors; the
+  route now falls back to deterministic BRD generation and keeps raw `/api/brd/generate` failure
+  semantics intact. Also fixed a runtime `UnboundLocalError` in the provider-failure fallback path.
+  Xem `apps/api/app/routes/{brd_generate,persistence}.py`,
+  `apps/api/tests/test_persistence_chain.py`.
 - **Persisted Use Case deep-link hydration state**: direct `Feature -> Use Case` routes no longer
   flash the missing-editor error while feature resources are still hydrating from persistence; the
   workspace now keeps a truthful loading state until the feature inventory is ready. Xem
