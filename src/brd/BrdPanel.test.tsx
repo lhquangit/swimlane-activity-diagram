@@ -78,15 +78,18 @@ function BrdPanelHarness({ onLoadServerVersion = null }: { onLoadServerVersion?:
 }
 
 describe('BrdPanel', () => {
-  it('renders warnings, spec, and editable draft tabs', () => {
+  it('renders user-facing warnings and editable draft tabs without telemetry or raw spec payloads', () => {
     render(<BrdPanelHarness />);
 
     expect(screen.getByText('AI BRD Draft')).toBeInTheDocument();
     expect(screen.getByText('Outdated')).toBeInTheDocument();
     expect(screen.getByText('DECISION_UNLABELED')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Structured Spec' }));
-    expect(screen.getByText(/Demo summary/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Structured Spec' })).not.toBeInTheDocument();
+    expect(screen.queryByText('req_demo_001')).not.toBeInTheDocument();
+    expect(screen.queryByText('openai/gpt-5.5')).not.toBeInTheDocument();
+    expect(screen.queryByText('850 ms')).not.toBeInTheDocument();
+    expect(screen.queryByText('~ $0.01')).not.toBeInTheDocument();
+    expect(screen.queryByText('n-dec1')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'BRD Draft' }));
     const textarea = screen.getByPlaceholderText(

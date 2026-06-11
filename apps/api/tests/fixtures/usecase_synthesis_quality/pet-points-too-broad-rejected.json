@@ -1,0 +1,65 @@
+{
+  "feature_intent": {
+    "feature_name": "Tích điểm cho thú cưng",
+    "feature_summary": "Mỗi tháng mỗi thú cưng được 100 điểm, khi vi phạm thì bị trừ điểm và ban quản lý cần theo dõi kết quả.",
+    "actors": ["Cư dân", "V-App", "Ban quản lý", "Portal"],
+    "primary_actor": "Ban quản lý",
+    "trigger": "Ban quản lý ghi nhận một vi phạm liên quan đến thú cưng của cư dân.",
+    "inputs": ["Biên bản vi phạm", "Điểm hiện tại của thú cưng"],
+    "outputs": ["Điểm sau cập nhật", "Trạng thái theo dõi vi phạm"],
+    "constraints": ["Điểm không được nhỏ hơn 0", "Mỗi vi phạm chỉ được trừ điểm một lần"],
+    "success_outcome": "Điểm của thú cưng được cập nhật và trạng thái theo dõi phản ánh đúng mức vi phạm."
+  },
+  "synthesis": {
+    "use_cases": [
+      {
+        "title": "Ban quản lý thực hiện xử lý chính cho điểm thú cưng",
+        "objective": "Phối hợp actor và hệ thống để hoàn tất nghiệp vụ tích điểm.",
+        "primary_actor": "Ban quản lý",
+        "supporting_actors": ["V-App", "Portal"],
+        "preconditions": ["Có phát sinh dữ liệu điểm thú cưng."],
+        "main_flow_steps": [
+          {
+            "actor": "Ban quản lý",
+            "action": "Hệ thống xử lý yêu cầu",
+            "input_or_trigger": "Biên bản vi phạm",
+            "expected_result": "Có kết quả tạm thời.",
+            "evidence_refs": ["feature.inputs.0"]
+          },
+          {
+            "actor": "V-App",
+            "action": "Cập nhật kết quả phù hợp",
+            "input_or_trigger": "Điểm hiện tại của thú cưng",
+            "expected_result": "Thông tin được cập nhật.",
+            "evidence_refs": ["feature.outputs.0"]
+          }
+        ],
+        "alternate_flows": [
+          {
+            "source_step_number": 2,
+            "condition": "Có ngoại lệ.",
+            "steps": [
+              {
+                "actor": "Portal",
+                "action": "Ghi nhận và xử lý ngoại lệ theo quy trình",
+                "input_or_trigger": null,
+                "expected_result": "Ngoại lệ được đóng.",
+                "evidence_refs": ["feature.constraints.0"]
+              }
+            ],
+            "rejoin_step_number": null,
+            "terminal_outcome": "Nghiệp vụ kết thúc.",
+            "evidence_refs": ["feature.constraints.0"]
+          }
+        ],
+        "success_outcome": "Điểm được cập nhật.",
+        "evidence_refs": ["feature.feature_summary", "feature.success_outcome"]
+      }
+    ]
+  },
+  "expected_issue_codes": [
+    "GENERIC_USE_CASE_BOUNDARY",
+    "GENERIC_OUTPUT"
+  ],
+  "offending_use_case_title": "Ban quản lý thực hiện xử lý chính cho điểm thú cưng"
+}

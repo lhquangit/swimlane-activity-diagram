@@ -12,22 +12,37 @@ from app.config import Settings
 from app.schemas.common import ResponseMetadata, WarningItem
 from app.schemas.usecase import FeatureIntent, ProjectSpec, UseCaseDraft
 
-from .deterministic_builder import generate_use_case_drafts
 from .grounding import build_grounding_catalog, validate_grounding
 from .hydrator import hydrate_synthesis
 from .quality import QualityResult, evaluate_synthesis
+from .runtime import normalize_usecase_generation_mode, usecase_ai_provider_available
 from .synthesis_schema import UseCaseSynthesisResult
 
 
 ProviderFactory = Callable[[str, Settings], LLMProvider]
-VALID_MODES = {"deterministic", "ai_shadow", "ai_opt_in", "ai_default"}
-
-
 @dataclass(frozen=True)
 class GenerationOutcome:
     use_cases: list[UseCaseDraft]
     metadata: ResponseMetadata
     warnings: list[WarningItem]
+
+
+class UseCaseGenerationFailure(Exception):
+    def __init__(
+        self,
+        *,
+        code: str,
+        message: str,
+        retryable: bool,
+        status_code: int,
+        metadata: ResponseMetadata,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.status_code = status_code
+        self.metadata = metadata
 
 
 class UseCaseGenerationService:
@@ -47,23 +62,28 @@ class UseCaseGenerationService:
         self,
         project_spec: ProjectSpec,
         feature_intent: FeatureIntent,
-        preference: str = "auto",
+        preference: str = "ai",
     ) -> GenerationOutcome:
         started_at = perf_counter()
-        mode = (
-            self._settings.usecase_generation_mode
-            if self._settings.usecase_generation_mode in VALID_MODES
-            else "deterministic"
-        )
-        should_attempt_ai = _should_attempt_ai(mode, preference)
-        if not should_attempt_ai:
-            reason = (
-                "user_selected_rule"
-                if preference == "deterministic"
-                else "ai_not_enabled"
+        mode = normalize_usecase_generation_mode(self._settings.usecase_generation_mode)
+        if preference != "ai":
+            raise self._failure(
+                code="USECASE_AI_ONLY_AUTHORING",
+                message="Sinh Use Case hiện chỉ hỗ trợ AI authoring.",
+                retryable=False,
+                status_code=422,
+                mode=mode,
+                started_at=started_at,
             )
-            return self._fallback(
-                project_spec, feature_intent, mode, reason, started_at
+        should_attempt_ai = _should_attempt_ai(mode)
+        if not should_attempt_ai:
+            raise self._failure(
+                code="USECASE_AI_UNAVAILABLE",
+                message="AI authoring cho Use Case hiện không khả dụng ở môi trường này.",
+                retryable=False,
+                status_code=503,
+                mode=mode,
+                started_at=started_at,
             )
 
         prompt = get_prompt(
@@ -85,28 +105,27 @@ class UseCaseGenerationService:
             }
         )
         provider_name = self._settings.usecase_provider
-        if provider_name != "mock" and not (
-            self._settings.ai_openrouter_api_key
-            or self._settings.openrouter_api_key
-        ):
-            return self._fallback(
-                project_spec,
-                feature_intent,
-                mode,
-                "provider_unavailable",
-                started_at,
+        if provider_name != "mock" and not usecase_ai_provider_available(self._settings):
+            raise self._failure(
+                code="USECASE_AI_UNAVAILABLE",
+                message="AI provider cho Use Case chưa được cấu hình sẵn sàng.",
+                retryable=False,
+                status_code=503,
+                mode=mode,
+                started_at=started_at,
                 prompt=prompt,
             )
 
         try:
             provider = self._provider_factory(provider_name, self._settings)
         except (ValueError, OpenRouterProviderError):
-            return self._fallback(
-                project_spec,
-                feature_intent,
-                mode,
-                "provider_unavailable",
-                started_at,
+            raise self._failure(
+                code="USECASE_AI_UNAVAILABLE",
+                message="Không thể khởi tạo AI provider cho Use Case.",
+                retryable=False,
+                status_code=503,
+                mode=mode,
+                started_at=started_at,
                 prompt=prompt,
             )
 
@@ -150,41 +169,23 @@ class UseCaseGenerationService:
                     synthesis, project_spec, feature_intent
                 )
             except OpenRouterProviderError as exc:
-                validation_codes = [
-                    "PROVIDER_RETRYABLE" if exc.retryable else "PROVIDER_UNAVAILABLE"
-                ]
                 if not exc.retryable:
-                    break
+                    raise self._failure(
+                        code="USECASE_AI_PROVIDER_FAILURE",
+                        message=f"AI provider từ chối yêu cầu sinh Use Case: {exc}",
+                        retryable=False,
+                        status_code=502,
+                        mode=mode,
+                        started_at=started_at,
+                        prompt=prompt,
+                        attempt_count=attempt,
+                        usage=provider_usage,
+                    ) from exc
+                validation_codes = ["PROVIDER_RETRYABLE"]
                 continue
             except (TypeError, ValueError) as exc:
                 validation_codes = [exc.__class__.__name__.upper()]
                 continue
-
-            if mode == "ai_shadow":
-                record_generation_event(
-                    "shadow_success",
-                    capability="usecase_synthesis",
-                    provider=provider_name,
-                    model=self._settings.usecase_model,
-                    prompt_id=prompt.prompt_id,
-                    prompt_version=prompt.version,
-                    source="deterministic_fallback",
-                    quality_status="passed",
-                    attempt_count=attempt,
-                    use_case_count=len(use_cases),
-                )
-                return self._fallback(
-                    project_spec,
-                    feature_intent,
-                    mode,
-                    "shadow_mode",
-                    started_at,
-                    prompt=prompt,
-                    attempt_count=attempt,
-                    usage=provider_usage,
-                    shadow_status="passed",
-                    quality_result=quality_result,
-                )
 
             metadata = ResponseMetadata(
                 capability="usecase_synthesis",
@@ -218,58 +219,57 @@ class UseCaseGenerationService:
             )
             return GenerationOutcome(use_cases=use_cases, metadata=metadata, warnings=[])
 
-        fallback_reason = (
-            "quality_rejected"
-            if any(
-                code
-                not in {"PROVIDER_RETRYABLE", "PROVIDER_UNAVAILABLE"}
-                for code in validation_codes
+        if any(code != "PROVIDER_RETRYABLE" for code in validation_codes):
+            raise self._failure(
+                code="USECASE_AI_OUTPUT_REJECTED",
+                message="AI đã trả về Use Case không đạt grounding hoặc quality gate.",
+                retryable=True,
+                status_code=422,
+                mode=mode,
+                started_at=started_at,
+                prompt=prompt,
+                attempt_count=self._settings.usecase_max_attempts,
+                usage=provider_usage,
+                quality_result=quality_result,
             )
-            else "provider_failure"
-        )
-        return self._fallback(
-            project_spec,
-            feature_intent,
-            mode,
-            fallback_reason,
-            started_at,
+        raise self._failure(
+            code="USECASE_AI_PROVIDER_FAILURE",
+            message="AI provider tạm thời không khả dụng cho Use Case.",
+            retryable=True,
+            status_code=502,
+            mode=mode,
+            started_at=started_at,
             prompt=prompt,
             attempt_count=self._settings.usecase_max_attempts,
             usage=provider_usage,
-            shadow_status="rejected" if mode == "ai_shadow" else None,
-            quality_result=quality_result,
         )
 
-    def _fallback(
+    def _failure(
         self,
-        project_spec: ProjectSpec,
-        feature_intent: FeatureIntent,
-        mode: str,
-        reason: str,
-        started_at: float,
         *,
+        code: str,
+        message: str,
+        retryable: bool,
+        status_code: int,
+        mode: str,
+        started_at: float,
         prompt=None,
         attempt_count: int = 0,
         usage: ProviderUsage | None = None,
-        shadow_status: str | None = None,
         quality_result: QualityResult | None = None,
-    ) -> GenerationOutcome:
-        use_cases = generate_use_case_drafts(project_spec, feature_intent)
+    ) -> UseCaseGenerationFailure:
         usage = usage or ProviderUsage()
-        attempted_ai = prompt is not None
         metadata = ResponseMetadata(
             capability="usecase_synthesis",
-            provider=self._settings.usecase_provider if attempted_ai else "deterministic",
-            model=self._settings.usecase_model if attempted_ai else "spec-usecase-builder-v1",
-            generation_source="deterministic_fallback",
+            provider=self._settings.usecase_provider,
+            model=self._settings.usecase_model,
             generation_mode=mode,
-            fallback_reason=reason,
+            fallback_reason=code,
             prompt_id=prompt.prompt_id if prompt else None,
             prompt_version=prompt.version if prompt else None,
             prompt_fingerprint=prompt.fingerprint if prompt else None,
             quality_status=quality_result.status if quality_result else "not_run",
             quality_score=quality_result.score if quality_result else None,
-            shadow_status=shadow_status,
             attempt_count=attempt_count,
             latency_ms=int((perf_counter() - started_at) * 1000),
             estimated_cost_usd=usage.estimated_cost_usd,
@@ -284,28 +284,23 @@ class UseCaseGenerationService:
             model=metadata.model,
             prompt_id=metadata.prompt_id,
             prompt_version=metadata.prompt_version,
-            source="deterministic_fallback",
+            source="failed",
             quality_status=metadata.quality_status,
-            fallback_reason=reason,
+            fallback_reason=code,
             attempt_count=attempt_count,
-            use_case_count=len(use_cases),
+            use_case_count=0,
         )
-        warning = WarningItem(
-            code="USECASE_DETERMINISTIC_FALLBACK",
-            severity="info" if reason in {"ai_not_enabled", "user_selected_rule"} else "warning",
-            message=_fallback_message(reason),
-        )
-        return GenerationOutcome(
-            use_cases=use_cases, metadata=metadata, warnings=[warning]
+        return UseCaseGenerationFailure(
+            code=code,
+            message=message,
+            retryable=retryable,
+            status_code=status_code,
+            metadata=metadata,
         )
 
 
-def _should_attempt_ai(mode: str, preference: str) -> bool:
-    if preference == "deterministic" or mode == "deterministic":
-        return False
-    if mode == "ai_opt_in":
-        return preference == "ai"
-    return mode in {"ai_shadow", "ai_default"}
+def _should_attempt_ai(mode: str) -> bool:
+    return mode in {"ai_opt_in", "ai_default"}
 
 
 def _append_validation_feedback(user_content: str, validation_codes: list[str]) -> str:
@@ -323,15 +318,3 @@ def _append_validation_feedback(user_content: str, validation_codes: list[str]) 
             sort_keys=True,
         )
     )
-
-
-def _fallback_message(reason: str) -> str:
-    if reason == "user_selected_rule":
-        return "Đã tạo bản nháp theo rule như lựa chọn của bạn."
-    if reason == "ai_not_enabled":
-        return "AI chưa được bật cho môi trường này; bản nháp được tạo theo rule."
-    if reason == "shadow_mode":
-        return "AI đang chạy ở chế độ đánh giá nền; bản nháp hiển thị vẫn được tạo theo rule."
-    if reason == "quality_rejected":
-        return "Kết quả AI không qua quality gate; hệ thống đã dùng bản nháp theo rule."
-    return "AI tạm thời không khả dụng; hệ thống đã dùng bản nháp theo rule."

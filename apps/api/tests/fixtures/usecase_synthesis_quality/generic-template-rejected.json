@@ -1,0 +1,68 @@
+{
+  "feature_intent": {
+    "feature_name": "Cấp phát GPS Device",
+    "feature_summary": "Xử lý yêu cầu cấp phát và lắp đặt GPS cho thú nuôi.",
+    "actors": ["Ban quản lý", "Portal", "V-app"],
+    "primary_actor": "Ban quản lý",
+    "trigger": "Có yêu cầu đăng ký GPS hợp lệ từ cư dân.",
+    "inputs": ["Yêu cầu GPS", "Danh sách GPS Device trong kho"],
+    "outputs": ["Trạng thái yêu cầu", "Trạng thái GPS Device", "Thông báo cư dân"],
+    "constraints": ["Thiết bị phải ở trạng thái Trong kho trước khi giữ chỗ."],
+    "assumptions": ["Portal là hệ thống thao tác chính của BQL."],
+    "systems_involved": ["Portal", "V-app"],
+    "success_outcome": "Yêu cầu GPS được cấp phát thành công và cư dân nhận được thông báo."
+  },
+  "expected_issue_codes": [
+    "GENERIC_USE_CASE_BOUNDARY",
+    "MISSING_INPUT_TRACE",
+    "MISSING_OUTPUT_TRACE",
+    "MISSING_CONSTRAINT_TRACE"
+  ],
+  "synthesis": {
+    "use_cases": [
+      {
+        "title": "Ban quản lý thực hiện xử lý chính cho Cấp phát GPS Device",
+        "objective": "Thực thi nghiệp vụ cốt lõi của cấp phát gps device.",
+        "primary_actor": "Ban quản lý",
+        "supporting_actors": ["Portal", "V-app"],
+        "preconditions": ["Đã có yêu cầu hợp lệ."],
+        "main_flow_steps": [
+          {
+            "actor": "Ban quản lý",
+            "action": "Mở thông tin chi tiết cần xử lý cho cấp phát gps device.",
+            "input_or_trigger": null,
+            "expected_result": "Hoàn tất bước mở thông tin chi tiết cần xử lý.",
+            "evidence_refs": ["feature.feature_summary"]
+          },
+          {
+            "actor": "Ban quản lý",
+            "action": "Thực hiện các hành động nghiệp vụ chính theo intent đã mô tả.",
+            "input_or_trigger": null,
+            "expected_result": "Hoàn tất bước thực hiện các hành động nghiệp vụ chính.",
+            "evidence_refs": ["feature.feature_summary"]
+          }
+        ],
+        "alternate_flows": [
+          {
+            "source_step_number": 2,
+            "condition": "Dữ liệu cần xử lý không còn hợp lệ tại thời điểm thực hiện.",
+            "steps": [
+              {
+                "actor": "Ban quản lý",
+                "action": "Ghi nhận và xử lý ngoại lệ theo quy trình.",
+                "input_or_trigger": null,
+                "expected_result": "Ngoại lệ được xử lý với trạng thái và lý do rõ ràng.",
+                "evidence_refs": ["feature.feature_summary"]
+              }
+            ],
+            "rejoin_step_number": null,
+            "terminal_outcome": "Ngoại lệ được khép lại.",
+            "evidence_refs": ["feature.feature_summary"]
+          }
+        ],
+        "success_outcome": "Nghiệp vụ được hoàn tất.",
+        "evidence_refs": ["feature.feature_summary"]
+      }
+    ]
+  }
+}

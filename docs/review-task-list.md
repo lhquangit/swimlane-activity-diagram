@@ -5052,3 +5052,758 @@ Review snapshot:
   - Active deep-link paths now auto-expand their parent feature/use-case branches so the selected
     artifact stays visible in the tree.
   - The use-case row layout was hardened to separate disclosure, selection, and actions cleanly.
+
+#### TASK-207 - Remove duplicated persisted-workspace navigation buttons that the left tree already owns
+- Priority: P1
+- Status: Done (2026-06-11)
+- Module: persisted-workspace-navigation-simplification
+- Problem: Persisted workspace screens still render local navigation buttons for destinations that
+  are already directly available in the left artifact tree, including sibling and parent artifacts.
+- Why it matters: Duplicate navigation makes the screen denser than necessary and weakens the left
+  tree as the canonical navigator for persisted artifacts.
+- Implementation steps:
+  1. Audit Feature, Use Case, Diagram, and BRD persisted routes for buttons whose only purpose is
+     to jump to another artifact already represented in the left tree.
+  2. Remove route-local navigation buttons such as `Use Cases`, `Về Use Cases`, `Về Diagram`,
+     `Mở diagram`, and similar sibling/parent jumps where the left tree already owns navigation.
+  3. Keep only current-artifact actions such as save, generate, export, or destructive actions that
+     mutate the artifact being viewed.
+  4. Add focused regressions that assert persisted routes still rely on the left tree for
+     cross-artifact navigation instead of local duplicate controls.
+- Acceptance criteria:
+  - Persisted workspace routes no longer show duplicate parent/sibling navigation buttons when the
+    left tree already exposes the same destination.
+  - Current-artifact actions remain available and discoverable.
+  - Regression coverage exists for the simplified persisted navigation surfaces.
+- Dependencies: TASK-205 and TASK-206 strengthened the left tree and are effectively prerequisites.
+- Verification: focused UI tests for persisted workspace routes and one manual/browser pass through
+  Feature, Use Case, Diagram, and BRD deep links.
+- Implementation notes:
+  - Removed duplicated route-local navigation buttons so the left artifact tree is now the
+    canonical navigator for persisted workspace flows.
+  - Kept state-mutating actions local to the current artifact surface.
+
+#### TASK-208 - Hide developer provenance and generation telemetry from end-user artifact screens
+- Priority: P1
+- Status: Done (2026-06-11)
+- Module: artifact-telemetry-visibility
+- Problem: End-user artifact screens were still exposing request IDs, provider/model information,
+  prompt versions, latency, cost, and fallback details as visible primary UI.
+- Why it matters: This metadata is useful for operators and developers, but it adds noise and does
+  not help ordinary users review or edit business artifacts.
+- Implementation steps:
+  1. Define a default UI policy for artifact metadata that keeps business-relevant state visible but
+     hides developer provenance and telemetry.
+  2. Remove request/provider/model/prompt/version/cost/latency/fallback fields from persisted Use
+     Case and BRD reading surfaces.
+  3. Apply the same visibility policy to legacy Use Case and BRD panels so alternate surfaces do
+     not reintroduce technical clutter.
+  4. Add regressions that assert telemetry fields are absent from default end-user views.
+- Acceptance criteria:
+  - Persisted and legacy artifact screens no longer expose developer telemetry in the default UI.
+  - Users still see business-relevant artifact state such as save/generation status where useful.
+  - Regression coverage locks the default visibility policy in place.
+- Dependencies: None
+- Verification: focused UI tests for persisted and legacy artifact surfaces, plus one manual review
+  of generated Use Case and BRD screens.
+- Implementation notes:
+  - Persisted Use Case and BRD routes now keep only high-level source badges where useful and hide
+    request IDs, provider/model, prompt/version, mode, quality, latency, cost, and fallback detail
+    from the default UI.
+  - Legacy `UseCasePanel` and `BrdPanel` follow the same default-visibility policy so technical
+    telemetry no longer leaks through alternate surfaces.
+
+#### TASK-209 - Remove technical diagnostics and internal configuration from normal BRD and Use Case reading surfaces
+- Priority: P2
+- Status: Done (2026-06-11)
+- Module: artifact-diagnostics-surface
+- Problem: The product still exposes raw diagnostics and internal controls such as `Structured
+  Spec`, `related_node_ids`, `Template`, “trace/review” debug wording, and “database” storage copy
+  on normal user screens.
+- Why it matters: These elements mix implementation details into business-document workflows and
+  make it unclear which information users are supposed to act on.
+- Implementation steps:
+  1. Remove `Structured Spec` JSON and raw diagnostic payloads from the default persisted BRD
+     experience.
+  2. Rework warning presentation so normal users only see actionable, business-readable warnings,
+     not raw node IDs or internal trace details.
+  3. Reassess whether `Template` belongs in the normal BRD route at all; remove it, lock it, or
+     relocate it behind an explicitly advanced product surface.
+  4. Rewrite empty-state and helper copy that mentions implementation details such as artifacts
+     “trong database” or “trace and review”.
+  5. Apply the same cleanup policy to legacy BRD debug tabs if those surfaces remain accessible.
+- Acceptance criteria:
+  - Normal persisted BRD and Use Case routes no longer show raw JSON specs, `related_node_ids`, or
+    storage/debug wording.
+  - Any remaining warnings are understandable without internal node identifiers.
+  - Internal template/debug controls are absent from the standard end-user reading flow.
+  - Copy on empty states and helper text refers to user tasks, not storage or tracing mechanics.
+- Dependencies: TASK-208 is recommended first so metadata policy is settled before diagnostics are
+  moved or removed.
+- Verification: focused UI tests for BRD/Use Case routes and one browser/manual pass through empty,
+  generated, and warning states.
+- Implementation notes:
+  - Removed persisted BRD `Structured Spec`, raw warning node IDs, and the visible `Template`
+    control from the standard end-user route while keeping internal template state for generation
+    and save compatibility.
+  - Removed legacy Use Case trace/debug disclosure and legacy BRD structured-spec tab from the
+    default reading flow.
+  - Rewrote empty/helper copy so it no longer mentions storage or tracing internals.
+
+#### TASK-210 - Reduce repeated workflow chrome and low-value status copy across dashboard and workspace headers
+- Priority: P2
+- Status: Done (2026-06-11)
+- Module: ui-information-density
+- Problem: Several screens still spend visible space on artifact-plumbing explanations and low-value
+  status chrome such as full artifact-chain subtitles, “left tree refresh/persist” explanations,
+  and raw project `updated_at` timestamps without adjacent decision support.
+- Why it matters: Repeated operational copy competes with the actual artifact content and makes the
+  product feel denser than it needs to be.
+- Implementation steps:
+  1. Audit recurring header/subtitle/helper copy across dashboard, Project Workspace, persisted Use
+     Case, and persisted BRD routes.
+  2. Remove or rewrite copy that explains internal workflow plumbing rather than the user’s next
+     business task.
+  3. Reassess status chips and timestamps; keep them only where they directly help users decide what
+     to open, save, or regenerate.
+  4. Tighten dashboard/project-card metadata so low-value placeholders and raw timestamps do not
+     dominate the card surface.
+  5. Add lightweight UI regressions or snapshots for the cleaned header/card surfaces.
+- Acceptance criteria:
+  - Workspace headers no longer repeat full artifact-chain explanations on every route unless there
+    is a user-facing reason to do so.
+  - Route intros and helper text describe user goals rather than persistence/tree implementation.
+  - Dashboard cards only show metadata that helps ordinary users choose or manage a project.
+  - Regression coverage exists for the simplified header/card content.
+- Dependencies: None
+- Verification: focused UI tests/snapshots for dashboard and persisted workspace header surfaces,
+  plus one manual/browser review across the main routes.
+- Implementation notes:
+  - Removed the workspace-wide artifact-chain subtitle from the persisted shell header.
+  - Simplified Use Case/BRD intro copy to describe the user task rather than persistence/tree
+    mechanics.
+  - Tightened Project Dashboard cards so they no longer show a raw `updated_at` timestamp or the
+    low-value `Chưa có mô tả` placeholder.
+
+#### TASK-211 - Add row-level pending UX for project deletion on the dashboard
+- Priority: P1
+- Status: Done (2026-06-11)
+- Module: dashboard-loading-ux
+- Problem: `ProjectDashboard` deletes projects through the API, but the project card stays idle and
+  the delete button remains clickable while the destructive request is in flight.
+- Why it matters: Without immediate feedback, users can double-submit destructive actions and cannot
+  tell whether the product accepted the request.
+- Implementation steps:
+  1. Add per-project deleting state in `ProjectDashboard` keyed by project id rather than a single
+     global flag.
+  2. Disable the project card’s open/delete interactions while that row is deleting.
+  3. Replace the static `Xóa` label with clear pending copy such as `Đang xóa…`.
+  4. Preserve error recovery so a failed delete re-enables the row and surfaces a visible error.
+  5. Add a focused UI test for repeated-click protection and pending-label rendering.
+- Acceptance criteria:
+  - Clicking delete on a project row immediately changes that row into a busy state.
+  - The same project cannot be opened or deleted again until the request resolves.
+  - Failed deletes restore interactivity and show the existing error channel.
+- Dependencies: None
+- Verification: focused `ProjectDashboard` UI test plus one manual/browser delete attempt on a slow
+  or throttled response.
+- Implementation notes:
+  - `ProjectDashboard` now tracks a per-project deleting id so the active row shows `Đang xóa…`
+    and disables both the open and delete buttons until the API call resolves.
+  - Added a focused regression that proves repeated clicks are blocked on the deleting row.
+
+#### TASK-212 - Add persisted-workspace pending UX for feature and left-tree Use Case deletion
+- Priority: P1
+- Status: Done (2026-06-11)
+- Module: workspace-destructive-loading-ux
+- Problem: The persisted workspace shell still executes destructive feature and use-case deletes
+  without row/button-level pending feedback while the API call and tree refresh are running.
+- Why it matters: These actions mutate the primary navigation tree. If the UI stays static, users
+  are more likely to click again or think the product ignored the request.
+- Implementation steps:
+  1. Add deleting state for the active Feature screen delete flow in `ProjectWorkspace`.
+  2. Add deleting state for left-bar Use Case deletes keyed by use-case id and thread that state
+     into `ArtifactTree`.
+  3. Disable the originating delete controls and adjacent conflicting navigation while refresh is in
+     flight.
+  4. Show explicit pending labels or busy affordances in both the Feature header and left-tree row.
+  5. Add regressions for active-feature delete and left-tree use-case delete pending states.
+- Acceptance criteria:
+  - Feature delete switches the CTA into a visible pending state until completion or failure.
+  - Left-tree Use Case delete visibly marks the affected row as busy and prevents repeated clicks.
+  - Tree refresh completion clears the pending state and leaves the shell in a consistent route.
+- Dependencies: None
+- Verification: focused `ProjectWorkspace` and `ArtifactTree` UI tests plus one manual delete flow
+  from the persisted shell.
+- Implementation notes:
+  - `ProjectWorkspace` now tracks deleting state for the active Feature and for left-tree Use Case
+    rows independently.
+  - The Feature delete CTA switches to `Đang xóa…`, and the left-tree Use Case row disables its
+    toggle, selection, and delete controls while deletion plus tree refresh are in flight.
+
+#### TASK-213 - Add diagram-action loading states across persisted and legacy Use Case flows
+- Priority: P1
+- Status: Done (2026-06-11)
+- Module: usecase-diagram-loading-ux
+- Problem: The persisted Use Case route does not expose a pending state while generating/saving a
+  Diagram, and the legacy Use Case panel does not expose one while opening a saved Diagram.
+- Why it matters: Diagram actions are among the longest waits in the product. Missing wait states
+  make the workflow feel unreliable even when the backend is behaving correctly.
+- Implementation steps:
+  1. Introduce a dedicated persisted-route diagram action state for `generating` so the CTA can
+     render `Đang tạo…` and stay disabled through generate/save/tree-refresh.
+  2. Reuse or extend the legacy diagram inventory `operation_state` contract to include `opening`
+     for saved-diagram fetches.
+  3. Disable competing diagram actions on the affected use case while work is in progress.
+  4. Surface concise progress text in both persisted and legacy flows.
+  5. Add regressions for persisted `Tạo diagram` pending UX and legacy `Mở canvas` loading UX.
+- Acceptance criteria:
+  - Persisted Use Case diagram generation immediately shows a busy CTA and prevents repeated clicks.
+  - Legacy saved-diagram open shows a visible loading state until the canvas is ready or the call
+    fails.
+  - Error cases clear the busy state and reuse the existing error/status channels.
+- Dependencies: None
+- Verification: focused tests for `PersistedUseCaseWorkspace`, `UseCasePanel`, and `App.tsx`, plus
+  one manual slow-response run through both flows.
+- Implementation notes:
+  - Persisted Use Case routes now expose `Đang tạo diagram…` while the generate-save-refresh chain
+    is running, and the CTA stays disabled until the chain completes.
+  - Legacy Use Case diagram inventory now supports an `opening` operation state so `Mở canvas`
+    becomes a disabled `Đang mở…` button while a saved Diagram is loading.
+
+#### TASK-214 - Add exporting/loading UX for persisted BRD DOCX export
+- Priority: P2
+- Status: Done (2026-06-11)
+- Module: brd-export-loading-ux
+- Problem: BRD DOCX export is asynchronous, but the persisted BRD route keeps the export button
+  static and clickable until the download starts.
+- Why it matters: Export is a user-visible document operation. The screen should confirm that the
+  file is being prepared and guard against duplicate requests.
+- Implementation steps:
+  1. Add explicit exporting state in `PersistedBrdWorkspace`.
+  2. Disable the export button while the request is in flight.
+  3. Replace `Export DOCX` with pending copy such as `Đang tạo file DOCX…`.
+  4. Ensure failures clear the exporting state and surface the existing error message.
+  5. Add a focused regression for export pending-label and repeated-click prevention.
+- Acceptance criteria:
+  - Starting export immediately changes the button into a busy state.
+  - Duplicate clicks are blocked until the request resolves.
+  - Failed exports restore the normal button state and show the error message.
+- Dependencies: None
+- Verification: focused `PersistedBrdWorkspace` UI test plus one manual export attempt with
+  throttled response.
+- Implementation notes:
+  - Persisted BRD export now tracks an explicit exporting state, disables duplicate clicks, and
+    switches the CTA to `Đang tạo file DOCX…` until the blob is ready.
+  - Added regression coverage for the pending export label and duplicate-request guard.
+
+#### TASK-215 - Align persisted Use Case diagram CTA with the save-first workspace gate
+- Priority: P2
+- Status: Done (2026-06-12)
+- Module: persisted-usecase-diagram-gating
+- Problem: The persisted `Use Case` editor still renders an enabled `Tạo diagram` CTA after the
+  user edits the Use Case, even though the workspace command layer rejects diagram generation until
+  the latest Use Case is saved.
+- Why it matters: The product rule is correct, but the screen currently advertises an action that
+  is not executable. Users only discover the save requirement after clicking into an error state.
+- Implementation steps:
+  1. Thread the current `workspace.useCaseSaveState` into the persisted editor CTA gating logic.
+  2. Disable or replace `Tạo diagram` whenever the selected Use Case is `dirty`, `saving`, or
+     `failed`, while keeping the existing approval and contract guards.
+  3. Add explicit save-first helper copy near the CTA so the next step is obvious before click.
+  4. Preserve the existing workspace-level throw as the final defensive guard.
+  5. Add focused regressions proving the dirty-state editor cannot start diagram generation and the
+     CTA reflects the save requirement.
+- Acceptance criteria:
+  - Editing a persisted Use Case immediately prevents Diagram generation until the Use Case is
+    saved again.
+  - The UI communicates the save-first requirement without waiting for an error message.
+  - Existing approved + valid + saved Use Cases can still generate diagrams normally.
+- Dependencies: None
+- Verification: focused `PersistedUseCaseWorkspace` UI tests for dirty/saving/failed states plus
+  one manual editor flow where a title or step is changed before attempting diagram generation.
+- Implementation notes:
+  - The persisted `Use Case` editor and missing-diagram route now derive the Diagram CTA label from
+    `workspace.useCaseSaveState`, so `dirty`, `saving`, and `failed` states show save-first copy
+    and keep the action disabled before click.
+  - Added focused regression coverage proving the editor route blocks Diagram generation up front
+    when the latest Use Case has not been saved.
+
+#### TASK-216 - Make the effective use-case generation mode truthful before the user clicks generate
+- Priority: P1
+- Status: Done
+- Module: usecase-generation-mode-truthfulness
+- Problem: The persisted `Use Case` route still offers `Ưu tiên AI` and `Theo hệ thống` even when
+  the backend is hard-pinned to deterministic generation, so the user can believe they are testing
+  AI while the server never attempts it.
+- Why it matters: This creates false diagnosis. Teams blame "bad AI output" when the system was
+  actually producing rule-based fallback all along.
+- Implementation steps:
+  1. Expose the effective server-side use-case generation mode to the frontend on boot or through
+     the existing feature/workspace payload.
+  2. If the effective mode is deterministic-only, disable or hide AI-oriented generation choices in
+     the persisted route before the user clicks `Sinh use case`.
+  3. Replace the current passive metadata badge with a stronger pre-generation warning when AI is
+     unavailable or disabled for the environment.
+  4. Preserve the existing post-generation metadata, but make it secondary confirmation instead of
+     the primary discovery mechanism.
+  5. Add UI regressions for deterministic-only environments and AI-enabled environments.
+- Acceptance criteria:
+  - Users cannot select an AI-oriented generation path when the backend will not honor it.
+  - Deterministic-only environments communicate that limitation before generation starts.
+  - AI-enabled environments still expose AI choices normally.
+- Dependencies: None
+- Verification: focused persisted `Use Case` UI tests plus one manual local run in deterministic
+  mode and one in AI-enabled mode.
+- Implementation notes:
+  - Persisted feature resources now expose `usecase_generation_runtime` from the backend, so the
+    workspace can decide pre-click whether the current environment is `rule_only`, `ai_optional`,
+    or `ai_default`.
+  - The persisted `Use Case` route now hides AI-oriented choices in deterministic-only environments,
+    shows a stronger runtime note before generation, and derives the primary CTA label from the
+    effective runtime instead of always saying `Sinh use case`.
+
+#### TASK-217 - Demote the deterministic use-case builder from primary content generation to explicit scaffold/fallback
+- Priority: P1
+- Status: Done
+- Module: deterministic-usecase-fallback-scope
+- Problem: The deterministic builder currently produces canned intake/execution/coordination/exception
+  narratives that are too generic to serve as production-grade BA artifacts, yet the system still
+  uses that path as a normal response mode.
+- Why it matters: Rule-based scaffolds are useful for stability, but they are not good enough to be
+  mistaken for domain-aware synthesis. Shipping them as the main content path destroys trust in the
+  feature.
+- Implementation steps:
+  1. Reclassify deterministic generation as explicit fallback/scaffold in product and code.
+  2. Tighten deterministic output so it is clearly presented as a starter draft, not a finished
+     use-case portfolio.
+  3. Review whether deterministic mode should emit fewer, more honestly scaffold-like artifacts
+     instead of 2-4 pseudo-final use cases.
+  4. Update copy and downstream expectations so diagrams/BRDs are not treated as ready solely from
+     deterministic output.
+  5. Add tests that assert deterministic mode labels itself as scaffold/fallback.
+- Acceptance criteria:
+  - Deterministic output is no longer framed as equivalent to AI/domain-aware synthesis.
+  - Users can distinguish scaffold output from review-ready output immediately.
+  - Downstream flows do not silently treat scaffold-quality use cases as fully trustworthy content.
+- Dependencies: TASK-216 recommended first
+- Verification: focused API + UI tests and one manual deterministic generation run.
+- Implementation notes:
+  - The backend runtime descriptor and fallback warnings now call the deterministic path
+    `scaffold theo rule` instead of framing it as equivalent to AI/domain-aware synthesis.
+  - Persisted and legacy Use Case surfaces now label deterministic output as scaffold/fallback and
+    rename the rule path CTA accordingly.
+
+#### TASK-218 - Strengthen use-case quality gates to reject schema-valid but unusable drafts
+- Priority: P1
+- Status: Done
+- Module: usecase-quality-gate-depth
+- Problem: The current quality gate catches duplication, filler, and missing technical actors, but
+  it still lets many semantically empty or boundary-less use-case portfolios pass.
+- Why it matters: Contract-valid output that cannot guide BA review, diagram generation, or BRD
+  writing is still a product failure.
+- Implementation steps:
+  1. Define business-quality checks beyond anti-generic heuristics: meaningful segmentation,
+     distinct objectives, real trigger/input/output usage, and concrete alternate-flow decision
+     points.
+  2. Introduce scoring or rejection thresholds that map to "usable for review" rather than merely
+     "not obviously broken".
+  3. Feed those checks into the AI retry/fallback loop so low-value AI drafts are rejected before
+     they reach the user.
+  4. Ensure deterministic scaffolds are either exempted explicitly or held to a clearly different
+     quality bar with honest labeling.
+  5. Add regression tests for known bad-but-currently-valid outputs.
+- Acceptance criteria:
+  - Schema-valid but semantically empty drafts are rejected.
+  - Distinct feature domains require materially distinct flows to pass.
+  - Quality rejection reasons are specific enough to debug and improve.
+- Dependencies: None
+- Verification: focused API quality tests plus one manual run against a domain that currently
+  produces unusable output.
+- Implementation notes:
+  - The quality gate now rejects generic use-case boundaries and missing trace coverage for
+    inputs/triggers, outputs/success outcomes, and constraints.
+  - These signals feed the existing retry/fallback loop, so semantically empty AI drafts are
+    rejected before they reach the user.
+
+#### TASK-219 - Add domain-grade use-case acceptance goldens that test usability, not just legality
+- Priority: P2
+- Status: Done
+- Module: usecase-quality-golden-suite
+- Problem: Existing tests mostly lock metadata, counts, and structural legality. They do not assert
+  that real business domains yield reviewable use-case portfolios.
+- Why it matters: The suite can stay green while the product still produces artifacts that a human
+  cannot use.
+- Implementation steps:
+  1. Curate a small golden set of representative domains with expected business boundaries and flow
+     characteristics.
+  2. For each domain, assert more than count/kind: actor responsibility, step specificity, real use
+     of inputs/outputs/constraints, and non-template alternate flows.
+  3. Separate acceptance goldens for AI output and deterministic scaffold output where appropriate.
+  4. Add at least one regression fixture for the currently failing domain the user is reporting.
+  5. Document how to review and update the goldens when prompts or quality gates evolve.
+- Acceptance criteria:
+  - A domain that currently feels unusable is represented in the golden suite.
+  - Test failures explain whether the problem is segmentation, step specificity, actor assignment,
+    or fallback mode.
+  - Prompt/model changes cannot silently degrade user-facing use-case quality without test signal.
+- Dependencies: TASK-218 recommended first
+- Verification: targeted pytest suite for the new goldens and one review pass of the fixture
+  expectations with a BA/product owner.
+- Implementation notes:
+  - Added fixture-backed acceptance goldens for GPS-device issuance and camera/re-id domains, plus
+    a rejected scaffold-like regression fixture that locks the new quality issue codes.
+
+#### TASK-220 - Fail closed when persisted feature payloads do not include `usecase_generation_runtime`
+- Priority: P1
+- Status: Done
+- Module: usecase-generation-mode-truthfulness
+- Problem: The persisted `Use Case` UI now depends on `usecase_generation_runtime` for truthful
+  pre-click behavior, but the field is still optional and the null path falls back to showing
+  `Theo hệ thống` and `Ưu tiên AI`.
+- Why it matters: If the API contract regresses or a stale payload omits the field, the exact UX
+  bug fixed by `TASK-216` silently comes back.
+- Implementation steps:
+  1. Make `usecase_generation_runtime` mandatory in persisted feature responses unless there is a
+     hard compatibility reason not to.
+  2. Change the UI null-runtime fallback to a conservative state that hides AI-specific choices and
+     explains that AI capability could not be determined.
+  3. Add persistence API regressions for feature detail/list responses that assert the runtime
+     descriptor is always present.
+  4. Add a UI regression for a missing-runtime payload to prove the screen fails closed.
+- Acceptance criteria:
+  - Missing runtime payloads do not expose AI-specific generation choices.
+  - Feature detail/list endpoint tests fail if the runtime descriptor disappears.
+  - Persisted `Use Case` route stays truthful even under partial payload regressions.
+- Dependencies: None
+- Verification: persistence API tests for feature endpoints plus focused `PersistedUseCaseWorkspace`
+  UI regression.
+- Implementation notes:
+  - `usecase_generation_runtime` is now required in persisted feature resources on the API side.
+  - The persisted `Use Case` route now treats a missing runtime payload as deterministic-only and
+    shows a conservative note instead of exposing AI-specific generation choices.
+  - Added persistence endpoint coverage and a focused UI regression to lock the fail-closed path.
+
+#### TASK-221 - Move required trace coverage checks from portfolio-level to per-use-case quality evaluation
+- Priority: P1
+- Status: Done
+- Module: usecase-quality-gate-depth
+- Problem: The new `MISSING_INPUT_TRACE`, `MISSING_OUTPUT_TRACE`, and `MISSING_CONSTRAINT_TRACE`
+  checks currently aggregate evidence across the entire synthesis portfolio, so one grounded use
+  case can hide another weak one.
+- Why it matters: A portfolio can still pass while containing use cases that are not reviewable
+  enough to drive Diagram or BRD downstream safely.
+- Implementation steps:
+  1. Evaluate required business trace coverage per use case, not only once across the whole
+     synthesis.
+  2. Decide which traces are mandatory for each use case category and encode that rule explicitly.
+  3. Emit issue messages that identify the exact use case missing input/output/constraint grounding.
+  4. Add a mixed-portfolio regression fixture where one use case is grounded and another is not,
+     then assert rejection.
+- Acceptance criteria:
+  - A portfolio with one grounded and one weak use case is rejected.
+  - Quality issues identify the specific offending use case.
+  - Existing accepted domain fixtures still pass without weakening the gate.
+- Dependencies: None
+- Verification: focused `pytest` for `test_usecase_synthesis.py` with new mixed-fixture coverage.
+- Implementation notes:
+  - Required input/output/constraint trace checks now run per use case and include the offending
+    use-case title in each quality issue message.
+  - Added a mixed-portfolio rejected fixture proving one grounded use case can no longer mask
+    another weak use case in the same synthesis.
+
+#### TASK-222 - Replace `scaffold` jargon on the persisted Use Case screen with explicit AI-runtime status
+- Priority: P1
+- Status: Open
+- Module: usecase-generation-mode-truthfulness
+- Problem: The screen is now truthful, but `Theo rule (scaffold)` and `Tạo bản nháp scaffold` are
+  still internal engineering language. Product users read it as “AI feature disappeared” rather
+  than “AI is disabled for this environment”.
+- Why it matters: The current wording causes the exact confusion seen in local review sessions even
+  when the backend behavior is technically correct.
+- Implementation steps:
+  1. Replace `scaffold`-heavy labels on the persisted `Use Case` route with plain user-facing copy
+     that explicitly states whether AI is disabled, shadow-only, optional, or default.
+  2. Split “mode explanation” from “action label” so the primary CTA describes what will happen and
+     the helper note explains why.
+  3. Add one deterministic-local regression and one AI-enabled regression for the new copy.
+  4. Update relevant product or setup docs with the env switches that enable AI generation for Use
+     Case locally.
+- Acceptance criteria:
+  - A user can tell in one read whether AI generation is enabled in the current environment.
+  - Deterministic-only mode no longer requires understanding the word `scaffold`.
+  - The UI copy distinguishes “AI disabled by config” from “AI optional” and “AI default”.
+- Dependencies: None
+- Verification: focused `PersistedUseCaseWorkspace` UI tests plus one manual local check in
+  deterministic mode and one in AI-enabled mode.
+
+#### TASK-223 - Strengthen the Use Case AI prompt with explicit business segmentation rules and counterexamples
+- Priority: P1
+- Status: Done
+- Module: usecase-prompt-design
+- Problem: The AI path now runs locally, but the prompt still gives the model too much freedom to
+  produce broad, technically valid, but BA-weak use cases.
+- Why it matters: If the prompt does not force business-boundary decisions clearly enough, even a
+  grounded output can remain too coarse to drive Diagram and BRD workflows well.
+- Implementation steps:
+  1. Extend the `usecase_synthesis` system prompt with explicit heuristics for splitting a feature
+     into multiple use cases versus keeping one flow.
+  2. Add at least one negative example of an output that is schema-valid but too broad, plus one
+     positive example that shows the expected level of business segmentation.
+  3. Require an internal planning checklist before emission: objective distinctness, actor
+     responsibility split, alternate-flow decision points, and evidence coverage.
+  4. Update prompt-linked tests or fixtures to lock the new expected behavior.
+- Acceptance criteria:
+  - Prompt changes produce materially more distinct use-case boundaries on representative domains.
+  - The prompt explicitly guards against “one big flow with cosmetic variation”.
+  - Golden suites remain green and at least one new complaint domain improves.
+- Dependencies: None
+- Verification: targeted synthesis tests plus manual review on the reported feature domain.
+- Completed: 2026-06-12 — added `usecase_synthesis@1.2.0`, promoted it as the default prompt
+  version, and locked explicit segmentation/counterexample language in prompt-registry tests.
+
+#### TASK-224 - Revisit the default Use Case synthesis model and add an evaluation path for stronger planning quality
+- Priority: P1
+- Status: Done
+- Module: usecase-model-policy
+- Problem: The current local Use Case model is `openai/gpt-5.4-mini`, but the task still expects
+  one-pass semantic decomposition, grounding, and useful BA-ready flow design.
+- Why it matters: A weak model/pipeline choice can cap output quality even when prompt and runtime
+  mode are correct.
+- Implementation steps:
+  1. Define the intended quality bar for Use Case synthesis separately from BRD generation.
+  2. Evaluate whether the default Use Case model should move off the current `mini` tier or whether
+     a second-pass critic/planner stage is needed instead.
+  3. Add a simple evaluation matrix for 2-3 representative domains comparing current and candidate
+     model/pipeline choices.
+  4. Reflect the chosen policy in `.env.example` and relevant product/setup docs.
+- Acceptance criteria:
+  - The team has an explicit default model policy for Use Case synthesis.
+  - The selected model/pipeline shows measurable improvement on representative domains.
+  - Local/staging configuration no longer leaves the quality bar implicit.
+- Dependencies: TASK-223 recommended first
+- Verification: side-by-side evaluation on representative domains plus regression fixture updates.
+- Completed: 2026-06-12 — promoted the default Use Case model policy to `openai/gpt-5.5`, updated
+  `.env.example`, and added `docs/product/usecase-synthesis-model-policy.md` with the quality bar
+  and candidate evaluation matrix.
+
+#### TASK-225 - Expand domain-grade acceptance goldens with real complaint domains from product review
+- Priority: P2
+- Status: Done
+- Module: usecase-quality-golden-suite
+- Problem: The current goldens catch obvious weak outputs, but they still cover a narrow set of
+  domains compared with the diversity of features the product now synthesizes.
+- Why it matters: The suite can stay green while real user domains still produce outputs that feel
+  unusable.
+- Implementation steps:
+  1. Capture 3-5 real complaint domains from recent product review sessions, including the current
+     “tích điểm cho thú cưng” style feature if representative.
+  2. For each domain, define what “usable for BA review” means in concrete terms.
+  3. Add accepted/rejected fixtures that exercise those boundaries.
+  4. Use those fixtures to refine prompt and model decisions iteratively.
+- Acceptance criteria:
+  - At least one current complaint domain is represented in the golden suite.
+  - Test failures identify why a domain is still weak, not just that it failed.
+  - Prompt/model changes cannot silently regress those domains.
+- Dependencies: TASK-223 and TASK-224 recommended
+- Verification: targeted `pytest` for the expanded golden suite and one review pass with product/BA.
+- Completed: 2026-06-12 — expanded acceptance goldens with `Tích điểm cho thú cưng`, guest
+  vehicle entry, and maintenance-ticket domains in both accepted and scaffold-like rejected forms.
+
+#### TASK-226 - Fail closed when AI-requested Use Case generation hits provider auth/config failure
+- Priority: P1
+- Status: Done
+- Module: usecase-generation-orchestration
+- Problem: The service currently converts OpenRouter auth/config failures into a normal-looking
+  deterministic scaffold portfolio and persists it as if generation had succeeded.
+- Why it matters: Users think AI generated nonsense, when in reality AI never ran successfully and
+  the system silently replaced the portfolio with fallback template text.
+- Implementation steps:
+  1. Split provider failure modes in `UseCaseGenerationService` into retryable/transient vs
+     non-retryable auth/config failures.
+  2. For `ai` preference or `ai_default` mode, stop returning persisted scaffold output on
+     non-retryable provider failures such as `401/403` or invalid provider config.
+  3. Return a failed envelope or a non-persistable degraded result that the workspace can surface
+     without overwriting the existing use-case portfolio.
+  4. Keep deterministic scaffold only for explicit `Theo rule` selection or deterministic runtime,
+     not as the silent answer to broken AI credentials.
+- Acceptance criteria:
+  - An auth/config failure does not overwrite saved use cases with scaffold text.
+  - The caller receives an actionable AI failure state instead of a successful portfolio payload.
+  - Existing deterministic mode still works when the user explicitly chooses it.
+- Dependencies: None
+- Verification: provider-failure regression in generation service and persisted generation flow.
+- Completed: 2026-06-12 — implemented as part of the AI-only authoring cutover; provider/auth
+  failures now return failed envelopes and no longer emit persisted scaffold portfolios.
+
+#### TASK-227 - Add authenticated provider health to Use Case runtime truthfulness
+- Priority: P1
+- Status: Open
+- Module: usecase-runtime-truthfulness
+- Problem: The runtime descriptor currently treats “API key string exists” as equivalent to “AI is
+  available,” even when the live provider rejects the credentials.
+- Why it matters: The UI can still advertise AI options that will inevitably fail and fall back,
+  recreating the same trust problem under a different failure mode.
+- Implementation steps:
+  1. Introduce a small provider-health/auth-status probe or cached last-failure signal for Use Case
+     generation runtime.
+  2. Extend the runtime descriptor contract so the UI can distinguish configured credentials from
+     authenticated/usable provider state.
+  3. Downgrade runtime copy and available actions when the last known provider state is auth
+     failure.
+  4. Add regressions for `key present + auth broken` and `key present + auth valid` cases.
+- Acceptance criteria:
+  - The persisted `Use Case` screen no longer advertises AI as usable when provider auth is broken.
+  - Runtime notes distinguish config presence from authenticated availability.
+  - The contract stays deterministic and testable without requiring live provider calls in every
+    request path.
+- Dependencies: TASK-226 recommended
+- Verification: runtime serializer tests plus focused persisted UI regressions.
+
+#### TASK-228 - Surface fallback degradation and provider-failure cause prominently on persisted Use Case pages
+- Priority: P2
+- Status: Done
+- Module: persisted-usecase-ui
+- Problem: The current UI note `Bản nháp hiện tại được tạo theo scaffold rule.` hides why the
+  artifact is degraded and invites users to review meaningless text.
+- Why it matters: When fallback artifacts are visible, users need to know whether they intentionally
+  chose rule mode or whether AI failed operationally.
+- Implementation steps:
+  1. Surface `fallback_reason` from generation metadata in the persisted generation card.
+  2. Add distinct copy for `user_selected_rule`, `ai_not_enabled`, `provider_unavailable`, and
+     `provider_failure`.
+  3. Mark provider-failure output as degraded and steer the user toward fixing AI config or
+     retrying, instead of implying the artifact is ready for BA review.
+  4. Add UI regressions for provider-failure and explicit-rule cases.
+- Acceptance criteria:
+  - A user can tell immediately whether the current draft is intentional rule output or failed AI
+    fallback.
+  - Provider-failure output is visually differentiated from normal AI drafts.
+  - Existing AI-success and explicit-rule states remain clear.
+- Dependencies: TASK-226 recommended
+- Verification: focused `PersistedUseCaseWorkspace` tests.
+- Completed: 2026-06-12 — AI-success pages no longer present scaffold as a normal choice, and any
+  legacy degraded metadata is surfaced as non-BA-ready output instead of a healthy draft.
+
+#### TASK-229 - Remove deterministic/rule authoring as a first-class Use Case generation mode
+- Priority: P1
+- Status: Done
+- Module: usecase-runtime-contract
+- Problem: The current runtime contract still exposes `deterministic` / `Theo rule (scaffold)` as a
+  normal BA-facing authoring mode even though its output is not acceptable for product use.
+- Why it matters: As long as deterministic authoring remains a supported mode, the system keeps a
+  built-in path to artifacts the product team already considers unusable.
+- Implementation steps:
+  1. Remove deterministic authoring preference from persisted and legacy Use Case UIs.
+  2. Simplify runtime contract away from `deterministic | ai_shadow | ai_opt_in | ai_default` for
+     BA-facing generation; replace it with AI-only runtime states such as `available`, `degraded`,
+     `unavailable`.
+  3. Update request/response typing so Use Case generation preference no longer accepts
+     `deterministic`.
+  4. Rewrite route and service tests that currently treat deterministic authoring as expected
+     product behavior.
+- Acceptance criteria:
+  - Users cannot intentionally choose scaffold/rule output from the Use Case generation UI.
+  - API and frontend contracts no longer advertise deterministic authoring as a normal mode.
+  - Existing tests/docs are updated to the new AI-only authoring contract.
+- Dependencies: None
+- Verification: focused backend/service tests, focused persisted UI tests, and doc updates.
+- Completed: 2026-06-12 — removed user-facing deterministic/scaffold choices from persisted and
+  legacy Use Case screens, simplified runtime to `available / degraded / unavailable`, and narrowed
+  the generation preference contract to AI-only.
+
+#### TASK-230 - Replace deterministic fallback with fail-closed AI generation outcomes
+- Priority: P1
+- Status: Done
+- Module: usecase-generation-orchestration
+- Problem: Provider failure, provider auth failure, and quality rejection are currently converted
+  into deterministic scaffold drafts instead of explicit non-success outcomes.
+- Why it matters: AI-only authoring cannot work if broken AI calls still yield persisted fake
+  artifacts.
+- Implementation steps:
+  1. Introduce explicit generation outcomes for `ai_success`, `ai_validation_rejected`,
+     `ai_provider_failure`, and `ai_unavailable`.
+  2. Stop calling deterministic builder in those failure branches.
+  3. Ensure persisted generation flows do not overwrite the saved portfolio on AI failure.
+  4. Return actionable failure details to the caller so the UI can show retry/config guidance.
+- Acceptance criteria:
+  - A failed AI call never returns a BA-facing scaffold portfolio.
+  - Existing persisted artifacts remain intact when a new AI attempt fails.
+  - Response metadata distinguishes provider failure from quality rejection.
+- Dependencies: TASK-229 recommended
+- Verification: generation-service regressions, persistence-generation regressions, and one real
+  provider smoke with invalid credentials.
+- Completed: 2026-06-12 — provider/config failures and quality rejection now return failed
+  envelopes with actionable metadata instead of scaffold fallback portfolios, and persisted use-case
+  collections remain unchanged on failed AI attempts.
+
+#### TASK-231 - Retire the deterministic Use Case builder from the production authoring path
+- Priority: P2
+- Status: Done
+- Module: usecase-deterministic-builder
+- Problem: `deterministic_builder.py` currently owns production authoring fallback logic and test
+  surface for scaffold text that the product no longer wants.
+- Why it matters: Leaving it wired into the main pipeline keeps accidental reintroduction cheap.
+- Implementation steps:
+  1. Remove production imports of `generate_use_case_drafts` from authoring flows.
+  2. Keep only non-authoring helpers that still belong elsewhere, such as artifact-chain metadata,
+     and move them out of the builder module if needed.
+  3. Delete or rewrite deterministic-builder tests that currently lock scaffold copy.
+  4. Audit docs/changelog references that still present the builder as an acceptable path.
+- Acceptance criteria:
+  - The deterministic builder is no longer reachable from BA-facing Use Case generation.
+  - Remaining code in the module, if any, is clearly non-authoring infrastructure.
+  - Test suite no longer protects scaffold prose as desired behavior.
+- Dependencies: TASK-230 recommended
+- Verification: import/path audit plus focused backend tests.
+- Completed: 2026-06-12 — production authoring flows no longer import
+  `generate_use_case_drafts`; shared artifact-chain metadata moved to
+  `app.usecases.artifact_chain`.
+
+#### TASK-232 - Preserve validation guardrails while switching Use Case authoring to AI-only
+- Priority: P1
+- Status: Done
+- Module: usecase-guardrails
+- Problem: The product wants to remove manual/rule authoring, but that must not be confused with
+  removing schema, grounding, quality, or hydration checks.
+- Why it matters: If the team deletes all rule-based logic indiscriminately, AI output quality and
+  downstream safety will get worse, not better.
+- Implementation steps:
+  1. Explicitly classify `grounding`, `quality`, `schema`, and `hydrator` layers as validation /
+     contract enforcement rather than authoring.
+  2. Keep or strengthen those layers while removing deterministic authoring.
+  3. Add tests proving malformed AI output is still rejected under the new AI-only contract.
+  4. Update product/setup docs so “AI-only” does not imply “unguarded free-form output.”
+- Acceptance criteria:
+  - AI-only authoring still rejects unsupported actors, weak boundaries, and malformed alternate
+    flows.
+  - The pipeline retains stable IDs and contract-safe hydration.
+  - Docs clearly distinguish authoring removal from guardrail retention.
+- Dependencies: None
+- Verification: focused grounding/quality/hydrator suites and doc updates.
+- Completed: 2026-06-12 — grounding, quality, schema, and hydrator enforcement stayed intact, and
+  malformed/weak AI output now fails closed under the AI-only contract.
+
+#### TASK-233 - Rewrite Use Case docs and UI copy around AI-only authoring
+- Priority: P2
+- Status: Done
+- Module: usecase-product-surface
+- Problem: The repo still teaches developers and users that scaffold/rule output is part of normal
+  Use Case generation.
+- Why it matters: Even after backend changes, stale UI/doc language will keep the wrong mental
+  model alive and make regressions easier to reintroduce.
+- Implementation steps:
+  1. Remove `Theo rule (scaffold)` language from persisted and legacy Use Case screens.
+  2. Update `UC-07` and related product/setup docs to describe AI-only authoring plus failure
+     states.
+  3. Reframe runtime notes around `AI available`, `AI unavailable`, and `AI failed`.
+  4. Update UI tests that still expect deterministic labels and modes.
+- Acceptance criteria:
+  - No BA-facing Use Case screen suggests scaffold/rule output as a desired generation choice.
+  - Core docs no longer document deterministic Use Case authoring as a supported workflow.
+  - Failure copy tells the user what happened without suggesting degraded scaffold review.
+- Dependencies: TASK-229 and TASK-230 recommended
+- Verification: focused UI tests and doc review.
+- Completed: 2026-06-12 — removed BA-facing scaffold/rule language from current Use Case screens,
+  updated core product/use-case docs to describe AI-only authoring plus failure states, and aligned
+  regressions to the new copy.

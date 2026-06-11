@@ -1,0 +1,69 @@
+{
+  "feature_intent": {
+    "feature_name": "Cấp phát GPS Device",
+    "feature_summary": "Xử lý yêu cầu cấp phát và lắp đặt GPS cho thú nuôi.",
+    "actors": ["Ban quản lý", "Portal", "V-app"],
+    "primary_actor": "Ban quản lý",
+    "trigger": "Có yêu cầu đăng ký GPS hợp lệ từ cư dân.",
+    "inputs": ["Yêu cầu GPS", "Danh sách GPS Device trong kho"],
+    "outputs": ["Trạng thái yêu cầu", "Trạng thái GPS Device", "Thông báo cư dân"],
+    "constraints": ["Thiết bị phải ở trạng thái Trong kho trước khi giữ chỗ."],
+    "assumptions": ["Portal là hệ thống thao tác chính của BQL."],
+    "systems_involved": ["Portal", "V-app"],
+    "success_outcome": "Yêu cầu GPS được cấp phát thành công và cư dân nhận được thông báo."
+  },
+  "synthesis": {
+    "use_cases": [
+      {
+        "title": "Ban quản lý tiếp nhận yêu cầu cấp phát GPS hợp lệ",
+        "objective": "Xác nhận yêu cầu GPS của cư dân đủ thông tin và đủ điều kiện để mở xử lý.",
+        "primary_actor": "Ban quản lý",
+        "supporting_actors": ["Portal", "V-app"],
+        "preconditions": ["Cư dân đã gửi yêu cầu GPS qua kênh hợp lệ."],
+        "main_flow_steps": [
+          {
+            "actor": "Ban quản lý",
+            "action": "Mở yêu cầu GPS mới của cư dân trên Portal.",
+            "input_or_trigger": "Có yêu cầu đăng ký GPS hợp lệ từ cư dân.",
+            "expected_result": "Thông tin yêu cầu GPS và hồ sơ cư dân được hiển thị đầy đủ.",
+            "evidence_refs": ["feature.trigger", "feature.inputs.0", "feature.systems_involved.0"]
+          },
+          {
+            "actor": "Ban quản lý",
+            "action": "Đối chiếu yêu cầu GPS với danh sách GPS Device còn trong kho.",
+            "input_or_trigger": "Danh sách GPS Device trong kho",
+            "expected_result": "Yêu cầu đủ điều kiện được chuyển sang bước giữ thiết bị.",
+            "evidence_refs": ["feature.inputs.1", "feature.constraints.0"]
+          },
+          {
+            "actor": "Portal",
+            "action": "Khởi tạo hồ sơ cấp phát và giữ chỗ GPS Device được chọn.",
+            "input_or_trigger": null,
+            "expected_result": "Trạng thái yêu cầu và trạng thái GPS Device được cập nhật đồng bộ.",
+            "evidence_refs": ["feature.outputs.0", "feature.outputs.1", "feature.systems_involved.0"]
+          }
+        ],
+        "alternate_flows": [
+          {
+            "source_step_number": 2,
+            "condition": "Không còn GPS Device ở trạng thái Trong kho.",
+            "steps": [
+              {
+                "actor": "Ban quản lý",
+                "action": "Đánh dấu yêu cầu chờ bổ sung thiết bị và ghi rõ lý do thiếu tồn kho.",
+                "input_or_trigger": null,
+                "expected_result": "Yêu cầu chưa được cấp phát nhưng trạng thái xử lý đã rõ ràng.",
+                "evidence_refs": ["feature.constraints.0", "feature.outputs.0"]
+              }
+            ],
+            "rejoin_step_number": null,
+            "terminal_outcome": "Yêu cầu chuyển sang trạng thái chờ thiết bị.",
+            "evidence_refs": ["feature.constraints.0", "feature.outputs.0"]
+          }
+        ],
+        "success_outcome": "Yêu cầu GPS được cấp phát thành công và cư dân nhận được thông báo.",
+        "evidence_refs": ["feature.feature_summary", "feature.success_outcome", "feature.outputs.2"]
+      }
+    ]
+  }
+}

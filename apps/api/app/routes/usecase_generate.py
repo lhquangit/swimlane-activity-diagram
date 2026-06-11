@@ -13,8 +13,8 @@ from app.runtime_contract import (
 )
 from app.schemas.common import ErrorObject, ResponseEnvelope
 from app.schemas.usecase import UseCaseGenerationRequest, UseCaseGenerationResult
-from app.usecases.deterministic_builder import build_artifact_chain
-from app.usecases.generation_service import UseCaseGenerationService
+from app.usecases.artifact_chain import build_artifact_chain
+from app.usecases.generation_service import UseCaseGenerationFailure, UseCaseGenerationService
 
 router = APIRouter()
 rate_limiter = InMemoryRateLimiter(parse_rate_limit("60/minute"))
@@ -45,13 +45,26 @@ def generate_use_cases(
         )
         return json_response_from_envelope(envelope, 429)
 
-    outcome = generation_service.generate(
-        payload.project_spec,
-        payload.feature_intent,
-        payload.generation_preference,
-    )
+    try:
+        outcome = generation_service.generate(
+            payload.project_spec,
+            payload.feature_intent,
+            payload.generation_preference,
+        )
+    except UseCaseGenerationFailure as exc:
+        envelope = ResponseEnvelope(
+            request_id=request_id,
+            status="failed",
+            error=ErrorObject(
+                code=exc.code,
+                message=exc.message,
+                retryable=exc.retryable,
+            ),
+            metadata=exc.metadata,
+        )
+        return json_response_from_envelope(envelope, exc.status_code)
     result = UseCaseGenerationResult(
-        generation_source=outcome.metadata.generation_source or "deterministic_fallback",
+        generation_source=outcome.metadata.generation_source or "ai",
         artifact_chain=build_artifact_chain(),
         project_spec=payload.project_spec,
         feature_intent=payload.feature_intent,

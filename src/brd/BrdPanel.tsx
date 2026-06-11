@@ -35,7 +35,6 @@ type Props = {
 
 const TABS: Array<{ id: BrdTabId; label: string }> = [
   { id: 'warnings', label: 'Warnings' },
-  { id: 'spec', label: 'Structured Spec' },
   { id: 'draft', label: 'BRD Draft' },
 ];
 
@@ -85,15 +84,6 @@ export default function BrdPanel({
         >
           ×
         </button>
-      </div>
-
-      <div className="brd-panel__meta">
-        <span>{requestId ? `Request ${requestId}` : 'Chưa generate'}</span>
-        {metadata?.model ? <span>{metadata.model}</span> : null}
-        {typeof metadata?.latency_ms === 'number' ? <span>{metadata.latency_ms} ms</span> : null}
-        {typeof metadata?.estimated_cost_usd === 'number' ? (
-          <span>~ ${metadata.estimated_cost_usd.toFixed(2)}</span>
-        ) : null}
       </div>
 
       {isOutdated ? (
@@ -156,22 +146,11 @@ export default function BrdPanel({
                 <div key={`${warning.code}-${index}`} className={`warning-item ${warning.severity}`}>
                   <div className="warning-item__code">{warning.code}</div>
                   <div className="warning-item__message">{warning.message}</div>
-                  {warning.related_node_ids.length > 0 ? (
-                    <div className="warning-item__nodes">{warning.related_node_ids.join(', ')}</div>
-                  ) : null}
                 </div>
               ))
             ) : (
               <p className="brd-panel__empty">Không có warning nổi bật.</p>
             )}
-          </div>
-        ) : null}
-
-        {activeTab === 'spec' ? (
-          <div className="brd-panel__code-wrap">
-            <pre className="brd-panel__code">
-              {spec ? JSON.stringify(spec, null, 2) : 'Chưa có structured spec.'}
-            </pre>
           </div>
         ) : null}
 

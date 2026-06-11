@@ -1,0 +1,65 @@
+{
+  "feature_intent": {
+    "feature_name": "Đăng ký xe khách",
+    "feature_summary": "Cư dân đăng ký xe khách trước giờ vào cổng để bảo vệ kiểm tra và cho phép vào khu dân cư.",
+    "actors": ["Cư dân", "V-App", "Bảo vệ", "Barrier"],
+    "primary_actor": "Cư dân",
+    "trigger": "Cư dân cần cho một xe khách vào khu dân cư.",
+    "inputs": ["Biển số xe khách", "Thời gian vào dự kiến"],
+    "outputs": ["Phiếu đăng ký xe khách", "Trạng thái cho phép vào cổng"],
+    "constraints": ["Phiếu chỉ có hiệu lực trong ngày đăng ký"],
+    "success_outcome": "Bảo vệ có thông tin hợp lệ để cho xe khách vào cổng đúng thời gian."
+  },
+  "synthesis": {
+    "use_cases": [
+      {
+        "title": "Cư dân phối hợp actor và hệ thống để hoàn tất xe khách",
+        "objective": "Thực thi nghiệp vụ cốt lõi cho xe khách.",
+        "primary_actor": "Cư dân",
+        "supporting_actors": ["V-App", "Bảo vệ", "Barrier"],
+        "preconditions": ["Có nhu cầu đưa xe khách vào khu dân cư."],
+        "main_flow_steps": [
+          {
+            "actor": "Cư dân",
+            "action": "Mở thông tin chi tiết cần xử lý",
+            "input_or_trigger": "Cư dân cần cho một xe khách vào khu dân cư.",
+            "expected_result": "Có dữ liệu để tiếp tục.",
+            "evidence_refs": ["feature.trigger"]
+          },
+          {
+            "actor": "Bảo vệ",
+            "action": "Thực hiện các hành động nghiệp vụ chính",
+            "input_or_trigger": "Biển số xe khách",
+            "expected_result": "Có kết quả xử lý.",
+            "evidence_refs": ["feature.inputs.0"]
+          }
+        ],
+        "alternate_flows": [
+          {
+            "source_step_number": 2,
+            "condition": "Có ngoại lệ.",
+            "steps": [
+              {
+                "actor": "Barrier",
+                "action": "Ghi nhận và xử lý ngoại lệ theo quy trình",
+                "input_or_trigger": null,
+                "expected_result": "Ngoại lệ được đóng.",
+                "evidence_refs": ["feature.constraints.0"]
+              }
+            ],
+            "rejoin_step_number": null,
+            "terminal_outcome": "Nghiệp vụ được hoàn tất.",
+            "evidence_refs": ["feature.constraints.0"]
+          }
+        ],
+        "success_outcome": "Xe khách được xử lý.",
+        "evidence_refs": ["feature.feature_summary", "feature.success_outcome"]
+      }
+    ]
+  },
+  "expected_issue_codes": [
+    "GENERIC_USE_CASE_BOUNDARY",
+    "GENERIC_OUTPUT"
+  ],
+  "offending_use_case_title": "Cư dân phối hợp actor và hệ thống để hoàn tất xe khách"
+}

@@ -15,6 +15,7 @@ type ArtifactTreeProps = {
     businessKey: string;
     title: string;
   }) => void;
+  deletingUseCaseIds?: Record<string, boolean>;
   sidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
 };
@@ -25,6 +26,7 @@ export default function ArtifactTree({
   onSelect,
   onCreateFeature,
   onDeleteUseCase,
+  deletingUseCaseIds = {},
   sidebarCollapsed = false,
   onToggleSidebar,
 }: ArtifactTreeProps) {
@@ -205,6 +207,7 @@ export default function ArtifactTree({
                           ) : null}
                           {feature.use_cases.map((useCase) => {
                             const useCaseKey = `usecase:${useCase.id}`;
+                            const useCaseDeleting = Boolean(deletingUseCaseIds[useCase.id]);
                             const useCaseActive =
                               sameArtifact(active, {
                                 kind: 'use-case',
@@ -227,6 +230,7 @@ export default function ArtifactTree({
                                   <button
                                     type="button"
                                     className="artifact-tree__toggle"
+                                    disabled={useCaseDeleting}
                                     onClick={() => toggle(useCaseKey)}
                                     aria-label={
                                       collapsed[useCaseKey]
@@ -241,6 +245,7 @@ export default function ArtifactTree({
                                     label={useCase.title}
                                     meta={`${useCase.use_case_key} · ${useCase.review_status}`}
                                     active={useCaseActive}
+                                    disabled={useCaseDeleting}
                                     onClick={() =>
                                       onSelect({
                                         kind: 'use-case',
@@ -253,8 +258,17 @@ export default function ArtifactTree({
                                     <button
                                       type="button"
                                       className="artifact-tree__row-action artifact-tree__row-action--danger"
-                                      aria-label={`Xóa ${useCase.title}`}
-                                      title={`Xóa ${useCase.title}`}
+                                      aria-label={
+                                        useCaseDeleting
+                                          ? `Đang xóa ${useCase.title}`
+                                          : `Xóa ${useCase.title}`
+                                      }
+                                      title={
+                                        useCaseDeleting
+                                          ? `Đang xóa ${useCase.title}`
+                                          : `Xóa ${useCase.title}`
+                                      }
+                                      disabled={useCaseDeleting}
                                       onClick={(event) => {
                                         event.stopPropagation();
                                         onDeleteUseCase({
@@ -265,7 +279,7 @@ export default function ArtifactTree({
                                         });
                                       }}
                                     >
-                                      ×
+                                      {useCaseDeleting ? '…' : '×'}
                                     </button>
                                   ) : null}
                                 </div>
@@ -281,6 +295,7 @@ export default function ArtifactTree({
                                           : 'Tạo từ Use Case đã duyệt'
                                       }
                                       muted={!useCase.diagram}
+                                      disabled={useCaseDeleting}
                                       active={sameArtifact(active, {
                                         kind: 'diagram',
                                         featureId: feature.id,
@@ -307,6 +322,7 @@ export default function ArtifactTree({
                                           : 'Chưa có dữ liệu'
                                       }
                                       muted={!useCase.diagram?.brd}
+                                      disabled={useCaseDeleting}
                                       active={sameArtifact(active, {
                                         kind: 'brd',
                                         featureId: feature.id,
@@ -354,12 +370,14 @@ function TreeItem({
   meta,
   active,
   muted = false,
+  disabled = false,
   onClick,
 }: {
   label: string;
   meta: string;
   active: boolean;
   muted?: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -367,6 +385,7 @@ function TreeItem({
       type="button"
       role="treeitem"
       aria-current={active ? 'page' : undefined}
+      disabled={disabled}
       className={[
         'artifact-tree__item',
         active ? 'active' : '',

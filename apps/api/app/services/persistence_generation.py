@@ -12,8 +12,8 @@ from app.schemas.persistence import validate_saved_diagram_graph
 from app.schemas.request import GenerateRequest
 from app.schemas.usecase import FeatureIntent, ProjectSpec, UseCaseDraft, UseCaseGenerationResult
 from app.services.diagram_builder import generate_diagram_draft
-from app.usecases.deterministic_builder import build_artifact_chain
-from app.usecases.generation_service import UseCaseGenerationService
+from app.usecases.artifact_chain import build_artifact_chain
+from app.usecases.generation_service import UseCaseGenerationFailure, UseCaseGenerationService
 
 
 generation_service = UseCaseGenerationService(settings)
@@ -46,14 +46,22 @@ def generate_feature_use_case_envelope(
         systems_involved=feature.systems_involved,
         success_outcome=feature.success_outcome,
     )
-    preference = (
-        generation_preference
-        if generation_preference in {"auto", "ai", "deterministic"}
-        else "auto"
-    )
-    outcome = generation_service.generate(project_spec, intent, preference)
+    preference = generation_preference if generation_preference == "ai" else "ai"
+    try:
+        outcome = generation_service.generate(project_spec, intent, preference)
+    except UseCaseGenerationFailure as exc:
+        return ResponseEnvelope(
+            request_id=f"req_{uuid4().hex[:12]}",
+            status="failed",
+            error=ErrorObject(
+                code=exc.code,
+                message=exc.message,
+                retryable=exc.retryable,
+            ),
+            metadata=exc.metadata,
+        )
     result = UseCaseGenerationResult(
-        generation_source=outcome.metadata.generation_source or "deterministic_fallback",
+        generation_source=outcome.metadata.generation_source or "ai",
         artifact_chain=build_artifact_chain(),
         project_spec=project_spec,
         feature_intent=intent,

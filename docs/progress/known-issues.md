@@ -21,6 +21,121 @@ Severity:
 
 ---
 
+## [FIXED] Use-case generation từng dễ trả về bản nháp generic, khó dùng cho BA review hoặc downstream artifact (severity: P1) {#open-usecase-generation-unusable-output}
+
+- **ID**: KI-46
+- **Phát hiện**: 2026-06-12 by Codex (targeted review)
+- **Severity**: P1 — artifact cốt lõi của workflow đang có thể "hợp schema nhưng vô dụng", kéo theo
+  diagram và BRD downstream cũng mất giá trị.
+- **Reproduction**:
+  1. Ở local/dev env không cấu hình rõ `USECASE_GENERATION_MODE`, mở màn `Use Case`.
+  2. Chọn `Theo hệ thống` hoặc thậm chí `Ưu tiên AI`, rồi bấm `Sinh use case`.
+  3. Quan sát danh sách tạo ra thường là các nhóm intake / execution / coordination / exception với
+     câu chữ template và luồng khá giống nhau giữa nhiều domain.
+  4. Badge `Bản nháp theo rule` có thể có, nhưng rất dễ bị đọc sau cùng thay vì trước khi user kỳ
+     vọng AI.
+- **Root cause**:
+  1. Backend default `USECASE_GENERATION_MODE=deterministic`, và local env review lần này không có
+     `USECASE_*` override nên server thiên về rule-based path.
+  2. Deterministic builder tạo 1-4 use case từ heuristic keyword/count và fixed templates, không đủ
+     năng lực semantic planning cho nghiệp vụ thật.
+  3. Quality gate hiện tại chỉ bắt duplication/filler/technical-actor coverage, chưa bắt các bản
+     nháp semantically weak nhưng vẫn "đẹp" về cấu trúc.
+  4. Test suite khóa legality và metadata tốt hơn là khóa business usability.
+- **Fix**: Hoàn thành `TASK-216` đến `TASK-219`. Feature resources giờ expose runtime generation
+  thật cho persisted UI, deterministic path được relabel thành `scaffold theo rule`, quality gate
+  mới bắt generic boundary + missing trace coverage, và acceptance goldens mới khóa các domain GPS
+  device / camera re-id cùng một fixture scaffold-like phải bị reject.
+- **Verified**: 2026-06-12 by Codex — focused `pytest` suites for generation service, quality
+  goldens, persistence auth/chain, persisted Use Case UI regressions, `npm run build`, and
+  `git diff --check`.
+
+---
+
+## [FIXED] AI-auth failure từng bị biến thành persisted scaffold draft cho Use Case (severity: P1) {#open-usecase-provider-failure-silent-fallback}
+
+- **ID**: KI-48
+- **Phát hiện**: 2026-06-12 by Codex (targeted review + live provider replay)
+- **Severity**: P1 — user kỳ vọng AI nhưng hệ thống lưu deterministic scaffold vô nghĩa như thể đó
+  là artifact hợp lệ, làm mất niềm tin và tốn thời gian review.
+- **Reproduction**:
+  1. Dùng môi trường có `USECASE_PROVIDER=openrouter`, `USECASE_GENERATION_MODE=ai_default`, và
+     UI cho phép `Ưu tiên AI`.
+  2. Sinh Use Case cho feature `Luồng tích điểm cho thú cưng`.
+  3. Quan sát artifact chứa các câu template như `cư dân tiếp nhận và khởi tạo xử lý...`,
+     `kiểm tra tính đầy đủ và ngữ cảnh ban đầu...`.
+  4. Kiểm tra `latest_usecase_generation` của feature thấy
+     `generation_source=deterministic_fallback` và `fallback_reason=provider_failure`.
+  5. Replay trực tiếp provider call trả `OpenRouter HTTP 401: {"error":{"message":"User not found.","code":401}}`.
+- **Root cause**:
+  1. `UseCaseGenerationService` đang chuyển non-retryable provider/auth failures thành
+     `_fallback(...)` thay vì fail closed.
+  2. Deterministic builder vẫn sinh scaffold text quá generic để BA review.
+  3. Runtime/UI truthfulness mới chỉ check có key hay không, chưa check auth/session provider còn
+     usable hay không.
+  4. Persisted UI không surface rõ `fallback_reason=provider_failure`.
+- **Fix**: Hoàn thành `TASK-229` đến `TASK-233` để chuyển Use Case authoring sang AI-only: route
+  và persisted generation flow giờ fail closed trên provider/auth/config failure hoặc quality
+  rejection thay vì sinh scaffold fallback; deterministic builder bị rút khỏi production authoring
+  path; và UI/docs không còn quảng bá scaffold như một output bình thường cho BA review.
+- **Verified**: 2026-06-12 by Codex — focused generation-service regressions, persistence auth/chain
+  regressions, persisted Use Case UI regressions, `npm run build`, và `git diff --check`.
+
+---
+
+## [FIXED] AI-enabled Use Case generation từng dễ trả output quá thô để dùng cho BA review (severity: P1) {#open-ai-usecase-still-poor}
+
+- **ID**: KI-47
+- **Phát hiện**: 2026-06-12 by Codex (targeted review)
+- **Severity**: P1 — local env hiện đã attempt AI cho Use Case, nhưng quality bar của output vẫn có
+  thể thấp hơn kỳ vọng business review.
+- **Reproduction**:
+  1. Cấu hình local với `USECASE_PROVIDER=openrouter`, `USECASE_GENERATION_MODE=ai_default`, và
+     chọn `Ưu tiên AI` hoặc dùng flow mặc định AI-enabled.
+  2. Sinh Use Case cho một feature thực tế.
+  3. Quan sát output có thể vẫn hợp schema, giữ actor, và qua quality gate nhưng vẫn quá rộng hoặc
+     chưa đủ sắc để BA dùng tiếp.
+- **Root cause**:
+  1. Prompt hiện ưu tiên legality/grounding nhiều hơn business segmentation sâu.
+  2. Pipeline Use Case hiện dùng một pass model duy nhất cho decomposition + flow design + evidence
+     mapping, không có critic/planner pass.
+  3. Local model policy hiện dùng `USECASE_MODEL_PRIMARY=openai/gpt-5.4-mini`, có thể chưa đủ mạnh
+     cho bài toán semantic planning này.
+  4. Golden suite hiện tốt hơn trước nhưng vẫn chưa phủ đủ các domain complaint thật của product.
+- **Fix**: Hoàn thành `TASK-223`, `TASK-224`, và `TASK-225`. Repo default giờ dùng prompt
+  `usecase_synthesis@1.2.0` với heuristics phân rã business, ví dụ đạt/không đạt và checklist tự
+  rà soát; model policy BA-facing được nâng lên `USECASE_MODEL_PRIMARY=openai/gpt-5.5` và được ghi
+  rõ trong `docs/product/usecase-synthesis-model-policy.md`; golden suite được mở rộng bằng các
+  complaint domains `Tích điểm cho thú cưng`, `Đăng ký xe khách`, và `Tiếp nhận phiếu bảo trì` ở
+  cả nhánh accepted và scaffold-like rejected.
+- **Verified**: 2026-06-12 by Codex — focused `pytest` suites for prompt registry, model-policy
+  artifacts, generation service metadata, and expanded synthesis goldens.
+
+---
+
+## [FIXED] Persisted `Use Case` screen cho bấm `Tạo diagram` dù bản mới nhất chưa được lưu (severity: P2) {#open-usecase-diagram-save-gate-ui-mismatch}
+
+- **ID**: KI-45
+- **Phát hiện**: 2026-06-12 by Codex (targeted review)
+- **Severity**: P2 — không làm sai dữ liệu vì workspace đã chặn ở command layer, nhưng UX hiện tại
+  dẫn user vào một action không thực thi được rồi mới báo lỗi.
+- **Reproduction**:
+  1. Mở persisted `Use Case` editor cho một Use Case đã `approved`.
+  2. Sửa title, actor, step, hoặc bất kỳ nội dung nào để Use Case chuyển sang trạng thái chưa lưu.
+  3. Quan sát nút `Tạo diagram` vẫn còn hiển thị và có thể bấm.
+  4. Bấm nút đó.
+  5. Hệ thống không sinh Diagram mà trả lỗi `Hãy lưu Use Case mới nhất trước khi sinh Diagram.`.
+- **Root cause**: Guard save-first nằm đúng ở `workspace.generateDiagram()` trong
+  `ProjectWorkspace`, nhưng persisted `Use Case` route chỉ disable CTA theo `approved`/contract
+  validity/pending generation, không disable theo `workspace.useCaseSaveState`.
+- **Fix**: Hoàn thành qua `TASK-215`: persisted `Use Case` editor và missing-diagram route giờ
+  derive label/disabled state của Diagram CTA từ `workspace.useCaseSaveState`, nên dirty / saving /
+  failed sẽ hiện save-first guidance và không cho click sinh Diagram trước khi lưu xong.
+- **Verified**: 2026-06-12 by Codex — focused `PersistedUseCaseWorkspace` regression pass,
+  `npm run build` pass, `git diff --check` pass.
+
+---
+
 ## [FIXED] AI-generated BRD chưa bám format tài liệu mẫu `examples/BRD.docx.md` (severity: P1) {#open-brd-format-vs-sample-template}
 
 - **ID**: KI-44

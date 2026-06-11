@@ -1,0 +1,76 @@
+{
+  "feature_intent": {
+    "feature_name": "Tra cứu re-id camera",
+    "feature_summary": "Camera AI và dịch vụ re-id hỗ trợ nhận diện và đối chiếu đối tượng theo yêu cầu của ban quản lý.",
+    "actors": ["Ban quản lý", "Camera AI", "Dịch vụ Re-ID"],
+    "primary_actor": "Ban quản lý",
+    "trigger": "Ban quản lý gửi yêu cầu truy vết đối tượng từ ảnh truy vấn.",
+    "inputs": ["Ảnh truy vấn", "Luồng camera"],
+    "outputs": ["Kết quả đối sánh re-id", "Báo cáo xác minh"],
+    "constraints": ["Chỉ dùng dữ liệu camera trong phạm vi cho phép."],
+    "assumptions": [],
+    "systems_involved": ["Camera AI", "Dịch vụ Re-ID"],
+    "success_outcome": "Kết quả đối sánh được trả về cho ban quản lý."
+  },
+  "synthesis": {
+    "use_cases": [
+      {
+        "title": "Ban quản lý khởi tạo yêu cầu tra cứu re-id từ ảnh truy vấn",
+        "objective": "Khởi tạo đúng yêu cầu tra cứu để pipeline camera và dịch vụ re-id xử lý cùng một ngữ cảnh nghiệp vụ.",
+        "primary_actor": "Ban quản lý",
+        "supporting_actors": ["Camera AI", "Dịch vụ Re-ID"],
+        "preconditions": ["Ban quản lý đã có ảnh truy vấn hợp lệ."],
+        "main_flow_steps": [
+          {
+            "actor": "Ban quản lý",
+            "action": "Gửi ảnh truy vấn và phạm vi truy vết cần kiểm tra.",
+            "input_or_trigger": "Ảnh truy vấn",
+            "expected_result": "Yêu cầu tra cứu re-id được khởi tạo với đầy đủ đầu vào.",
+            "evidence_refs": ["feature.inputs.0", "feature.trigger"]
+          },
+          {
+            "actor": "Camera AI",
+            "action": "Trích xuất khung hình và đặc trưng đối tượng từ các luồng camera liên quan.",
+            "input_or_trigger": "Luồng camera",
+            "expected_result": "Dữ liệu camera phù hợp được chuyển tiếp cho dịch vụ re-id.",
+            "evidence_refs": ["feature.inputs.1", "feature.systems_involved.0"]
+          },
+          {
+            "actor": "Dịch vụ Re-ID",
+            "action": "Đối chiếu đặc trưng ảnh truy vấn với dữ liệu camera đã trích xuất.",
+            "input_or_trigger": null,
+            "expected_result": "Kết quả đối sánh re-id được tạo và sẵn sàng trả về.",
+            "evidence_refs": ["feature.outputs.0", "feature.systems_involved.1"]
+          },
+          {
+            "actor": "Ban quản lý",
+            "action": "Rà soát kết quả đối sánh và xác nhận báo cáo xác minh cuối.",
+            "input_or_trigger": null,
+            "expected_result": "Báo cáo xác minh được hoàn tất cho yêu cầu tra cứu.",
+            "evidence_refs": ["feature.outputs.1", "feature.success_outcome"]
+          }
+        ],
+        "alternate_flows": [
+          {
+            "source_step_number": 2,
+            "condition": "Nguồn camera nằm ngoài phạm vi cho phép của yêu cầu.",
+            "steps": [
+              {
+                "actor": "Camera AI",
+                "action": "Bỏ qua các luồng camera không thuộc phạm vi cho phép và ghi log lý do.",
+                "input_or_trigger": null,
+                "expected_result": "Pipeline chỉ giữ lại dữ liệu camera hợp lệ cho bước đối chiếu.",
+                "evidence_refs": ["feature.constraints.0", "feature.systems_involved.0"]
+              }
+            ],
+            "rejoin_step_number": 3,
+            "terminal_outcome": null,
+            "evidence_refs": ["feature.constraints.0"]
+          }
+        ],
+        "success_outcome": "Kết quả đối sánh được trả về cho ban quản lý.",
+        "evidence_refs": ["feature.feature_summary", "feature.success_outcome"]
+      }
+    ]
+  }
+}

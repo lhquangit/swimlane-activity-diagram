@@ -90,6 +90,8 @@ export default function ProjectWorkspace({
   const [projectSaveState, setProjectSaveState] = useState<SaveState>('idle');
   const [specSaveState, setSpecSaveState] = useState<SaveState>('idle');
   const [featureSaveState, setFeatureSaveState] = useState<SaveState>('idle');
+  const [deletingFeatureId, setDeletingFeatureId] = useState<string | null>(null);
+  const [deletingUseCaseIds, setDeletingUseCaseIds] = useState<Record<string, boolean>>({});
   const [saveStateRegistry, setSaveStateRegistry] = useState<SaveStateRegistry>({});
   const [activeDiagramBusinessKey, setActiveDiagramBusinessKey] = useState<string | null>(null);
   const [artifactSidebarCollapsed, setArtifactSidebarCollapsed] = useState(() =>
@@ -374,7 +376,7 @@ export default function ProjectWorkspace({
   };
 
   const saveFeature = async () => {
-    if (!tree || !featureDraft.feature_name.trim() || !featureDraft.feature_summary.trim()) return;
+    if (!tree || !isFeatureDraftComplete(featureDraft)) return;
     setFeatureSaveState('saving');
     setError(null);
     try {
@@ -401,10 +403,13 @@ export default function ProjectWorkspace({
 
   const deleteFeature = async () => {
     if (!activeFeature) return;
+    if (deletingFeatureId === activeFeature.id) return;
     if (!confirmDiscardActiveChanges('Bỏ các thay đổi chưa lưu trước khi xóa Feature?')) return;
     if (!window.confirm(`Xóa feature "${activeFeature.name}" và toàn bộ artifact liên quan?`)) {
       return;
     }
+    setDeletingFeatureId(activeFeature.id);
+    setError(null);
     try {
       await api.deleteFeature(activeFeature.id);
       setSaveStateRegistry((current) => clearFeatureScopes(current, activeFeature.id));
@@ -419,6 +424,8 @@ export default function ProjectWorkspace({
       navigate(artifactPath(projectId, { kind: 'spec' }), { replace: true });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Không xóa được Feature.');
+    } finally {
+      setDeletingFeatureId((current) => (current === activeFeature.id ? null : current));
     }
   };
 
@@ -459,8 +466,8 @@ export default function ProjectWorkspace({
         setActiveDiagram(null);
         setActiveDiagramBusinessKey(null);
       }
-      await refreshArtifactTree();
       navigateToArtifact({ kind: 'use-cases', featureId: activeFeature.id });
+      await refreshArtifactTree();
     },
     [
       activeDiagram?.id,
@@ -473,8 +480,51 @@ export default function ProjectWorkspace({
     ],
   );
 
+  const deleteUseCaseFromTreeResource = useCallback(
+    async ({
+      featureId,
+      useCaseId,
+      businessKey,
+    }: {
+      featureId: string;
+      useCaseId: string;
+      businessKey: string;
+    }) => {
+      await api.deleteUseCase(useCaseId);
+      if (activeFeature?.id === featureId) {
+        setUseCaseResources((current) => current.filter((item) => item.id !== useCaseId));
+      }
+      setSaveStateRegistry((current) =>
+        clearScopesByPredicate(
+          current,
+          (scope) =>
+            scope.resourceId === businessKey ||
+            scope.key.includes(`:${featureId}:`) ||
+            scope.key.includes(`:diagram:${businessKey}`) ||
+            (activeDiagram?.use_case_id === useCaseId && scope.resourceId === activeDiagram.id),
+        ),
+      );
+      if (activeDiagram?.use_case_id === useCaseId) {
+        setActiveDiagram(null);
+        setActiveDiagramBusinessKey(null);
+      }
+      navigateToArtifact({ kind: 'use-cases', featureId });
+      await refreshArtifactTree();
+    },
+    [
+      activeDiagram?.id,
+      activeDiagram?.use_case_id,
+      activeFeature?.id,
+      api,
+      navigateToArtifact,
+      refreshArtifactTree,
+    ],
+  );
+
   const handleDeleteUseCaseFromTree = useCallback(
     async ({
+      featureId,
+      useCaseId,
       businessKey,
       title,
     }: {
@@ -491,13 +541,22 @@ export default function ProjectWorkspace({
       ) {
         return;
       }
+      setDeletingUseCaseIds((current) => ({ ...current, [useCaseId]: true }));
+      setError(null);
       try {
-        await deleteUseCaseResource(businessKey);
+        await deleteUseCaseFromTreeResource({ featureId, useCaseId, businessKey });
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : 'Không thể xóa Use Case.');
+      } finally {
+        setDeletingUseCaseIds((current) => {
+          if (!current[useCaseId]) return current;
+          const next = { ...current };
+          delete next[useCaseId];
+          return next;
+        });
       }
     },
-    [deleteUseCaseResource],
+    [deleteUseCaseFromTreeResource],
   );
 
   const contextValue = useMemo<WorkspacePersistence | null>(() => {
@@ -806,6 +865,8 @@ export default function ProjectWorkspace({
   const showUseCaseEditor = !routeError && activeArtifact.kind === 'use-case';
   const showDiagramEditor = !routeError && activeArtifact.kind === 'diagram';
   const showBrdEditor = !routeError && activeArtifact.kind === 'brd';
+  const deletingActiveFeature = Boolean(activeFeature && deletingFeatureId === activeFeature.id);
+  const canSaveFeatureDraft = isFeatureDraftComplete(featureDraft);
   const showCanvasEditor = showDiagramEditor;
   const showMissingDiagramState =
     showDiagramEditor && activeTreeUseCase != null && !activeTreeUseCase.diagram;
@@ -818,7 +879,6 @@ export default function ProjectWorkspace({
         <div>
           <button className="workspace-back" onClick={leaveWorkspace}>← Projects</button>
           <h1>{tree.project.name}</h1>
-          <p>Project Spec → Feature Intent → Use Case → Diagram → BRD</p>
         </div>
         <div className="workspace-header__actions">
           {hasUnsavedChanges ? <span className="save-state dirty">Có thay đổi chưa lưu</span> : null}
@@ -839,6 +899,7 @@ export default function ProjectWorkspace({
           onSelect={navigateToArtifact}
           onCreateFeature={startNewFeature}
           onDeleteUseCase={(payload) => void handleDeleteUseCaseFromTree(payload)}
+          deletingUseCaseIds={deletingUseCaseIds}
           sidebarCollapsed={artifactSidebarCollapsed}
           onToggleSidebar={() => setArtifactSidebarCollapsed((current) => !current)}
         />
@@ -903,29 +964,45 @@ export default function ProjectWorkspace({
                 </div>
                 <div className="workspace-header__actions">
                   {featureDraftId ? (
-                    <button className="workspace-button danger" onClick={() => void deleteFeature()}>
-                      Xóa
-                    </button>
-                  ) : null}
-                  {featureDraftId ? (
                     <button
-                      className="workspace-button"
-                      onClick={() =>
-                        navigateToArtifact({
-                          kind: 'use-cases',
-                          featureId: featureDraftId,
-                        })
-                      }
+                      className="workspace-button danger"
+                      onClick={() => void deleteFeature()}
+                      disabled={deletingActiveFeature}
                     >
-                      Use Cases
+                      {deletingActiveFeature ? 'Đang xóa…' : 'Xóa'}
                     </button>
                   ) : null}
-                  <SaveButton state={featureSaveState} onClick={() => void saveFeature()} />
+                  <SaveButton
+                    state={featureSaveState}
+                    onClick={() => void saveFeature()}
+                    disabled={!canSaveFeatureDraft}
+                  />
                 </div>
               </div>
-              <TextField label="Tên feature" value={featureDraft.feature_name} onChange={(feature_name) => updateFeatureDraft({ feature_name })} />
-              <TextArea label="Mô tả feature" value={featureDraft.feature_summary} onChange={(feature_summary) => updateFeatureDraft({ feature_summary })} />
-              <ListField label="Actors" value={featureDraft.actors ?? []} onChange={(actors) => updateFeatureDraft({ actors, primary_actor: actors[0] ?? null })} />
+              <TextField
+                label="Tên feature"
+                value={featureDraft.feature_name}
+                onChange={(feature_name) => updateFeatureDraft({ feature_name })}
+                required
+                invalid={featureDraft.feature_name.trim().length === 0}
+                helperText={featureDraft.feature_name.trim().length === 0 ? 'Trường bắt buộc.' : undefined}
+              />
+              <TextArea
+                label="Mô tả feature"
+                value={featureDraft.feature_summary}
+                onChange={(feature_summary) => updateFeatureDraft({ feature_summary })}
+                required
+                invalid={featureDraft.feature_summary.trim().length === 0}
+                helperText={featureDraft.feature_summary.trim().length === 0 ? 'Trường bắt buộc.' : undefined}
+              />
+              <ListField
+                label="Actors"
+                value={featureDraft.actors ?? []}
+                onChange={(actors) => updateFeatureDraft({ actors, primary_actor: actors[0] ?? null })}
+                required
+                invalid={!hasRequiredActors(featureDraft.actors ?? [])}
+                helperText={!hasRequiredActors(featureDraft.actors ?? []) ? 'Nhập ít nhất một actor.' : undefined}
+              />
               <TextField label="Trigger" value={featureDraft.trigger ?? ''} onChange={(trigger) => updateFeatureDraft({ trigger })} />
               <ListField label="Inputs" value={featureDraft.inputs} onChange={(inputs) => updateFeatureDraft({ inputs })} />
               <ListField label="Outputs" value={featureDraft.outputs} onChange={(outputs) => updateFeatureDraft({ outputs })} />
@@ -1019,9 +1096,21 @@ function aggregateSaveState(...states: SaveState[]): SaveState {
   return 'idle';
 }
 
-function SaveButton({ state, onClick }: { state: SaveState; onClick: () => void }) {
+function SaveButton({
+  state,
+  onClick,
+  disabled = false,
+}: {
+  state: SaveState;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
-    <button className="workspace-button primary" onClick={onClick} disabled={state === 'saving'}>
+    <button
+      className="workspace-button primary"
+      onClick={onClick}
+      disabled={disabled || state === 'saving'}
+    >
       {state === 'saving' ? 'Đang lưu…' : state === 'saved' ? 'Đã lưu' : state === 'failed' ? 'Thử lưu lại' : 'Lưu'}
     </button>
   );
@@ -1069,15 +1158,79 @@ function ArtifactState({
   );
 }
 
-function TextField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <label className="workspace-field">{label}<input value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+function TextField({
+  label,
+  value,
+  onChange,
+  required = false,
+  invalid = false,
+  helperText,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+  invalid?: boolean;
+  helperText?: string;
+}) {
+  return (
+    <label className={`workspace-field${invalid ? ' workspace-field--invalid' : ''}`}>
+      <FieldLabel label={label} required={required} />
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-invalid={invalid}
+        aria-label={label}
+      />
+      {helperText ? <span className="workspace-field__helper">{helperText}</span> : null}
+    </label>
+  );
 }
 
-function TextArea({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <label className="workspace-field">{label}<textarea value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+function TextArea({
+  label,
+  value,
+  onChange,
+  required = false,
+  invalid = false,
+  helperText,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+  invalid?: boolean;
+  helperText?: string;
+}) {
+  return (
+    <label className={`workspace-field${invalid ? ' workspace-field--invalid' : ''}`}>
+      <FieldLabel label={label} required={required} />
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-invalid={invalid}
+        aria-label={label}
+      />
+      {helperText ? <span className="workspace-field__helper">{helperText}</span> : null}
+    </label>
+  );
 }
 
-function ListField({ label, value, onChange }: { label: string; value: string[]; onChange: (value: string[]) => void }) {
+function ListField({
+  label,
+  value,
+  onChange,
+  required = false,
+  invalid = false,
+  helperText,
+}: {
+  label: string;
+  value: string[];
+  onChange: (value: string[]) => void;
+  required?: boolean;
+  invalid?: boolean;
+  helperText?: string;
+}) {
   const [draft, setDraft] = useState(() => value.join('\n'));
 
   useEffect(() => {
@@ -1087,8 +1240,8 @@ function ListField({ label, value, onChange }: { label: string; value: string[];
   }, [draft, value]);
 
   return (
-    <label className="workspace-field">
-      {label}
+    <label className={`workspace-field${invalid ? ' workspace-field--invalid' : ''}`}>
+      <FieldLabel label={label} required={required} />
       <textarea
         value={draft}
         onChange={(event) => {
@@ -1097,8 +1250,24 @@ function ListField({ label, value, onChange }: { label: string; value: string[];
           onChange(parseTextList(nextDraft));
         }}
         placeholder="Mỗi dòng một giá trị"
+        aria-invalid={invalid}
+        aria-label={label}
       />
+      {helperText ? <span className="workspace-field__helper">{helperText}</span> : null}
     </label>
+  );
+}
+
+function FieldLabel({ label, required }: { label: string; required: boolean }) {
+  return (
+    <span className="workspace-field__label">
+      <span>{label}</span>
+      {required ? (
+        <span className="workspace-field__required" aria-hidden="true">
+          *
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -1111,4 +1280,16 @@ function parseTextList(value: string): string[] {
 
 function sameTextList(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index]);
+}
+
+function isFeatureDraftComplete(featureDraft: FeatureIntent) {
+  return (
+    featureDraft.feature_name.trim().length > 0 &&
+    featureDraft.feature_summary.trim().length > 0 &&
+    hasRequiredActors(featureDraft.actors ?? [])
+  );
+}
+
+function hasRequiredActors(actors: string[]) {
+  return actors.some((actor) => actor.trim().length > 0);
 }

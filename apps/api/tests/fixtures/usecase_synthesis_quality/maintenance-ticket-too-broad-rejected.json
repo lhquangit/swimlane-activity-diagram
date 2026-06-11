@@ -1,0 +1,65 @@
+{
+  "feature_intent": {
+    "feature_name": "Tiếp nhận phiếu bảo trì căn hộ",
+    "feature_summary": "Cư dân gửi yêu cầu bảo trì, lễ tân phân loại và kỹ thuật viên cập nhật kết quả xử lý.",
+    "actors": ["Cư dân", "V-App", "Lễ tân", "Kỹ thuật viên"],
+    "primary_actor": "Cư dân",
+    "trigger": "Cư dân gặp sự cố trong căn hộ và cần gửi yêu cầu bảo trì.",
+    "inputs": ["Mô tả sự cố", "Ảnh hiện trường"],
+    "outputs": ["Phiếu bảo trì", "Trạng thái xử lý"],
+    "constraints": ["Phiếu khẩn cấp phải được lễ tân phân công ngay trong ca trực"],
+    "success_outcome": "Phiếu bảo trì được phân công và trạng thái xử lý được cập nhật đến khi hoàn tất."
+  },
+  "synthesis": {
+    "use_cases": [
+      {
+        "title": "Cư dân thực thi nghiệp vụ cốt lõi cho bảo trì",
+        "objective": "Nghiệp vụ được hoàn tất qua sự phối hợp chung.",
+        "primary_actor": "Cư dân",
+        "supporting_actors": ["V-App", "Lễ tân", "Kỹ thuật viên"],
+        "preconditions": ["Có sự cố cần xử lý."],
+        "main_flow_steps": [
+          {
+            "actor": "Cư dân",
+            "action": "Thực hiện các hành động nghiệp vụ chính",
+            "input_or_trigger": "Cư dân gặp sự cố trong căn hộ và cần gửi yêu cầu bảo trì.",
+            "expected_result": "Có phiếu chờ xử lý.",
+            "evidence_refs": ["feature.trigger"]
+          },
+          {
+            "actor": "Lễ tân",
+            "action": "Xử lý theo quy trình",
+            "input_or_trigger": "Phiếu bảo trì",
+            "expected_result": "Có kết quả xử lý.",
+            "evidence_refs": ["feature.outputs.0"]
+          }
+        ],
+        "alternate_flows": [
+          {
+            "source_step_number": 2,
+            "condition": "Có ngoại lệ.",
+            "steps": [
+              {
+                "actor": "Kỹ thuật viên",
+                "action": "Ghi nhận và xử lý ngoại lệ theo quy trình",
+                "input_or_trigger": null,
+                "expected_result": "Phiếu được đóng.",
+                "evidence_refs": ["feature.constraints.0"]
+              }
+            ],
+            "rejoin_step_number": null,
+            "terminal_outcome": "Nghiệp vụ được hoàn tất.",
+            "evidence_refs": ["feature.constraints.0"]
+          }
+        ],
+        "success_outcome": "Phiếu được xử lý.",
+        "evidence_refs": ["feature.feature_summary", "feature.success_outcome"]
+      }
+    ]
+  },
+  "expected_issue_codes": [
+    "GENERIC_USE_CASE_BOUNDARY",
+    "GENERIC_OUTPUT"
+  ],
+  "offending_use_case_title": "Cư dân thực thi nghiệp vụ cốt lõi cho bảo trì"
+}

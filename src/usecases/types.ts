@@ -99,7 +99,7 @@ export type UseCaseDiagramInventoryItem = {
   can_open_canvas: boolean;
   is_focused: boolean;
   is_active_on_canvas: boolean;
-  operation_state?: 'generating' | 'failed';
+  operation_state?: 'generating' | 'opening' | 'failed';
 };
 
 export type OrphanedDiagramInventoryItem = {
@@ -115,10 +115,10 @@ export type UseCaseGenerationRequest = {
   generation_preference: UseCaseGenerationPreference;
 };
 
-export type UseCaseGenerationPreference = 'auto' | 'ai' | 'deterministic';
+export type UseCaseGenerationPreference = 'ai';
 
 export type UseCaseGenerationResult = {
-  generation_source: 'ai' | 'deterministic_fallback';
+  generation_source: 'ai';
   artifact_chain: ArtifactChainItem[];
   project_spec: ProjectSpec;
   feature_intent: FeatureIntent;

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -8,6 +11,9 @@ from app.usecases.grounding import validate_grounding
 from app.usecases.hydrator import HydrationError, hydrate_synthesis
 from app.usecases.quality import evaluate_synthesis
 from app.usecases.synthesis_schema import UseCaseSynthesisResult
+
+
+QUALITY_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "usecase_synthesis_quality"
 
 
 def project_and_intent() -> tuple[ProjectSpec, FeatureIntent]:
@@ -81,6 +87,10 @@ def valid_synthesis_payload() -> dict:
             }
         ]
     }
+
+
+def load_quality_fixture(name: str) -> dict:
+    return json.loads((QUALITY_FIXTURE_DIR / name).read_text(encoding="utf-8"))
 
 
 def test_hydrator_is_deterministic_and_derives_compatibility_summaries() -> None:
@@ -240,4 +250,83 @@ def test_quality_golden_domains_accept_specific_flows(
     assert (
         evaluate_synthesis(UseCaseSynthesisResult.model_validate(payload)).status
         == "passed"
+    )
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "gps-device-issue-accepted.json",
+        "camera-reid-accepted.json",
+        "pet-points-accepted.json",
+        "guest-vehicle-accepted.json",
+        "maintenance-ticket-accepted.json",
+    ],
+)
+def test_quality_acceptance_goldens_pass_for_domain_specific_synthesis(
+    fixture_name: str,
+) -> None:
+    fixture = load_quality_fixture(fixture_name)
+    feature_intent = FeatureIntent(**fixture["feature_intent"])
+    synthesis = UseCaseSynthesisResult.model_validate(fixture["synthesis"])
+
+    quality = evaluate_synthesis(synthesis, feature_intent)
+
+    assert quality.status == "passed"
+
+
+def test_quality_acceptance_golden_rejects_scaffold_like_template_output() -> None:
+    fixture = load_quality_fixture("generic-template-rejected.json")
+    feature_intent = FeatureIntent(**fixture["feature_intent"])
+    synthesis = UseCaseSynthesisResult.model_validate(fixture["synthesis"])
+
+    quality = evaluate_synthesis(synthesis, feature_intent)
+
+    assert quality.status == "rejected"
+    assert set(fixture["expected_issue_codes"]).issubset(
+        {issue.code for issue in quality.issues}
+    )
+
+
+def test_quality_acceptance_rejects_mixed_portfolio_when_one_use_case_lacks_business_trace() -> None:
+    fixture = load_quality_fixture("mixed-portfolio-missing-trace-rejected.json")
+    feature_intent = FeatureIntent(**fixture["feature_intent"])
+    synthesis = UseCaseSynthesisResult.model_validate(fixture["synthesis"])
+
+    quality = evaluate_synthesis(synthesis, feature_intent)
+
+    assert quality.status == "rejected"
+    assert set(fixture["expected_issue_codes"]).issubset(
+        {issue.code for issue in quality.issues}
+    )
+    assert any(
+        fixture["offending_use_case_title"] in issue.message
+        for issue in quality.issues
+    )
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "pet-points-too-broad-rejected.json",
+        "guest-vehicle-too-broad-rejected.json",
+        "maintenance-ticket-too-broad-rejected.json",
+    ],
+)
+def test_quality_acceptance_rejects_real_complaint_domains_when_boundaries_stay_scaffold_like(
+    fixture_name: str,
+) -> None:
+    fixture = load_quality_fixture(fixture_name)
+    feature_intent = FeatureIntent(**fixture["feature_intent"])
+    synthesis = UseCaseSynthesisResult.model_validate(fixture["synthesis"])
+
+    quality = evaluate_synthesis(synthesis, feature_intent)
+
+    assert quality.status == "rejected"
+    assert set(fixture["expected_issue_codes"]).issubset(
+        {issue.code for issue in quality.issues}
+    )
+    assert any(
+        fixture["offending_use_case_title"] in issue.message
+        for issue in quality.issues
     )

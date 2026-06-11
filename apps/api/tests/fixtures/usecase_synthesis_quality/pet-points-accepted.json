@@ -1,0 +1,124 @@
+{
+  "feature_intent": {
+    "feature_name": "Tích điểm cho thú cưng",
+    "feature_summary": "Mỗi tháng mỗi thú cưng được 100 điểm, khi vi phạm thì bị trừ điểm và ban quản lý cần theo dõi kết quả.",
+    "actors": ["Cư dân", "V-App", "Ban quản lý", "Portal"],
+    "primary_actor": "Ban quản lý",
+    "trigger": "Ban quản lý ghi nhận một vi phạm liên quan đến thú cưng của cư dân.",
+    "inputs": ["Biên bản vi phạm", "Điểm hiện tại của thú cưng"],
+    "outputs": ["Điểm sau cập nhật", "Trạng thái theo dõi vi phạm"],
+    "constraints": ["Điểm không được nhỏ hơn 0", "Mỗi vi phạm chỉ được trừ điểm một lần"],
+    "success_outcome": "Điểm của thú cưng được cập nhật và trạng thái theo dõi phản ánh đúng mức vi phạm."
+  },
+  "synthesis": {
+    "use_cases": [
+      {
+        "title": "Ban quản lý ghi nhận vi phạm và trừ điểm thú cưng",
+        "objective": "Cập nhật số điểm của thú cưng đúng với vi phạm vừa được xác nhận.",
+        "primary_actor": "Ban quản lý",
+        "supporting_actors": ["V-App", "Portal"],
+        "preconditions": ["Vi phạm đã được xác minh với cư dân."],
+        "main_flow_steps": [
+          {
+            "actor": "Ban quản lý",
+            "action": "Mở hồ sơ thú cưng có vi phạm trên Portal.",
+            "input_or_trigger": "Ban quản lý ghi nhận một vi phạm liên quan đến thú cưng của cư dân.",
+            "expected_result": "Hồ sơ thú cưng và điểm hiện tại được hiển thị.",
+            "evidence_refs": ["feature.trigger", "feature.outputs.0"]
+          },
+          {
+            "actor": "Portal",
+            "action": "Hiển thị điểm hiện tại và lịch sử trừ điểm của thú cưng.",
+            "input_or_trigger": "Điểm hiện tại của thú cưng",
+            "expected_result": "Ban quản lý thấy đủ căn cứ để chọn mức trừ điểm.",
+            "evidence_refs": ["feature.inputs.1"]
+          },
+          {
+            "actor": "Ban quản lý",
+            "action": "Chọn mức vi phạm và xác nhận trừ điểm cho thú cưng.",
+            "input_or_trigger": "Biên bản vi phạm",
+            "expected_result": "Yêu cầu cập nhật điểm được gửi đi.",
+            "evidence_refs": ["feature.inputs.0", "feature.constraints.1"]
+          },
+          {
+            "actor": "V-App",
+            "action": "Cập nhật điểm sau vi phạm và lưu trạng thái theo dõi mới.",
+            "input_or_trigger": "Yêu cầu cập nhật điểm được gửi đi.",
+            "expected_result": "Điểm sau cập nhật và trạng thái theo dõi được lưu thành công.",
+            "evidence_refs": ["feature.outputs.0", "feature.outputs.1", "feature.success_outcome"]
+          }
+        ],
+        "alternate_flows": [
+          {
+            "source_step_number": 4,
+            "condition": "Mức trừ điểm làm tổng điểm nhỏ hơn 0.",
+            "steps": [
+              {
+                "actor": "V-App",
+                "action": "Chặn cập nhật và trả về mức điểm tối thiểu bằng 0 để ban quản lý xác nhận lại.",
+                "input_or_trigger": null,
+                "expected_result": "Ban quản lý biết rằng mức điểm không thể nhỏ hơn 0.",
+                "evidence_refs": ["feature.constraints.0"]
+              }
+            ],
+            "rejoin_step_number": 3,
+            "terminal_outcome": null,
+            "evidence_refs": ["feature.constraints.0"]
+          }
+        ],
+        "success_outcome": "Điểm của thú cưng được cập nhật và trạng thái theo dõi phản ánh đúng mức vi phạm.",
+        "evidence_refs": ["feature.feature_summary", "feature.success_outcome"]
+      },
+      {
+        "title": "Ban quản lý theo dõi thú cưng sắp hết điểm",
+        "objective": "Xác định các hồ sơ cần theo dõi thêm khi điểm thú cưng giảm xuống sát ngưỡng cảnh báo.",
+        "primary_actor": "Ban quản lý",
+        "supporting_actors": ["Portal"],
+        "preconditions": ["Điểm thú cưng đã được cập nhật sau vi phạm."],
+        "main_flow_steps": [
+          {
+            "actor": "Ban quản lý",
+            "action": "Mở danh sách thú cưng có điểm giảm mạnh trên Portal.",
+            "input_or_trigger": "Biên bản vi phạm",
+            "expected_result": "Danh sách hồ sơ cần theo dõi được hiển thị.",
+            "evidence_refs": ["feature.inputs.0", "feature.outputs.0", "feature.constraints.0"]
+          },
+          {
+            "actor": "Portal",
+            "action": "Đánh dấu các hồ sơ có trạng thái theo dõi cần xử lý tiếp.",
+            "input_or_trigger": "Trạng thái theo dõi vi phạm",
+            "expected_result": "Ban quản lý thấy hồ sơ nào cần nhắc nhở hoặc kiểm tra thêm.",
+            "evidence_refs": ["feature.outputs.1"]
+          },
+          {
+            "actor": "Ban quản lý",
+            "action": "Chọn hồ sơ cần giám sát thêm và ghi chú hướng xử lý tiếp theo.",
+            "input_or_trigger": "Danh sách hồ sơ cần theo dõi được hiển thị.",
+            "expected_result": "Hồ sơ được đưa vào danh sách theo dõi sau vi phạm.",
+            "evidence_refs": ["feature.success_outcome"]
+          }
+        ],
+        "alternate_flows": [
+          {
+            "source_step_number": 2,
+            "condition": "Không có hồ sơ nào cần theo dõi thêm.",
+            "steps": [
+              {
+                "actor": "Portal",
+                "action": "Thông báo rằng chưa có hồ sơ nào chạm ngưỡng cảnh báo.",
+                "input_or_trigger": null,
+                "expected_result": "Ban quản lý kết thúc phiên theo dõi mà không cần hành động thêm.",
+                "evidence_refs": ["feature.outputs.1"]
+              }
+            ],
+            "rejoin_step_number": null,
+            "terminal_outcome": "Không phát sinh hồ sơ cần theo dõi thêm.",
+            "evidence_refs": ["feature.outputs.1"]
+          }
+        ],
+        "success_outcome": "Các hồ sơ cần theo dõi sau vi phạm được xác định rõ ràng.",
+        "evidence_refs": ["feature.outputs.1", "feature.success_outcome", "feature.constraints.0"]
+      }
+    ]
+  }
+}

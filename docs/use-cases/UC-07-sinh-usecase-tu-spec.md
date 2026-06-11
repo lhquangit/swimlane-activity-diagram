@@ -27,7 +27,7 @@
 
 1. User mở hoặc tạo `Feature Intent` từ left artifact tree.
 2. User điền và lưu tên chức năng, mô tả chức năng, danh sách `Actors / swimlanes` và kết quả mong muốn. Tất cả actor user nhập đều là actor chính của quy trình; UI không phân cấp actor chính/phụ và không giấu actor trong `Thông tin bổ sung`.
-3. User bấm action sinh use case trên `Feature Intent` hoặc vùng `Use Cases` của feature đang chọn.
+3. User bấm action sinh use case bằng AI trên `Feature Intent` hoặc vùng `Use Cases` của feature đang chọn.
 4. Frontend chạy `quick guard` cục bộ cho các field bắt buộc:
    - `project_name`
    - `project_summary`
@@ -37,21 +37,27 @@
 5. Nếu `quick guard` fail, frontend giữ user ở vùng `Input`, disable action generate, và hiển thị lỗi ngay trong workspace.
 6. Nếu đang có `UseCaseDraft` đã review/chỉnh sửa hoặc spec hiện tại khác fingerprint lần generate gần nhất, frontend phải so snapshot hiện tại với snapshot generate gần nhất trước khi quyết định có hiện confirm replace hay không.
 7. Frontend gửi `POST /api/usecases/generate` với payload schema ổn định, không dùng raw prompt tự do.
-8. User chọn cách sinh: theo cấu hình hệ thống, ưu tiên AI, hoặc theo rule. Backend:
+8. Frontend chỉ yêu cầu **AI authoring**. Nếu runtime không cho phép authoring, CTA phải bị disable
+   từ trước và route generate phải fail closed thay vì trả về scaffold. Backend:
    - validate `X-Schema-Version`
    - canonical normalize/trim/dedup ingestion payload
    - áp dụng rate limit
    - build `artifact_chain`
    - giữ `FeatureIntent.actors` làm participant set canonical, không hạ cấp actor kỹ thuật như
      camera, AI model, service, pipeline hoặc gateway thành actor con người chung chung
-   - áp dụng rollout mode `deterministic / ai_shadow / ai_opt_in / ai_default`
-   - nếu gọi AI: render prompt version đã pin từ asset markdown versioned, synthesize semantic
-     output, kiểm tra schema/evidence/quality và hydrate stable IDs
+   - kiểm tra runtime availability nội bộ (`deterministic`, `ai_shadow`, `ai_opt_in`,
+     `ai_default`) để quyết định **có cho phép AI authoring hay không**
+   - nếu được phép gọi AI: render prompt version đã pin từ asset markdown versioned, synthesize
+     semantic output, kiểm tra schema/evidence/quality và hydrate stable IDs
    - retry tối đa một lần với validation codes đã sanitize
-   - fallback về deterministic builder khi provider hoặc output không đạt yêu cầu
+   - nếu provider lỗi, auth lỗi, hoặc output không đạt quality/grounding, route trả lỗi rõ ràng và
+     **không** trả về portfolio scaffold thay thế
 9. Frontend lưu hoặc cập nhật danh sách `Use Case` theo contract persisted, refresh left artifact tree, rồi hiển thị:
-   - nguồn sinh `Bản nháp AI` hoặc `Bản nháp theo rule`, cùng lý do fallback
-   - metadata lần sinh gần nhất trên persisted list/editor: provider, model, rollout mode, prompt version khi có
+   - nguồn sinh `Bản nháp AI` cho lần generate thành công
+   - nếu lần gọi AI thất bại, giữ nguyên portfolio đã lưu trước đó và hiển thị lỗi retry/config
+     thay vì hiển thị scaffold fallback như artifact mới
+   - metadata lần sinh gần nhất trên persisted list/editor đủ để phân biệt AI success, AI failed,
+     và legacy degraded drafts còn sót từ contract cũ
    - danh sách use case đã persist và có thể mở từng item để chỉnh sửa
    - trạng thái review `draft / reviewed / approved`
    - next action rõ ràng trên từng item
@@ -94,16 +100,20 @@
   - `UseCaseDraft`
   - `DiagramDraft`
   - `FormalBRDDraft`
-- Response metadata đủ để trace capability, source, mode, provider/model, prompt ID/version/fingerprint, attempt, latency, token/cost, quality và fallback reason.
+- Response metadata đủ để trace capability, source, mode, provider/model, prompt ID/version/fingerprint, attempt, latency, token/cost, quality và failure reason.
 
-## AI rollout contract
+## AI authoring contract
 
-- `deterministic`: kill switch và default an toàn; không gọi provider.
-- `ai_shadow`: chạy AI để đo quality nhưng trả deterministic draft, không lưu raw payload.
-- `ai_opt_in`: chỉ gọi AI khi user chọn `Ưu tiên AI`.
-- `ai_default`: gọi AI trừ khi user chọn `Theo rule`.
-- Bật `ai_default` chỉ khi golden quality pass, fallback rate dưới 10%, p95 latency nằm trong budget sản phẩm và cost/request nằm trong budget vận hành đã duyệt.
-- Rollback khi quality rejection/fallback vượt 20% trong cửa sổ theo dõi, có unsupported-business-fact nghiêm trọng, hoặc latency/cost vượt budget hai cửa sổ liên tiếp.
+- BA-facing authoring là **AI-only**. Không còn lựa chọn scaffold/rule trên màn `Use Case`.
+- `deterministic` và `ai_shadow` là trạng thái môi trường nội bộ làm authoring **unavailable** cho
+  user; chúng không được quảng bá như một chất lượng output thay thế.
+- `ai_opt_in` và `ai_default` là các trạng thái môi trường cho phép AI authoring; UI chỉ cần biết
+  `available / degraded / unavailable`, không expose rollout flag raw cho BA.
+- Khi AI call fail hoặc output bị quality gate reject, response phải fail closed. Không sinh ra
+  portfolio scaffold mới và không overwrite danh sách Use Case đã lưu trước đó.
+- Chỉ bật các runtime cho phép authoring khi golden quality pass, failure rate nằm trong budget,
+  p95 latency nằm trong budget sản phẩm và cost/request nằm trong budget vận hành đã duyệt.
+- Rollback khi AI failure hoặc quality rejection vượt threshold theo dõi, có unsupported-business-fact nghiêm trọng, hoặc latency/cost vượt budget hai cửa sổ liên tiếp.
 - Prompt body và business payload không được ghi log mặc định; `AI_LOG_PROMPT_BODY` chỉ dành cho local debug có kiểm soát.
 
 ## Use case mở rộng
@@ -196,6 +206,12 @@
 - `target_users`, `systems_involved`, và compatibility `primary_actor/supporting_actors` chỉ là chi tiết contract tạm thời; UI canonical phải là một danh sách actor ngang hàng.
 - Prompt use-case phải được quản lý như asset versioned trong `apps/api/app/ai/prompts/assets/usecase_synthesis/*`
   thay vì hard-code trong Python module để BA/AI reviewer có thể audit và iterate độc lập.
+- Default policy hiện tại cho BA-facing AI synthesis là `USECASE_PROMPT_VERSION=1.2.0` và
+  `USECASE_MODEL_PRIMARY=openai/gpt-5.5`; prompt này ép mạnh hơn việc tách ranh giới business,
+  tránh “một flow lớn rồi đổi câu chữ”, và được khóa bằng complaint-domain golden suite.
+- Validation guardrails (`schema`, `grounding`, `quality`, `hydrator`) vẫn là một phần bắt buộc của
+  pipeline AI-only. “AI-only authoring” không có nghĩa là chấp nhận free-form output chưa qua
+  contract enforcement.
 - `function_name`, `glossary`, và `assumptions` không còn được thu thập hoặc forward trong generation flow; schema vẫn giữ tạm để đọc payload cũ.
 
 ## Out of scope cho UC-07 ở Phase 1

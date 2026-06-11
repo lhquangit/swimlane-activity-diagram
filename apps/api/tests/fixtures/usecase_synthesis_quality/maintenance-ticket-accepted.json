@@ -1,0 +1,110 @@
+{
+  "feature_intent": {
+    "feature_name": "Tiếp nhận phiếu bảo trì căn hộ",
+    "feature_summary": "Cư dân gửi yêu cầu bảo trì, lễ tân phân loại và kỹ thuật viên cập nhật kết quả xử lý.",
+    "actors": ["Cư dân", "V-App", "Lễ tân", "Kỹ thuật viên"],
+    "primary_actor": "Cư dân",
+    "trigger": "Cư dân gặp sự cố trong căn hộ và cần gửi yêu cầu bảo trì.",
+    "inputs": ["Mô tả sự cố", "Ảnh hiện trường"],
+    "outputs": ["Phiếu bảo trì", "Trạng thái xử lý"],
+    "constraints": ["Phiếu khẩn cấp phải được lễ tân phân công ngay trong ca trực"],
+    "success_outcome": "Phiếu bảo trì được phân công và trạng thái xử lý được cập nhật đến khi hoàn tất."
+  },
+  "synthesis": {
+    "use_cases": [
+      {
+        "title": "Cư dân gửi phiếu bảo trì từ V-App",
+        "objective": "Tạo phiếu bảo trì đầy đủ thông tin để lễ tân có thể tiếp nhận.",
+        "primary_actor": "Cư dân",
+        "supporting_actors": ["V-App"],
+        "preconditions": ["Cư dân có mô tả sự cố hoặc ảnh hiện trường."],
+        "main_flow_steps": [
+          {
+            "actor": "Cư dân",
+            "action": "Nhập mô tả sự cố và đính kèm ảnh hiện trường trên V-App.",
+            "input_or_trigger": "Cư dân gặp sự cố trong căn hộ và cần gửi yêu cầu bảo trì.",
+            "expected_result": "Thông tin yêu cầu sẵn sàng để gửi.",
+            "evidence_refs": ["feature.trigger", "feature.inputs.0", "feature.inputs.1"]
+          },
+          {
+            "actor": "V-App",
+            "action": "Tạo phiếu bảo trì mới và chuyển sang hàng chờ tiếp nhận của lễ tân.",
+            "input_or_trigger": "Thông tin yêu cầu sẵn sàng để gửi.",
+            "expected_result": "Phiếu bảo trì được tạo thành công.",
+            "evidence_refs": ["feature.outputs.0", "feature.constraints.0"]
+          }
+        ],
+        "alternate_flows": [
+          {
+            "source_step_number": 1,
+            "condition": "Cư dân gửi phiếu nhưng chưa có mô tả sự cố.",
+            "steps": [
+              {
+                "actor": "V-App",
+                "action": "Yêu cầu cư dân bổ sung mô tả sự cố trước khi tạo phiếu.",
+                "input_or_trigger": null,
+                "expected_result": "Phiếu chưa được tạo khi thiếu mô tả tối thiểu.",
+                "evidence_refs": ["feature.inputs.0"]
+              }
+            ],
+            "rejoin_step_number": 1,
+            "terminal_outcome": null,
+            "evidence_refs": ["feature.inputs.0"]
+          }
+        ],
+        "success_outcome": "Phiếu bảo trì đầy đủ được tạo để lễ tân tiếp nhận.",
+        "evidence_refs": ["feature.outputs.0", "feature.success_outcome", "feature.constraints.0"]
+      },
+      {
+        "title": "Lễ tân phân loại và phân công phiếu bảo trì",
+        "objective": "Đưa phiếu đến đúng kỹ thuật viên với mức ưu tiên phù hợp.",
+        "primary_actor": "Lễ tân",
+        "supporting_actors": ["Kỹ thuật viên"],
+        "preconditions": ["Phiếu bảo trì đã được tạo."],
+        "main_flow_steps": [
+          {
+            "actor": "Lễ tân",
+            "action": "Mở phiếu bảo trì mới để xem loại sự cố và mức khẩn cấp.",
+            "input_or_trigger": "Mô tả sự cố",
+            "expected_result": "Lễ tân có đủ thông tin để phân loại phiếu.",
+            "evidence_refs": ["feature.inputs.0", "feature.outputs.0"]
+          },
+          {
+            "actor": "Lễ tân",
+            "action": "Chọn kỹ thuật viên phù hợp và giao phiếu xử lý.",
+            "input_or_trigger": "Loại sự cố và mức khẩn cấp.",
+            "expected_result": "Phiếu được phân công cho kỹ thuật viên.",
+            "evidence_refs": ["feature.constraints.0", "feature.success_outcome"]
+          },
+          {
+            "actor": "Kỹ thuật viên",
+            "action": "Nhận phiếu được giao và cập nhật trạng thái bắt đầu xử lý.",
+            "input_or_trigger": "Phiếu được phân công cho kỹ thuật viên.",
+            "expected_result": "Trạng thái xử lý chuyển sang đang thực hiện.",
+            "evidence_refs": ["feature.outputs.1"]
+          }
+        ],
+        "alternate_flows": [
+          {
+            "source_step_number": 2,
+            "condition": "Phiếu được đánh dấu khẩn cấp trong ca trực hiện tại.",
+            "steps": [
+              {
+                "actor": "Lễ tân",
+                "action": "Phân công ngay cho kỹ thuật viên đang trực và ưu tiên xử lý trước.",
+                "input_or_trigger": null,
+                "expected_result": "Phiếu khẩn cấp được đẩy lên đầu hàng chờ xử lý.",
+                "evidence_refs": ["feature.constraints.0"]
+              }
+            ],
+            "rejoin_step_number": 3,
+            "terminal_outcome": null,
+            "evidence_refs": ["feature.constraints.0"]
+          }
+        ],
+        "success_outcome": "Phiếu bảo trì được phân công và trạng thái xử lý được cập nhật đến khi hoàn tất.",
+        "evidence_refs": ["feature.outputs.1", "feature.success_outcome"]
+      }
+    ]
+  }
+}

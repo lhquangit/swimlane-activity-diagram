@@ -10,6 +10,10 @@ from sqlalchemy import delete
 from app.db import get_session_factory
 from app.main import app
 from app.models import AppUser, BrdDoc, Diagram, FeatureIntentModel, Project, Spec, UseCaseModel
+from app.schemas.common import ResponseMetadata
+from app.schemas.usecase import FeatureIntent, ProjectSpec, UseCaseDraft
+from app.services import persistence_generation, persistence_serializers
+from app.usecases.generation_service import GenerationOutcome
 
 
 @dataclass(frozen=True)
@@ -65,6 +69,73 @@ def install_fake_clerk(monkeypatch) -> None:
     monkeypatch.setattr(auth, "authenticate_clerk_request", fake_authenticate)
 
 
+def install_mock_usecase_generation(monkeypatch) -> None:
+    class FakeGenerationService:
+        def generate(
+            self,
+            project_spec: ProjectSpec,
+            feature_intent: FeatureIntent,
+            preference: str = "ai",
+        ) -> GenerationOutcome:
+            primary_actor = feature_intent.primary_actor or feature_intent.actors[0]
+            supporting = [actor for actor in feature_intent.actors if actor != primary_actor]
+            trigger = feature_intent.trigger or feature_intent.inputs[0] if feature_intent.inputs else None
+            draft = UseCaseDraft(
+                use_case_id="UC-AI-001",
+                title=f"{primary_actor} xử lý {feature_intent.feature_name}",
+                objective=feature_intent.feature_summary,
+                primary_actor=primary_actor,
+                supporting_actors=supporting,
+                preconditions=[f"Feature {feature_intent.feature_name} đã sẵn sàng để xử lý."],
+                happy_path_summary=[feature_intent.feature_summary],
+                key_exceptions=[],
+                main_flow_steps=[
+                    {
+                        "step_id": "UC-AI-001-S01",
+                        "actor_ref": primary_actor,
+                        "action": f"Tiếp nhận và xử lý {feature_intent.feature_name}",
+                        "input_or_trigger": trigger,
+                        "expected_result": feature_intent.success_outcome or "Yêu cầu được xử lý.",
+                    }
+                ],
+                alternate_flows=[],
+                success_outcome=feature_intent.success_outcome or "Yêu cầu được xử lý.",
+                review_status="draft",
+            )
+            return GenerationOutcome(
+                use_cases=[draft],
+                metadata=ResponseMetadata(
+                    capability="usecase_synthesis",
+                    provider="openrouter",
+                    model="mock/usecase-model",
+                    generation_source="ai",
+                    generation_mode="ai_default",
+                    prompt_id="usecase_synthesis",
+                    prompt_version="1.2.0",
+                    quality_status="passed",
+                    attempt_count=1,
+                ),
+                warnings=[],
+            )
+
+    monkeypatch.setattr(persistence_generation, "generation_service", FakeGenerationService())
+    monkeypatch.setattr(
+        persistence_serializers,
+        "settings",
+        type(
+            "RuntimeSettings",
+            (),
+            {
+                "usecase_provider": "openrouter",
+                "usecase_generation_mode": "ai_default",
+                "usecase_prompt_version": "1.2.0",
+                "ai_openrouter_api_key": "sk-test",
+                "openrouter_api_key": "sk-test",
+            },
+        )(),
+    )
+
+
 def auth_headers(subject: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {subject}"}
 
@@ -115,7 +186,7 @@ def create_project_chain(client: TestClient, subject: str = "user_a") -> dict[st
     generated = client.post(
         f"/api/feature-intents/{feature_id}/use-cases/generate",
         headers=headers,
-        params={"generation_preference": "deterministic"},
+        params={"generation_preference": "ai"},
     )
     assert generated.status_code == 200
     draft = generated.json()["result"]["use_cases"][0]
@@ -193,6 +264,7 @@ def test_clerk_auth_rejects_missing_invalid_and_subjectless_tokens(
 ) -> None:
     clear_tables()
     install_fake_clerk(monkeypatch)
+    install_mock_usecase_generation(monkeypatch)
     try:
         assert client.get("/api/projects").status_code == 401
         assert client.get("/api/projects", headers={"Authorization": "Bearer invalid"}).status_code == 401
@@ -207,6 +279,7 @@ def test_clerk_auth_rejects_missing_invalid_and_subjectless_tokens(
 def test_new_clerk_user_is_hydrated_as_role_user(client: TestClient, monkeypatch) -> None:
     clear_tables()
     install_fake_clerk(monkeypatch)
+    install_mock_usecase_generation(monkeypatch)
     try:
         response = client.get("/api/me", headers=auth_headers("new_user"))
         assert response.status_code == 200
@@ -223,6 +296,7 @@ def test_cross_user_access_returns_404_for_full_resource_chain(
 ) -> None:
     clear_tables()
     install_fake_clerk(monkeypatch)
+    install_mock_usecase_generation(monkeypatch)
     try:
         ids = create_project_chain(client, "user_a")
         other = auth_headers("user_b")
@@ -249,6 +323,7 @@ def test_project_artifact_tree_returns_owned_metadata_without_heavy_payloads(
 ) -> None:
     clear_tables()
     install_fake_clerk(monkeypatch)
+    install_mock_usecase_generation(monkeypatch)
     try:
         ids = create_project_chain(client, "user_a")
         response = client.get(
@@ -284,6 +359,7 @@ def test_feature_resources_persist_latest_usecase_generation_metadata(
 ) -> None:
     clear_tables()
     install_fake_clerk(monkeypatch)
+    install_mock_usecase_generation(monkeypatch)
     try:
         headers = auth_headers("user_a")
         project = client.post(
@@ -330,7 +406,7 @@ def test_feature_resources_persist_latest_usecase_generation_metadata(
         generated = client.post(
             f"/api/feature-intents/{feature_id}/use-cases/generate",
             headers=headers,
-            params={"generation_preference": "deterministic"},
+            params={"generation_preference": "ai"},
         )
         assert generated.status_code == 200
         generated_payload = generated.json()
@@ -339,6 +415,10 @@ def test_feature_resources_persist_latest_usecase_generation_metadata(
         assert feature_response.status_code == 200
         feature_payload = feature_response.json()
         assert feature_payload["latest_usecase_generation"] is None
+        assert feature_payload["usecase_generation_runtime"] is not None
+        assert feature_payload["usecase_generation_runtime"]["status"] == "available"
+        assert feature_payload["usecase_generation_runtime"]["can_generate"] is True
+        assert feature_payload["usecase_generation_runtime"]["note"]
 
         save_use_cases = client.put(
             f"/api/feature-intents/{feature_id}/use-cases",
@@ -359,22 +439,17 @@ def test_feature_resources_persist_latest_usecase_generation_metadata(
         )
         assert committed_feature_response.status_code == 200
         committed_feature_payload = committed_feature_response.json()
-        assert (
-            committed_feature_payload["latest_usecase_generation"]["generation_source"]
-            == "deterministic_fallback"
-        )
+        assert committed_feature_payload["latest_usecase_generation"]["generation_source"] == "ai"
 
         list_response = client.get(f"/api/specs/{spec_id}/feature-intents", headers=headers)
         assert list_response.status_code == 200
         listed_feature = next(item for item in list_response.json() if item["id"] == feature_id)
-        assert (
-            listed_feature["latest_usecase_generation"]["generation_source"]
-            == "deterministic_fallback"
-        )
-        assert listed_feature["latest_usecase_generation"]["provider"] == "deterministic"
-        assert (
-            listed_feature["latest_usecase_generation"]["model"] == "spec-usecase-builder-v1"
-        )
+        assert listed_feature["latest_usecase_generation"]["generation_source"] == "ai"
+        assert listed_feature["usecase_generation_runtime"] is not None
+        assert listed_feature["usecase_generation_runtime"]["status"] == "available"
+        assert listed_feature["usecase_generation_runtime"]["can_generate"] is True
+        assert listed_feature["latest_usecase_generation"]["provider"] == "openrouter"
+        assert listed_feature["latest_usecase_generation"]["model"] == "mock/usecase-model"
     finally:
         clear_tables()
 
@@ -385,6 +460,7 @@ def test_bulk_use_case_save_replaces_omitted_rows_and_rekeys_retained_row(
 ) -> None:
     clear_tables()
     install_fake_clerk(monkeypatch)
+    install_mock_usecase_generation(monkeypatch)
     try:
         ids = create_project_chain(client, "user_a")
         headers = auth_headers("user_a")
@@ -461,6 +537,7 @@ def test_project_artifact_tree_supports_empty_and_partial_chains(
 ) -> None:
     clear_tables()
     install_fake_clerk(monkeypatch)
+    install_mock_usecase_generation(monkeypatch)
     try:
         headers = auth_headers("user_a")
         project = client.post(
@@ -509,12 +586,13 @@ def test_project_artifact_tree_supports_empty_and_partial_chains(
 def test_use_case_generation_does_not_auto_save(client: TestClient, monkeypatch) -> None:
     clear_tables()
     install_fake_clerk(monkeypatch)
+    install_mock_usecase_generation(monkeypatch)
     try:
         ids = create_project_chain(client, "user_a")
         response = client.post(
             f"/api/feature-intents/{ids['feature_id']}/use-cases/generate",
             headers=auth_headers("user_a"),
-            params={"generation_preference": "deterministic"},
+            params={"generation_preference": "ai"},
         )
         assert response.status_code == 200
         listed = client.get(
@@ -533,6 +611,7 @@ def test_malformed_diagram_payload_is_rejected_before_save(
 ) -> None:
     clear_tables()
     install_fake_clerk(monkeypatch)
+    install_mock_usecase_generation(monkeypatch)
     try:
         ids = create_project_chain(client, "user_a")
         payload = valid_diagram_payload()
@@ -550,6 +629,7 @@ def test_malformed_diagram_payload_is_rejected_before_save(
 def test_delete_use_case_cascades_diagram_and_brd(client: TestClient, monkeypatch) -> None:
     clear_tables()
     install_fake_clerk(monkeypatch)
+    install_mock_usecase_generation(monkeypatch)
     try:
         ids = create_project_chain(client, "user_a")
         headers = auth_headers("user_a")

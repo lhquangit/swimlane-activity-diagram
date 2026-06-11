@@ -43,8 +43,17 @@ export type FeatureIntentResource = {
   systems_involved: string[];
   success_outcome?: string | null;
   latest_usecase_generation?: ResponseMetadata | null;
+  usecase_generation_runtime?: UseCaseGenerationRuntime | null;
   created_at: string;
   updated_at: string;
+};
+
+export type UseCaseGenerationRuntime = {
+  status: 'available' | 'degraded' | 'unavailable';
+  provider: string;
+  prompt_version: string;
+  can_generate: boolean;
+  note: string;
 };
 
 export type UseCaseResource = {

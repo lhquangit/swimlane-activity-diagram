@@ -1553,6 +1553,31 @@ body,
   resize: vertical;
 }
 
+.workspace-field__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.workspace-field__required {
+  color: #b42318;
+  font-weight: 800;
+}
+
+.workspace-field--invalid input,
+.workspace-field--invalid textarea,
+.workspace-field input[aria-invalid='true'],
+.workspace-field textarea[aria-invalid='true'] {
+  border-color: #d92d20;
+  box-shadow: 0 0 0 1px rgba(217, 45, 32, 0.08);
+}
+
+.workspace-field__helper {
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .workspace-form-card {
   display: grid;
   gap: 16px;
@@ -2470,6 +2495,13 @@ body,
   background: transparent;
 }
 
+.persisted-usecase__runtime-note {
+  margin: 0;
+  max-width: 32rem;
+  color: #475569;
+  font-size: 0.92rem;
+}
+
 .persisted-usecase__generation-header {
   display: flex;
   align-items: flex-start;
@@ -2575,6 +2607,16 @@ body,
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.persisted-usecase__hero-helper {
+  margin: 0;
+  max-width: 280px;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  text-align: right;
 }
 
 .persisted-usecase__hero-note {

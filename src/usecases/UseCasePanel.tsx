@@ -7,7 +7,6 @@ import type {
   ProjectSpec,
   UseCaseDiagramInventoryItem,
   UseCaseDraft,
-  UseCaseGenerationPreference,
   UseCasePanelPhase,
   UseCaseWorkspaceSection,
 } from './types';
@@ -45,7 +44,6 @@ type UseCasePanelProps = {
   artifactChain: ArtifactChainItem[];
   requestId: string | null;
   metadata?: ResponseMetadata | null;
-  generationPreference?: UseCaseGenerationPreference;
   errorMessage: string | null;
   validationErrors: string[];
   isOutdated: boolean;
@@ -58,7 +56,6 @@ type UseCasePanelProps = {
   onEditProjectSpec?: () => void;
   onEditFeatureIntent?: () => void;
   onDeleteUseCase?: (useCaseId: string) => void;
-  onGenerationPreferenceChange?: (next: UseCaseGenerationPreference) => void;
   onSectionChange: (section: UseCaseWorkspaceSection) => void;
   onProjectSpecChange: (next: ProjectSpec) => void;
   onFeatureIntentChange: (next: FeatureIntent) => void;
@@ -87,7 +84,6 @@ export default function UseCasePanel({
   artifactChain,
   requestId,
   metadata = null,
-  generationPreference = 'auto',
   errorMessage,
   validationErrors,
   isOutdated,
@@ -100,7 +96,6 @@ export default function UseCasePanel({
   onEditProjectSpec,
   onEditFeatureIntent,
   onDeleteUseCase,
-  onGenerationPreferenceChange,
   onSectionChange,
   onProjectSpecChange,
   onFeatureIntentChange,
@@ -408,31 +403,12 @@ export default function UseCasePanel({
             </div>
 
             <div className="usecase-panel__actions">
-              <div className="usecase-panel__generation-mode" aria-label="Cách sinh use case">
-                {(
-                  [
-                    ['auto', 'Theo hệ thống'],
-                    ['ai', 'Ưu tiên AI'],
-                    ['deterministic', 'Theo rule'],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={generationPreference === value ? 'active' : ''}
-                    aria-pressed={generationPreference === value}
-                    onClick={() => onGenerationPreferenceChange?.(value)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
               <button
                 className="toolbar-btn primary"
                 onClick={onGenerate}
                 disabled={phase === 'generating' || validationErrors.length > 0}
               >
-                {phase === 'generating' ? 'Đang sinh…' : 'Sinh use case'}
+                {phase === 'generating' ? 'Đang sinh…' : 'Sinh use case bằng AI'}
               </button>
               {onSave ? (
                 <button
@@ -458,27 +434,6 @@ export default function UseCasePanel({
               </ul>
             ) : null}
             {errorMessage ? <p className="usecase-panel__error">{errorMessage}</p> : null}
-
-            {artifactChain.length > 0 ? (
-              <details className="usecase-panel__advanced">
-                <summary>Trace kỹ thuật</summary>
-                <p className="usecase-panel__advanced-copy">
-                  Các artifact kỹ thuật này được giữ lại để traceability, nhưng không còn chen vào
-                  flow nhập liệu chính.
-                </p>
-                <ul className="usecase-panel__artifact-list">
-                  {artifactChain.map((artifact) => (
-                    <li key={artifact.artifact_type}>
-                      <strong>{artifact.label}</strong>
-                      <span>
-                        {artifact.source_of_truth ? 'SoT' : 'Derived'} ·{' '}
-                        {artifact.human_editable ? 'Editable' : 'Read-only'}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            ) : null}
           </section>
         ) : null}
 
@@ -494,21 +449,13 @@ export default function UseCasePanel({
             <div className="usecase-panel__section-header">
               <div>
                 <h4>Danh sách use case đã sinh</h4>
-                <p>{requestId ? `Request ${requestId}` : 'Chưa có request sinh nào.'}</p>
                 {metadata?.generation_source ? (
                   <div className="usecase-panel__source">
                     <span
                       className={`usecase-panel__source-badge usecase-panel__source-badge--${metadata.generation_source}`}
                     >
-                      {metadata.generation_source === 'ai' ? 'Bản nháp AI' : 'Bản nháp theo rule'}
+                    {metadata.generation_source === 'ai' ? 'Bản nháp AI' : 'Bản nháp degraded'}
                     </span>
-                    {metadata.generation_source === 'deterministic_fallback' ? (
-                      <small>{fallbackSourceCopy(metadata.fallback_reason)}</small>
-                    ) : (
-                      <small>
-                        Prompt {metadata.prompt_id}@{metadata.prompt_version}
-                      </small>
-                    )}
                   </div>
                 ) : null}
               </div>
@@ -1213,6 +1160,10 @@ export default function UseCasePanel({
                         <button className="toolbar-btn primary" disabled>
                           Đang tạo…
                         </button>
+                      ) : item.operation_state === 'opening' ? (
+                        <button className="toolbar-btn primary" disabled>
+                          Đang mở…
+                        </button>
                       ) : item.diagram_status === 'ready_to_generate' ? (
                         <button
                           className="toolbar-btn primary"
@@ -1373,19 +1324,6 @@ function phaseLabel(phase: UseCasePanelPhase) {
     default:
       return 'Nhập spec, rà soát use case, rồi chuẩn bị sơ đồ cho từng use case';
   }
-}
-
-function fallbackSourceCopy(reason?: string | null) {
-  if (reason === 'quality_rejected') {
-    return 'Kết quả AI chưa đạt quality gate. Hãy rà soát chi tiết nghiệp vụ.';
-  }
-  if (reason === 'provider_failure' || reason === 'provider_unavailable') {
-    return 'AI tạm thời không khả dụng. Hãy rà soát chi tiết nghiệp vụ.';
-  }
-  if (reason === 'shadow_mode') {
-    return 'AI chỉ chạy đánh giá nền; kết quả hiển thị vẫn theo rule.';
-  }
-  return 'Kết quả được tạo theo rule và cần được rà soát trước khi phê duyệt.';
 }
 
 function reviewStatusPillLabel(status: UseCaseDraft['review_status']) {

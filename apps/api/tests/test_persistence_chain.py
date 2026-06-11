@@ -14,6 +14,10 @@ from app.main import app
 from app.models import AppUser, BrdDoc, Diagram, FeatureIntentModel, Project, Spec, UseCaseModel
 from app.routes import brd_generate
 from app.providers.openrouter_provider import OpenRouterProviderError
+from app.services import persistence_generation, persistence_serializers
+from app.schemas.common import ResponseMetadata
+from app.schemas.usecase import FeatureIntent, ProjectSpec, UseCaseDraft
+from app.usecases.generation_service import GenerationOutcome
 
 
 def clear_persistence_tables() -> None:
@@ -21,6 +25,73 @@ def clear_persistence_tables() -> None:
         for model in (BrdDoc, Diagram, UseCaseModel, FeatureIntentModel, Spec, Project, AppUser):
             db.execute(delete(model))
         db.commit()
+
+
+def install_mock_usecase_generation(monkeypatch) -> None:
+    class FakeGenerationService:
+        def generate(
+            self,
+            project_spec: ProjectSpec,
+            feature_intent: FeatureIntent,
+            preference: str = "ai",
+        ) -> GenerationOutcome:
+            primary_actor = feature_intent.primary_actor or feature_intent.actors[0]
+            supporting = [actor for actor in feature_intent.actors if actor != primary_actor]
+            trigger = feature_intent.trigger or feature_intent.inputs[0] if feature_intent.inputs else None
+            draft = UseCaseDraft(
+                use_case_id="UC-AI-001",
+                title=f"{primary_actor} xử lý {feature_intent.feature_name}",
+                objective=feature_intent.feature_summary,
+                primary_actor=primary_actor,
+                supporting_actors=supporting,
+                preconditions=[f"Feature {feature_intent.feature_name} đã sẵn sàng để xử lý."],
+                happy_path_summary=[feature_intent.feature_summary],
+                key_exceptions=[],
+                main_flow_steps=[
+                    {
+                        "step_id": "UC-AI-001-S01",
+                        "actor_ref": primary_actor,
+                        "action": f"Tiếp nhận và xử lý {feature_intent.feature_name}",
+                        "input_or_trigger": trigger,
+                        "expected_result": feature_intent.success_outcome or "Yêu cầu được xử lý.",
+                    }
+                ],
+                alternate_flows=[],
+                success_outcome=feature_intent.success_outcome or "Yêu cầu được xử lý.",
+                review_status="draft",
+            )
+            return GenerationOutcome(
+                use_cases=[draft],
+                metadata=ResponseMetadata(
+                    capability="usecase_synthesis",
+                    provider="openrouter",
+                    model="mock/usecase-model",
+                    generation_source="ai",
+                    generation_mode="ai_default",
+                    prompt_id="usecase_synthesis",
+                    prompt_version="1.2.0",
+                    quality_status="passed",
+                    attempt_count=1,
+                ),
+                warnings=[],
+            )
+
+    monkeypatch.setattr(persistence_generation, "generation_service", FakeGenerationService())
+    monkeypatch.setattr(
+        persistence_serializers,
+        "settings",
+        type(
+            "RuntimeSettings",
+            (),
+            {
+                "usecase_provider": "openrouter",
+                "usecase_generation_mode": "ai_default",
+                "usecase_prompt_version": "1.2.0",
+                "ai_openrouter_api_key": "sk-test",
+                "openrouter_api_key": "sk-test",
+            },
+        )(),
+    )
 
 
 def create_persisted_chain(client: TestClient) -> tuple[str, str, str, str]:
@@ -64,7 +135,7 @@ def create_persisted_chain(client: TestClient) -> tuple[str, str, str, str]:
 
     generated = client.post(
         f"/api/feature-intents/{feature_id}/use-cases/generate",
-        params={"generation_preference": "deterministic"},
+        params={"generation_preference": "ai"},
     )
     assert generated.status_code == 200
     generated_payload = generated.json()
@@ -131,6 +202,7 @@ def create_persisted_chain(client: TestClient) -> tuple[str, str, str, str]:
 
 def test_latest_state_chain_and_owner_isolation(client: TestClient, monkeypatch) -> None:
     clear_persistence_tables()
+    install_mock_usecase_generation(monkeypatch)
     monkeypatch.setattr(
         brd_generate,
         "settings",
@@ -196,6 +268,7 @@ def test_saved_brd_generation_falls_back_when_provider_request_fails(
     monkeypatch,
 ) -> None:
     clear_persistence_tables()
+    install_mock_usecase_generation(monkeypatch)
     monkeypatch.setattr(
         brd_generate,
         "settings",
@@ -229,6 +302,7 @@ def test_persisted_brd_docx_export_returns_a_real_docx_from_edited_markdown(
     monkeypatch,
 ) -> None:
     clear_persistence_tables()
+    install_mock_usecase_generation(monkeypatch)
     monkeypatch.setattr(
         brd_generate,
         "settings",

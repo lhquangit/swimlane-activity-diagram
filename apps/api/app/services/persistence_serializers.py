@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.config import settings
 from app.models import AppUser, BrdDoc, Diagram, FeatureIntentModel, Project, Spec, UseCaseModel
 from app.schemas.common import ResponseMetadata
 from app.schemas.persistence import (
@@ -9,9 +10,11 @@ from app.schemas.persistence import (
     FeatureIntentResource,
     ProjectResource,
     SpecResource,
+    UseCaseGenerationRuntimeResource,
     UseCaseResource,
 )
 from app.schemas.usecase import UseCaseDraft
+from app.usecases.runtime import describe_usecase_generation_runtime
 
 
 def app_user_resource(model: AppUser) -> AppUserResource:
@@ -27,6 +30,7 @@ def spec_resource(model: Spec) -> SpecResource:
 
 
 def feature_resource(model: FeatureIntentModel) -> FeatureIntentResource:
+    runtime = describe_usecase_generation_runtime(settings)
     return FeatureIntentResource(
         id=model.id,
         spec_id=model.spec_id,
@@ -45,6 +49,7 @@ def feature_resource(model: FeatureIntentModel) -> FeatureIntentResource:
             if model.latest_usecase_generation
             else None
         ),
+        usecase_generation_runtime=UseCaseGenerationRuntimeResource.model_validate(runtime.__dict__),
         created_at=model.created_at,
         updated_at=model.updated_at,
     )

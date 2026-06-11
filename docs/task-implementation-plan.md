@@ -1,411 +1,81 @@
 # Task Implementation Plan
 
 ## Task Summary
-
-- Task: Implement `TASK-205` and `TASK-206`
-- Requested by: User
-- Date: 2026-06-11
-- Affected modules: artifact tree UI, project workspace command orchestration, persisted artifact
-  navigation docs/tests
+- Task: Implement TASK-229 through TASK-233 for AI-only Use Case authoring
+- Requested by: Codex using senior-ai-developer
+- Date: 2026-06-12
+- Affected modules: `apps/api/app/ai/prompts`, `apps/api/app/config.py`,
+  `apps/api/tests/{test_prompt_registry.py,test_usecase_generation_service.py,test_usecase_synthesis.py,fixtures/usecase_synthesis_quality/*}`,
+  `docs/{product/usecase-synthesis-model-policy.md,use-cases/UC-07-sinh-usecase-tu-spec.md,review-task-list.md,progress/changelog.md,activity-log/2026-06.md}`
 
 ## Goal Reconstruction
-
-- Requested change: let users delete individual persisted Use Cases directly from the left artifact
-  bar and improve the left bar so each Use Case branch can be collapsed or expanded independently.
-- Intended outcome: the artifact tree becomes a lightweight management surface, not only a
-  navigator, while active deep links remain visible and destructive actions reuse existing cleanup
-  semantics.
-- Hidden assumption: the current workspace delete command is already the source of truth for use
-  case deletion and should be reused instead of reimplemented inside the tree component.
+- Requested change: Remove deterministic/scaffold authoring from the BA-facing `Use Case`
+  experience, stop returning scaffold fallback portfolios when AI fails, keep validation guardrails,
+  and rewrite product/docs/UI copy around AI-only authoring.
+- Intended outcome: Use Case generation either returns an AI-authored, guardrail-validated
+  portfolio or fails clearly without overwriting persisted artifacts.
+- Hidden assumptions:
+  - We can improve quality materially without redesigning the entire generation pipeline.
+  - The safest immediate lever is stronger prompt + stronger default model + better acceptance
+    coverage, not a wide new orchestration stage.
+  - Historical prompt versions must stay registered for backward compatibility, while new work can
+    promote a newer default version.
 
 ## Risk Assessment
-
 - Decision: IMPLEMENT_WITH_GUARDRAILS
 - Risk level: Medium
-- Main concerns: click bubbling from row actions into navigation, divergence between sidebar delete
-  and route-level delete behavior, and disclosure changes that break keyboard focus or hide the
-  active artifact path.
-- Guardrails: keep delete orchestration in `ProjectWorkspace`, split disclosure/select/action
-  targets in the row UI, auto-expand the active deep-link path, and add focused regressions before
-  broader verification.
-
-## Execution And Verification
-
-- Added left-bar delete actions for persisted use-case rows and routed them through the existing
-  workspace delete command.
-- Added per-use-case disclosure state and active-path auto-expand behavior in `ArtifactTree`.
-- Added regressions for row-action isolation, collapse/expand behavior, and active-route delete
-  cleanup from the sidebar.
-- Verification:
-  - Focused `ArtifactTree` and `ProjectWorkspace` tests passed `15/15`.
-  - Full verification recorded after suite/build reruns in the implementation summary.
-
-## Final Recommendation
-
-- `TASK-205` and `TASK-206` belong together because both require a cleaner use-case row model in
-  the tree.
-- Keep future artifact-row actions on the same split model: disclosure, selection, and destructive
-  actions should remain separate targets.
-
----
-
-## Task Summary
-
-- Task: Implement `TASK-203` and `TASK-204`
-- Requested by: User
-- Date: 2026-06-11
-- Affected modules: persisted BRD editor UX, markdown parse/serialize layer, persistence API,
-  backend DOCX export, BRD product/use-case docs
-
-## Goal Reconstruction
-
-- Requested change: remove the persisted BRD markdown-toggle workflow, let users edit directly on
-  the visible BRD document, and support exporting a real `.docx` file from the edited content.
-- Intended outcome: the persisted `/diagram/brd` route becomes the canonical business-document
-  surface for review, editing, saving, and export; DOCX output reflects the latest draft content.
-- Hidden assumption: standalone `BrdPanel` can remain textarea-based for Phase 1 as long as the
-  persisted artifact route is documented as the canonical inline-edit surface.
-
-## Risk Assessment
-
-- Decision: IMPLEMENT_WITH_GUARDRAILS
-- Risk level: Medium
-- Main concerns: fragile `contentEditable` editing, markdown/data drift after inline edits,
-  fake-DOCX export that only renames plain text blobs, and product docs falling out of sync with
-  the new persisted workflow.
-- Guardrails: keep `structured_spec` read-only, serialize every inline edit back into canonical
-  markdown, use a real backend DOCX library, and document that export uses the latest in-page draft
-  including unsaved edits.
-
-## Execution And Verification
-
-- Reworked the persisted BRD route into a direct inline document editor with shared
-  parse/serialize logic for headings, paragraphs, lists, tables, and figure captions.
-- Removed the persisted `Chỉnh sửa markdown` toggle and kept standalone `BrdPanel` on the
-  textarea/editor path for now.
-- Added `POST /api/diagrams/{diagram_id}/brd/export.docx`, a real `python-docx` builder, and
-  frontend blob download wiring from the persisted BRD page.
-- Updated use-case/product/task docs so persisted BRD editing/export behavior matches the code.
-- Verification:
-  - Focused UI regression: `src/brd/PersistedBrdWorkspace.test.tsx` passed `5/5`.
-  - Focused API regression: DOCX export + fallback persistence tests passed `2/2`.
-  - Full verification recorded after broader suite/build reruns in the final implementation entry.
-
-## Final Recommendation
-
-- `TASK-203` and `TASK-204` are the right boundary for Phase 1 persisted BRD UX.
-- Keep the inline editor limited to the persisted route until there is a reason to unify the
-  standalone BRD panel, and keep DOCX generation on the backend where it can stay deterministic and
-  testable.
-
----
-
-## Task Summary
-
-- Task: Implement `TASK-199`
-- Requested by: User
-- Date: 2026-06-10
-- Affected modules: persisted BRD lifecycle, workspace persistence context, frontend integration
-  tests
-
-## Goal Reconstruction
-
-- Requested change: Stop the BRD deep link from repeatedly fetching its source Diagram.
-- Intended outcome: An unchanged BRD route loads Diagram and BRD once, while navigation still
-  cancels stale responses.
-- Hidden assumption: The persistence API contract remains unchanged; the defect is caused by React
-  context identity, not backend polling.
-
-## Risk Assessment
-
-- Decision: IMPLEMENT_WITH_GUARDRAILS
-- Risk level: Medium
-- Main concerns: stale closures after stabilizing callbacks, losing cancellation behavior, and
-  tests that mock away the parent-child lifecycle.
-- Guardrails: keep the API contract unchanged, stabilize only the two read commands, mount the real
-  BRD component under the real workspace in regression coverage, and explicitly test stale response
-  handling.
-
-## Execution And Verification
-
-- Implemented stable `loadDiagram` and `loadBrd` callbacks in `ProjectWorkspace`.
-- Narrowed the BRD load effect dependencies to stable commands and Use Case identity.
-- Added integration request-count coverage and resource-switch stale-response coverage.
-- Verification:
-  - Focused lifecycle tests: `11/11`.
-  - Full UI suite: `95/95`.
-  - Production build: passed with the existing large-chunk warning.
-  - Browser/API smoke: not run because ports `5173` and `8000` had no running servers.
-
-## Final Recommendation
-
-- `TASK-199` is complete locally.
-- Keep the new integration test as the canonical regression because isolated component tests do not
-  reproduce context identity feedback loops.
-
----
-
-## Task Summary
-
-- Task: Implement `TASK-129` through `TASK-147`
-- Requested by: User
-- Date: 2026-06-07
-- Affected modules: Railway/env, FastAPI runtime, PostgreSQL/Alembic, Clerk auth, persistence
-  services/routes, React routing/workspaces, artifact Save flows, tests and operations docs
-
-## Goal Reconstruction
-
-- Requested change: Turn the current in-memory editor into a signed-in, multi-project application
-  that persists the latest Project, Spec, FeatureIntent, UseCase, Diagram and BRD state.
-- Intended outcome: A user can create a project, explicitly save every artifact, reload the browser
-  and continue from the same chain without accessing another user's data.
-- Hidden assumptions: Generation remains separate from Save; Clerk is the identity provider;
-  Railway PostgreSQL is the production database; latest-state overwrite is accepted for MVP.
-
-## Risk Assessment
-
-- Decision: IMPLEMENT_WITH_GUARDRAILS
-- Risk level: High
-- Main concerns: credential disclosure, migration/data-loss risk, IDOR, broad `App.tsx` coupling,
-  graph serialization loss, stale BRD cache context, and a scope too large for one unverified patch.
-- External blocker: Railway CLI authentication has expired and the repository is not linked, so
-  credential rotation and live Railway deployment cannot be truthfully completed from this session.
+- Main concerns:
+  - Persistence and route tests currently rely on deterministic generation to avoid networked AI
+    calls, so they need stable mock AI authoring instead of old fallback assumptions.
+  - Runtime truthfulness, API contracts, and UI copy must all change together or the repo will keep
+    advertising scaffold behavior indirectly.
+  - Removing authoring fallback must not accidentally remove schema/grounding/quality/hydration
+    guardrails that keep downstream artifacts safe.
+- Why this is safe or unsafe to implement as written: The direction is correct if we remove only
+  deterministic **authoring** while preserving deterministic **validation/contract enforcement**.
 
 ## Guardrails
-
-- Keep the seven-table latest-state schema; do not add revisions/workspaces/audit/realtime.
-- Require server-side ownership checks for every child resource.
-- Keep generation and persistence as separate actions.
-- Preserve existing generation services and add resource-scoped routes around them.
-- Keep legacy actor fields only as temporary compatibility adapters.
-- Do not connect to the disclosed credential during implementation verification.
-- Mark infrastructure tasks partial until Railway credential rotation/deploy/backup are verified.
-
-## Execution Plan
-
-1. Normalize env/deploy configuration and add PostgreSQL/Alembic foundation.
-2. Add Clerk authentication, CORS, request-scoped user and ownership services.
-3. Add Project/Spec and FeatureIntent CRUD plus protected React routing.
-4. Add UseCase resource identity, generation-from-saved-parent and explicit Save.
-5. Add Diagram and BRD serialization/persistence with explicit Save.
-6. Add shared dirty-state guards and full-chain tests.
-7. Update task statuses, changelog, activity log and Railway operations checklist.
-
-## Verification
-
-- Backend: migration/model/auth/ownership/CRUD/generation tests.
-- Frontend: API client, workspace, Save-state and existing LogicFlow/unit suites.
-- Integration: production build and Playwright persistence flow.
-- Browser: signed-out shell, project workspace and canvas Save behavior.
-
-## Final Recommendation
-
-- Core implementation completed locally on 2026-06-07: migration, auth boundary, ownership CRUD,
-  protected project UI, latest-state Save flows and PostgreSQL integration tests.
-- Remaining partial work is tracked in `docs/review-task-list.md`, primarily Railway credential
-  rotation/deploy/backup execution, live Clerk auth matrix and broader browser navigation coverage.
-- Do not claim `TASK-129`, live portions of `TASK-130`, or `TASK-147` complete until Railway access is
-  restored and credential rotation/deploy/backup checks are performed.
-
----
-
-## Task Summary
-
-- Task: Implement `TASK-148` through `TASK-158`
-- Requested by: User
-- Date: 2026-06-07
-- Affected modules: backend runtime scripts, Clerk auth, persistence services/routes, diagram
-  validation, project workspace UX, scoped Save state, BRD recovery cache, feature routing,
-  Docker/Railway deploy rehearsal and persistence tests
-
-## Goal Reconstruction
-
-- Requested change: Close the follow-up gaps found in the TASK-131 to TASK-145 review.
-- Intended outcome: The latest-state project flow should be testable through the repo runner,
-  safer at auth/validation boundaries, clearer in persisted UI mode, and less likely to leak stale
-  Save/cache state across resources.
-- Hidden assumptions: Route contracts remain stable, Railway deploy cannot be completed without
-  re-auth/link, and local Docker rehearsal is acceptable evidence for the code-side deploy path.
-
-## Risk Assessment
-
-- Decision: IMPLEMENT_WITH_GUARDRAILS
-- Risk level: High
-- Main concerns: auth/ownership regressions, malformed persisted diagram data, broad editor state
-  coupling, and accidental route contract changes while extracting services.
-- Why this is safe to implement as written: The work keeps endpoint paths stable, adds tests before
-  and after the service extraction, and treats live Railway deployment as partial when credentials
-  are unavailable.
-
-## Guardrails
-
-- Keep public persistence API paths and DTO shapes compatible.
-- Keep standalone `/demo` use-case input editable while persisted project mode is read-only for
-  parent Spec/Feature context.
-- Validate saved diagram graph data at Save time and again before saved-BRD generation.
-- Do not perform Railway login/deploy or connect to production credentials in this session.
-- Mark `TASK-157` partial until Railway OAuth, project link, migrations and staging health are
-  verified live.
+- Scope limits:
+  - Keep the existing AI synthesis + validation pipeline.
+  - Do not delete grounding, quality, schema, or hydration layers.
+  - Keep legacy metadata readable so persisted degraded drafts from old contracts can still render.
+- Required tests:
+  - Generation-service regressions for AI-only preference, unavailable runtime, provider/auth
+    failure, and quality rejection.
+  - Persistence auth/chain regressions using mock AI authoring instead of deterministic fallback.
+  - Persisted/legacy Use Case UI regressions for AI-only copy and unavailable/failure states.
+- Rollout or migration notes:
+  - Internal runtime flags such as `deterministic` and `ai_shadow` still exist, but they now mean
+    “authoring unavailable” rather than “return scaffold”.
+  - Legacy persisted `deterministic_fallback` metadata can still exist historically, so the UI must
+    frame it as degraded old output rather than a current generation choice.
 
 ## Execution Plan
-
-- Files changed: `package.json`, `README.md`, `apps/api/pyproject.toml`,
-  `apps/api/app/auth.py`, `apps/api/app/schemas/persistence.py`,
-  `apps/api/app/routes/persistence.py`, `apps/api/app/services/persistence_*.py`,
-  `apps/api/tests/test_persistence_auth_matrix.py`, `src/application/*`, `src/persistence/*`,
-  `src/usecases/UseCasePanel.tsx`, `src/usecases/UseCasePanel.test.tsx`, `src/brd/cache.ts`,
-  `src/brd/cache.test.ts`, `src/App.tsx`, `src/styles.css`, `docs/*`.
-- Implementation completed: runner normalization, Clerk auth matrix, diagram validator, service
-  extraction, scoped Save-state, persisted read-only parent context, UseCase delete, scoped BRD
-  cache, active feature URL route, Docker build fix and scenario tests.
-- Verification completed: `npm run api:python:smoke`, `npm run test:api-mock`, `npm run
-  test:ui-mock`, `npm run build`, `npm run test:e2e-mock`, `docker build -f
-  apps/api/Dockerfile -t swimlane-api:task-157 .`, container `/healthz`, `git diff --check`.
-
-## Final Recommendation
-
-- Proceed with the completed implementation.
-- `TASK-148` through `TASK-156` and `TASK-158` are complete locally.
-- `TASK-157` is partially complete: Docker build/run/health is verified, but Railway staging deploy
-  remains blocked by expired OAuth token and missing project link reported by `railway status`.
-
----
-
-## Task Summary
-
-- Task: Implement `TASK-159` through `TASK-163`
-- Requested by: User
-- Date: 2026-06-07
-- Affected modules: persisted workspace Save-state, diagram canvas context switching, active
-  feature routing, persisted BRD recovery, Railway staging operations
-
-## Goal Reconstruction
-
-- Requested change: Finish the follow-up work from the TASK-148 to TASK-158 review.
-- Intended outcome: Persisted workspace should keep unsaved changes visible across resource
-  switches, avoid silent route fallback, recover gracefully from BRD load failures, and complete as
-  much Railway rehearsal as current credentials allow.
-- Hidden assumptions: A native browser confirm is acceptable for the MVP switch guard; Railway live
-  deploy requires owner login/link and cannot be completed without those credentials.
-
-## Risk Assessment
-
-- Decision: IMPLEMENT_WITH_GUARDRAILS
-- Risk level: Medium
-- Main concerns: hidden unsaved state causing data loss confusion, over-coupling more state into
-  `App.tsx`, and falsely claiming Railway readiness without live deploy access.
-- Why this is safe to implement as written: The UI changes are additive around existing Save paths,
-  route behavior becomes more explicit, and Railway remains marked partial when CLI access is
-  blocked.
-
-## Guardrails
-
-- Keep active toolbar state scoped to the current artifact while using aggregate dirty state for
-  leave/reload guards.
-- Preserve inactive dirty scopes instead of discarding them during context switches.
-- Do not silently redirect invalid feature URLs to a different feature.
-- Keep scoped BRD recovery cache when server load fails.
-- Do not attempt Railway deploy without successful `railway login` and `railway link`.
-
-## Execution Plan
-
-- Files changed: `src/persistence/save-state.ts`, `src/persistence/save-state.test.ts`,
-  `src/persistence/WorkspaceContext.tsx`, `src/application/ProjectWorkspace.tsx`, `src/App.tsx`,
-  `docs/review-task-list.md`, `docs/task-implementation-plan.md`,
-  `docs/progress/changelog.md`, `docs/operations/railway-persistence-release.md`.
-- Implementation completed: save-state registry, aggregate dirty guard, diagram switch confirmation,
-  invalid feature deep-link banner, persisted BRD load error handling, Railway CLI blocker
-  verification.
-- Verification completed: `npm run build`, `npm run test:ui-mock`, `npm run test:e2e-mock`,
-  `railway status`.
+- Files likely to change:
+  - `apps/api/app/usecases/{generation_service.py,runtime.py,artifact_chain.py}`
+  - `apps/api/app/{routes/usecase_generate.py,routes/persistence.py,services/persistence_generation.py,services/persistence_serializers.py,schemas/persistence.py,schemas/usecase.py,services/usecase_builder.py}`
+  - `apps/api/tests/{test_usecase_generation_service.py,test_usecase_routes.py,test_persistence_auth_matrix.py,test_persistence_chain.py,test_live_smoke.py}`
+  - `src/{usecases/PersistedUseCaseWorkspace.tsx,usecases/UseCasePanel.tsx,usecases/types.ts,usecases/prevalidate.ts,persistence/types.ts,App.tsx}`
+  - `docs/{use-cases/UC-07-sinh-usecase-tu-spec.md,product/usecase-synthesis-model-policy.md,review-task-list.md,progress/known-issues.md,progress/changelog.md,activity-log/2026-06.md}`
+- Implementation steps:
+  1. Rewrite backend and persisted-route tests to expect AI-only generation success or explicit
+     failed envelopes instead of scaffold fallback.
+  2. Remove deterministic generation preference from request/response/UI contracts and simplify
+     runtime states to `available / degraded / unavailable`.
+  3. Make generation service fail closed on provider/config/auth failures and quality rejection.
+  4. Remove production imports of deterministic authoring helpers while keeping validation
+     guardrails intact.
+  5. Rewrite BA-facing copy/docs to describe AI-only authoring plus failure states.
+  6. Update tracking docs after verification.
+- Verification steps:
+  1. Run focused backend tests for generation service, routes, and persistence auth/chain.
+  2. Run focused UI tests for persisted and legacy Use Case screens.
+  3. Run `npm run build`.
+  4. Run `git diff --check`.
 
 ## Final Recommendation
-
-- `TASK-159` through `TASK-162` are complete locally.
-- `TASK-163` remains partial because Railway CLI still reports expired OAuth token and no linked
-  project. Complete it after the project owner runs `railway login` and `railway link`.
-
----
-
-## Task Summary
-
-- Task: Implement `TASK-164` through `TASK-168`
-- Requested by: User
-- Date: 2026-06-07
-- Affected modules: persisted Save-state ownership, feature routing, diagram context switching, BRD
-  recovery conflict handling, frontend regression tests
-
-## Goal Reconstruction
-
-- Requested change: Close the state-transition gaps found in the TASK-159 to TASK-163 review.
-- Intended outcome: Explicit discard/delete decisions clear only their owned dirty scopes, invalid
-  routes cannot retain stale editor context, diagram switches cannot half-commit on failure, and
-  local BRD recovery cannot be overwritten silently by server state.
-- Hidden assumptions: Latest-only storage makes local recovery conflict policy data-critical;
-  authenticated hosted Clerk E2E is not available in the mock test environment.
-
-## Risk Assessment
-
-- Decision: IMPLEMENT_WITH_GUARDRAILS
-- Risk level: Medium
-- Main concerns: clearing unrelated dirty scopes, committing active resource identity before async
-  success, and turning clean server BRD state into a false recovery draft.
-- Guardrails: attach feature ownership to Save scopes, clear only on explicit discard/delete,
-  commit diagram identity after successful load/generate, treat legacy BRD caches as dirty, and
-  require an explicit action before replacing local recovery with server content.
-
-## Execution And Verification
-
-- Implemented: feature-scope cleanup, invalid-route context reset, transactional diagram
-  load/generation, guarded generate switches, BRD dirty-cache policy, server-version conflict CTA,
-  correct BRD load retry, and focused integration/unit coverage.
-- Verification:
-  - `npm run build` passed with the existing large-chunk warning.
-  - `npm run test:ui-mock` passed: 16 files, 73 tests.
-  - `npm run test:e2e-mock` passed: 17 scenarios.
-  - Browser smoke on `/demo` confirmed editor/canvas/toolbar render.
-  - `git diff --check` passed.
-
-## Final Recommendation
-
-- `TASK-164` through `TASK-168` are complete locally.
-- Keep real hosted Clerk persistence E2E as a separate environment-backed verification item rather
-  than weakening the local auth boundary for tests.
-
----
-
-## Task Summary
-
-- Task: Implement `TASK-170` through `TASK-178`
-- Requested by: User
-- Date: 2026-06-07
-- Affected modules: persistence tree read model, frontend routing/workspace shell, artifact editors,
-  sample runtime, dirty guards, docs and E2E coverage
-
-## Goal Reconstruction
-
-- Requested change: Replace tab/demo-oriented navigation with a real-data-only left artifact tree
-  for `Project Spec -> Feature -> Use Case -> Diagram -> BRD`.
-- Intended outcome: Every artifact is selectable and refreshable by UUID/deep-link, missing data is
-  explicit, and no normal route can display hardcoded sample content.
-- Hidden assumptions: Latest-state persistence remains canonical; Diagram/BRD bodies should stay
-  lazy; sample graphs may remain only as test fixtures.
-
-## Risk Assessment
-
-- Decision: IMPLEMENT_WITH_GUARDRAILS
-- Risk level: High
-- Main concerns: N+1 tree loading, stale resource identity during route switches, data loss through
-  dirty-state bypass, Strict Mode hydration races, and loss of canvas regression coverage.
-- Guardrails: metadata-only owned tree endpoint, one canonical route model, transactional lazy
-  hydration, scoped dirty transitions, and a production-inaccessible test harness.
-
-## Execution And Verification
-
-- Implemented: artifact-tree backend API, canonical routes, accessible left tree, persisted
-  Project/Feature/Use Case/Diagram/BRD integration, truthful empty/error/loading states, runtime
-  sample removal, test-only fixture injection, and full-chain real persistence E2E.
-- Regression fixes: LogicFlow hydration now waits for editor readiness under React Strict Mode;
-  Diagram identity is preserved/reloaded when switching from Diagram to BRD.
-- Verification target: backend pytest, frontend Vitest, full Playwright suite, production build,
-  runtime sample-label search, Browser deep-link smoke, and `git diff --check`.
+- Proceed with guardrails
+- Rationale: The product direction is right: scaffold output is not acceptable as a BA artifact.
+  The safe cut is to remove deterministic authoring while preserving deterministic validation.
+- Safer alternative: keep the old fallback only in internal tooling, never in BA-facing persisted
+  generation. That alternative is intentionally not chosen for the product surface.

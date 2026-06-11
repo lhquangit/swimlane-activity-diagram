@@ -1,0 +1,110 @@
+{
+  "feature_intent": {
+    "feature_name": "Đăng ký xe khách",
+    "feature_summary": "Cư dân đăng ký xe khách trước giờ vào cổng để bảo vệ kiểm tra và cho phép vào khu dân cư.",
+    "actors": ["Cư dân", "V-App", "Bảo vệ", "Barrier"],
+    "primary_actor": "Cư dân",
+    "trigger": "Cư dân cần cho một xe khách vào khu dân cư.",
+    "inputs": ["Biển số xe khách", "Thời gian vào dự kiến"],
+    "outputs": ["Phiếu đăng ký xe khách", "Trạng thái cho phép vào cổng"],
+    "constraints": ["Phiếu chỉ có hiệu lực trong ngày đăng ký"],
+    "success_outcome": "Bảo vệ có thông tin hợp lệ để cho xe khách vào cổng đúng thời gian."
+  },
+  "synthesis": {
+    "use_cases": [
+      {
+        "title": "Cư dân đăng ký trước xe khách trên V-App",
+        "objective": "Tạo phiếu đăng ký xe khách hợp lệ trước khi khách đến cổng.",
+        "primary_actor": "Cư dân",
+        "supporting_actors": ["V-App"],
+        "preconditions": ["Cư dân biết biển số xe khách và thời gian vào dự kiến."],
+        "main_flow_steps": [
+          {
+            "actor": "Cư dân",
+            "action": "Nhập biển số xe khách và thời gian vào dự kiến trên V-App.",
+            "input_or_trigger": "Cư dân cần cho một xe khách vào khu dân cư.",
+            "expected_result": "Thông tin đăng ký chờ xác nhận.",
+            "evidence_refs": ["feature.trigger", "feature.inputs.0", "feature.inputs.1"]
+          },
+          {
+            "actor": "V-App",
+            "action": "Tạo phiếu đăng ký xe khách với hiệu lực trong ngày.",
+            "input_or_trigger": "Thông tin đăng ký chờ xác nhận.",
+            "expected_result": "Phiếu đăng ký sẵn sàng cho bảo vệ tra cứu.",
+            "evidence_refs": ["feature.outputs.0", "feature.constraints.0"]
+          }
+        ],
+        "alternate_flows": [
+          {
+            "source_step_number": 2,
+            "condition": "Thời gian vào dự kiến đã nằm ngoài ngày đăng ký.",
+            "steps": [
+              {
+                "actor": "V-App",
+                "action": "Từ chối tạo phiếu và yêu cầu cư dân chọn lại ngày hợp lệ.",
+                "input_or_trigger": null,
+                "expected_result": "Cư dân biết phiếu chỉ có hiệu lực trong ngày đăng ký.",
+                "evidence_refs": ["feature.constraints.0"]
+              }
+            ],
+            "rejoin_step_number": 1,
+            "terminal_outcome": null,
+            "evidence_refs": ["feature.constraints.0"]
+          }
+        ],
+        "success_outcome": "Phiếu đăng ký xe khách hợp lệ được tạo trước khi khách đến cổng.",
+        "evidence_refs": ["feature.outputs.0", "feature.success_outcome"]
+      },
+      {
+        "title": "Bảo vệ kiểm tra phiếu và mở barrier cho xe khách",
+        "objective": "Cho xe khách vào cổng khi phiếu đăng ký còn hiệu lực.",
+        "primary_actor": "Bảo vệ",
+        "supporting_actors": ["Barrier"],
+        "preconditions": ["Phiếu đăng ký xe khách đã được tạo."],
+        "main_flow_steps": [
+          {
+            "actor": "Bảo vệ",
+            "action": "Tra cứu phiếu đăng ký theo biển số xe khách tại chốt cổng.",
+            "input_or_trigger": "Biển số xe khách",
+            "expected_result": "Thông tin phiếu đăng ký được hiển thị.",
+            "evidence_refs": ["feature.inputs.0", "feature.outputs.0"]
+          },
+          {
+            "actor": "Bảo vệ",
+            "action": "Xác nhận phiếu còn hiệu lực và ra lệnh mở barrier.",
+            "input_or_trigger": "Phiếu đăng ký xe khách",
+            "expected_result": "Xe khách được phép đi qua cổng.",
+            "evidence_refs": ["feature.constraints.0", "feature.outputs.1", "feature.success_outcome"]
+          },
+          {
+            "actor": "Barrier",
+            "action": "Mở cổng cho xe khách đi qua.",
+            "input_or_trigger": "Lệnh mở barrier.",
+            "expected_result": "Trạng thái cho phép vào cổng được hoàn tất.",
+            "evidence_refs": ["feature.outputs.1"]
+          }
+        ],
+        "alternate_flows": [
+          {
+            "source_step_number": 2,
+            "condition": "Không tìm thấy phiếu đăng ký còn hiệu lực.",
+            "steps": [
+              {
+                "actor": "Bảo vệ",
+                "action": "Từ chối cho xe vào và hướng dẫn cư dân tạo lại phiếu hợp lệ.",
+                "input_or_trigger": null,
+                "expected_result": "Xe khách không được vào cổng khi thiếu phiếu hợp lệ.",
+                "evidence_refs": ["feature.constraints.0"]
+              }
+            ],
+            "rejoin_step_number": null,
+            "terminal_outcome": "Xe khách chưa được phép vào cổng.",
+            "evidence_refs": ["feature.constraints.0"]
+          }
+        ],
+        "success_outcome": "Bảo vệ có thông tin hợp lệ để cho xe khách vào cổng đúng thời gian.",
+        "evidence_refs": ["feature.outputs.1", "feature.success_outcome"]
+      }
+    ]
+  }
+}

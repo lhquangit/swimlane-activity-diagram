@@ -85,10 +85,23 @@ USECASE_SYNTHESIS_V1_1 = PromptDefinition(
     system_prompt=_load_prompt_text("usecase_synthesis", "1.1.0", "system.md"),
 )
 
+USECASE_SYNTHESIS_V1_2 = PromptDefinition(
+    prompt_id="usecase_synthesis",
+    version="1.2.0",
+    capability="usecase_synthesis",
+    input_schema_version="2026-06-06",
+    changelog=(
+        "Add explicit business segmentation heuristics, counterexamples, and a self-review "
+        "checklist to reduce broad schema-valid use-case output."
+    ),
+    system_prompt=_load_prompt_text("usecase_synthesis", "1.2.0", "system.md"),
+)
+
 _REGISTRY = {
     (BRD_GENERATION_V1.prompt_id, BRD_GENERATION_V1.version): BRD_GENERATION_V1,
     (USECASE_SYNTHESIS_V1.prompt_id, USECASE_SYNTHESIS_V1.version): USECASE_SYNTHESIS_V1,
     (USECASE_SYNTHESIS_V1_1.prompt_id, USECASE_SYNTHESIS_V1_1.version): USECASE_SYNTHESIS_V1_1,
+    (USECASE_SYNTHESIS_V1_2.prompt_id, USECASE_SYNTHESIS_V1_2.version): USECASE_SYNTHESIS_V1_2,
 }
 
 

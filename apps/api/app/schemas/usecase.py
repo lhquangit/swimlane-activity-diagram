@@ -285,7 +285,7 @@ class UseCaseGenerationRequest(StrictBaseModel):
     project_spec: ProjectSpec
     feature_intent: FeatureIntent
     language: Literal["vi"] = "vi"
-    generation_preference: Literal["auto", "ai", "deterministic"] = "auto"
+    generation_preference: Literal["ai"] = "ai"
 
 
 class UseCaseGenerationResult(StrictBaseModel):

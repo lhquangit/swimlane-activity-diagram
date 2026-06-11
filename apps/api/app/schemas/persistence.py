@@ -133,10 +133,19 @@ class FeatureIntentUpdate(FeatureIntentCreate):
     pass
 
 
+class UseCaseGenerationRuntimeResource(StrictBaseModel):
+    status: Literal["available", "degraded", "unavailable"]
+    provider: str
+    prompt_version: str
+    can_generate: bool
+    note: str
+
+
 class FeatureIntentResource(FeatureIntentCreate):
     id: UUID
     spec_id: UUID
     latest_usecase_generation: ResponseMetadata | None = None
+    usecase_generation_runtime: UseCaseGenerationRuntimeResource
     created_at: datetime
     updated_at: datetime
 

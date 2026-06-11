@@ -858,7 +858,7 @@ export default function App({ seed }: { seed?: AppSeed }) {
     Record<string, DiagramWorkspaceEntry>
   >({});
   const [diagramOperationStates, setDiagramOperationStates] = useState<
-    Record<string, 'generating' | 'failed' | undefined>
+    Record<string, 'generating' | 'opening' | 'failed' | undefined>
   >({});
   const [orphanedDiagramIds, setOrphanedDiagramIds] = useState<string[]>([]);
   const [editorReady, setEditorReady] = useState(false);
@@ -867,8 +867,7 @@ export default function App({ seed }: { seed?: AppSeed }) {
   const isApplyingUseCaseDiagramRef = useRef(false);
   const [useCaseRequestId, setUseCaseRequestId] = useState<string | null>(null);
   const [useCaseMetadata, setUseCaseMetadata] = useState<ResponseMetadata | null>(null);
-  const [useCaseGenerationPreference, setUseCaseGenerationPreference] =
-    useState<UseCaseGenerationPreference>('auto');
+  const [useCaseGenerationPreference] = useState<UseCaseGenerationPreference>('ai');
   const [useCaseError, setUseCaseError] = useState<string | null>(null);
   const [lastUseCaseGenerateFingerprint, setLastUseCaseGenerateFingerprint] = useState<string | null>(
     null,
@@ -2072,6 +2071,7 @@ export default function App({ seed }: { seed?: AppSeed }) {
     }
     let diagramWorkspace = diagramWorkspaces[useCaseId];
     if (!diagramWorkspace && workspace) {
+      setDiagramOperationStates((current) => ({ ...current, [useCaseId]: 'opening' }));
       try {
         const useCase = useCaseDrafts.find((item) => item.use_case_id === useCaseId);
         const saved = await workspace.loadDiagram(useCaseId);
@@ -2080,9 +2080,16 @@ export default function App({ seed }: { seed?: AppSeed }) {
           setDiagramWorkspaces((current) => ({ ...current, [useCaseId]: diagramWorkspace! }));
         }
       } catch (error) {
+        setDiagramOperationStates((current) => ({ ...current, [useCaseId]: undefined }));
         const message = error instanceof Error ? error.message : 'Không tải được diagram đã lưu.';
         setStatus(`Không thể mở ${useCaseId}: ${message}`);
         return;
+      } finally {
+        setDiagramOperationStates((current) =>
+          current[useCaseId] === 'opening'
+            ? { ...current, [useCaseId]: undefined }
+            : current,
+        );
       }
     }
     if (!diagramWorkspace) {
@@ -3030,7 +3037,6 @@ export default function App({ seed }: { seed?: AppSeed }) {
             artifactChain={artifactChain}
             requestId={useCaseRequestId}
             metadata={useCaseMetadata}
-            generationPreference={useCaseGenerationPreference}
             errorMessage={useCaseError}
             validationErrors={useCaseValidationErrors}
             isOutdated={isUseCaseDraftOutdated}
@@ -3038,7 +3044,6 @@ export default function App({ seed }: { seed?: AppSeed }) {
             onClose={() => setUseCasePanelOpen(false)}
             onGenerate={() => void handleGenerateUseCases()}
             sourceMode="standalone"
-            onGenerationPreferenceChange={setUseCaseGenerationPreference}
             onSectionChange={setUseCaseWorkspaceSection}
             onProjectSpecChange={handleProjectSpecChange}
             onFeatureIntentChange={handleFeatureIntentChange}

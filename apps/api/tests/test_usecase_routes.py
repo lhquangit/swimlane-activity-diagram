@@ -1,9 +1,41 @@
 from __future__ import annotations
 
+import pytest
+
+from app.ai.providers import MockProvider
+from app.config import Settings
 from app.routes import usecase_generate
+from app.usecases.generation_service import UseCaseGenerationService
+from test_usecase_synthesis import valid_synthesis_payload
 
 
 SCHEMA_HEADERS = {"X-Schema-Version": "2026-05-31"}
+
+
+@pytest.fixture(autouse=True)
+def install_mock_generation_service(monkeypatch):
+    original = usecase_generate.generation_service
+    settings = Settings(
+        usecase_provider="openrouter",
+        usecase_generation_mode="ai_default",
+        usecase_model="mock/usecase-model",
+        usecase_prompt_version="1.2.0",
+        usecase_max_attempts=2,
+        ai_openrouter_api_key="sk-test",
+        openrouter_api_key="sk-test",
+    )
+    monkeypatch.setattr(
+        usecase_generate,
+        "generation_service",
+        UseCaseGenerationService(
+            settings,
+            provider_factory=lambda _name, _settings: MockProvider(valid_synthesis_payload),
+        ),
+    )
+    try:
+        yield
+    finally:
+        monkeypatch.setattr(usecase_generate, "generation_service", original)
 
 
 def valid_usecase_payload() -> dict:
@@ -33,10 +65,11 @@ def valid_usecase_payload() -> dict:
             "success_outcome": "Yêu cầu GPS được cấp phát thành công và cư dân nhận được thông báo.",
         },
         "language": "vi",
+        "generation_preference": "ai",
     }
 
 
-def test_generate_usecases_returns_artifact_chain_and_usecases(client) -> None:
+def test_generate_usecases_returns_ai_artifact_chain_and_usecases(client) -> None:
     response = client.post(
         "/api/usecases/generate",
         json=valid_usecase_payload(),
@@ -46,41 +79,12 @@ def test_generate_usecases_returns_artifact_chain_and_usecases(client) -> None:
 
     assert response.status_code == 200
     assert body["status"] == "completed"
-    assert body["metadata"]["provider"] == "deterministic"
-    assert body["metadata"]["generation_source"] == "deterministic_fallback"
-    assert body["result"]["generation_source"] == "deterministic_fallback"
+    assert body["metadata"]["generation_source"] == "ai"
+    assert body["result"]["generation_source"] == "ai"
     assert body["result"]["artifact_chain"][0]["artifact_type"] == "project_spec"
     assert body["result"]["artifact_chain"][-1]["artifact_type"] == "formal_brd_draft"
-    assert len(body["result"]["use_cases"]) == 4
+    assert body["result"]["use_cases"]
     assert body["result"]["use_cases"][0]["review_status"] == "draft"
-    assert "Ban quản lý" == body["result"]["use_cases"][0]["primary_actor"]
-    assert body["result"]["use_cases"][0]["main_flow_steps"][0]["step_id"].endswith("-S01")
-    assert body["result"]["use_cases"][0]["alternate_flows"][0]["source_step_id"]
-
-
-def test_generate_usecases_accepts_minimal_visible_input(client) -> None:
-    response = client.post(
-        "/api/usecases/generate",
-        json={
-            "project_spec": {
-                "project_name": "Current project",
-                "project_summary": "Project context.",
-            },
-            "feature_intent": {
-                "feature_name": "Update request",
-                "feature_summary": "Update one business request.",
-                "primary_actor": "Operator",
-            },
-            "language": "vi",
-        },
-        headers=SCHEMA_HEADERS,
-    )
-
-    assert response.status_code == 200
-    use_cases = response.json()["result"]["use_cases"]
-    assert use_cases
-    assert all(use_case["main_flow_steps"] for use_case in use_cases)
-    assert all(use_case["primary_actor"] == "Operator" for use_case in use_cases)
 
 
 def test_generate_usecases_rejects_invalid_schema_version(client) -> None:
@@ -144,55 +148,39 @@ def test_generate_usecases_returns_canonically_normalized_payload(client) -> Non
     assert body["result"]["feature_intent"]["systems_involved"] == ["Portal", "V-app"]
 
 
-def test_generate_diagram_requires_approved_use_case_and_returns_traceable_graph(client) -> None:
-    usecase_response = client.post(
-        "/api/usecases/generate",
-        json=valid_usecase_payload(),
-        headers=SCHEMA_HEADERS,
-    )
-    use_case = usecase_response.json()["result"]["use_cases"][0]
+def test_generate_usecases_fails_closed_when_ai_provider_is_unavailable(client, monkeypatch) -> None:
+    original = usecase_generate.generation_service
 
-    blocked = client.post(
-        "/api/diagrams/generate",
-        json={"use_case": use_case, "language": "vi"},
-        headers=SCHEMA_HEADERS,
-    )
-    assert blocked.status_code == 409
-    assert blocked.json()["error"]["code"] == "USE_CASE_NOT_APPROVED"
+    class FailingService:
+        def generate(self, *_args, **_kwargs):
+            from app.schemas.common import ResponseMetadata
+            from app.usecases.generation_service import UseCaseGenerationFailure
 
-    use_case["review_status"] = "approved"
-    response = client.post(
-        "/api/diagrams/generate",
-        json={"use_case": use_case, "language": "vi"},
-        headers=SCHEMA_HEADERS,
-    )
+            raise UseCaseGenerationFailure(
+                code="USECASE_AI_PROVIDER_FAILURE",
+                message="AI provider tạm thời không khả dụng cho Use Case.",
+                retryable=True,
+                status_code=502,
+                metadata=ResponseMetadata(
+                    capability="usecase_synthesis",
+                    provider="openrouter",
+                    model="openai/gpt-5.5",
+                    fallback_reason="USECASE_AI_PROVIDER_FAILURE",
+                ),
+            )
+
+    monkeypatch.setattr(usecase_generate, "generation_service", FailingService())
+    try:
+        response = client.post(
+            "/api/usecases/generate",
+            json=valid_usecase_payload(),
+            headers=SCHEMA_HEADERS,
+        )
+    finally:
+        monkeypatch.setattr(usecase_generate, "generation_service", original)
+
     body = response.json()
-
-    assert response.status_code == 200
-    assert body["result"]["diagram"]["use_case_id"] == use_case["use_case_id"]
-    assert body["result"]["diagram"]["generation_status"] == "ready"
-    assert body["result"]["diagram"]["nodes"]
-    assert all(
-        node["trace"]["use_case_id"] == use_case["use_case_id"]
-        for node in body["result"]["diagram"]["nodes"]
-    )
-
-
-def test_generate_diagram_rejects_invalid_detailed_contract(client) -> None:
-    usecase_response = client.post(
-        "/api/usecases/generate",
-        json=valid_usecase_payload(),
-        headers=SCHEMA_HEADERS,
-    )
-    use_case = usecase_response.json()["result"]["use_cases"][0]
-    use_case["review_status"] = "approved"
-    use_case["main_flow_steps"] = []
-
-    response = client.post(
-        "/api/diagrams/generate",
-        json={"use_case": use_case, "language": "vi"},
-        headers=SCHEMA_HEADERS,
-    )
-
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "INVALID_REQUEST"
+    assert response.status_code == 502
+    assert body["status"] == "failed"
+    assert body["error"]["code"] == "USECASE_AI_PROVIDER_FAILURE"
+    assert body["result"] == {}

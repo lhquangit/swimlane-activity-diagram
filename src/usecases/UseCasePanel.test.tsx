@@ -200,22 +200,22 @@ function UseCasePanelHarness({
 }
 
 describe('UseCasePanel', () => {
-  it('shows the deterministic source and review guidance', () => {
+  it('shows degraded fallback source without exposing provider internals', () => {
     render(
       <UseCasePanelHarness
         metadata={{
           generation_source: 'deterministic_fallback',
-          fallback_reason: 'quality_rejected',
+          fallback_reason: 'USECASE_AI_PROVIDER_FAILURE',
         }}
       />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Use case/ }));
-    expect(screen.getByText('Bản nháp theo rule')).toBeInTheDocument();
-    expect(screen.getByText(/chưa đạt quality gate/)).toBeInTheDocument();
+    expect(screen.getByText('Bản nháp degraded')).toBeInTheDocument();
+    expect(screen.queryByText(/provider failure/i)).not.toBeInTheDocument();
   });
 
-  it('shows AI source with the prompt version', () => {
+  it('shows AI source without exposing prompt/version internals', () => {
     render(
       <UseCasePanelHarness
         metadata={{
@@ -228,7 +228,8 @@ describe('UseCasePanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Use case/ }));
     expect(screen.getByText('Bản nháp AI')).toBeInTheDocument();
-    expect(screen.getByText('Prompt usecase_synthesis@1.0.0')).toBeInTheDocument();
+    expect(screen.queryByText('Prompt usecase_synthesis@1.0.0')).not.toBeInTheDocument();
+    expect(screen.queryByText('Request req_usecase_001')).not.toBeInTheDocument();
   });
 
   it('renders the workspace with distinct input, use-case, and diagram zones', () => {
@@ -251,10 +252,9 @@ describe('UseCasePanel', () => {
     expect(screen.queryByText('Thông tin bổ sung')).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Bên tham gia hoặc hệ thống/)).not.toBeInTheDocument();
 
-    expect(screen.getByText('Trace kỹ thuật')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Trace kỹ thuật'));
-    expect(screen.getAllByText('ProjectSpec').length).toBeGreaterThan(0);
-    expect(screen.getByText('UseCaseDraft')).toBeInTheDocument();
+    expect(screen.queryByText('Trace kỹ thuật')).not.toBeInTheDocument();
+    expect(screen.queryByText('Theo rule (scaffold)')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ưu tiên AI')).not.toBeInTheDocument();
 
     const summary = screen.getByDisplayValue('Nen tang quan ly cu dan va dich vu noi khu.');
     fireEvent.change(summary, {
@@ -329,8 +329,6 @@ describe('UseCasePanel', () => {
   it('edits structured flows without exposing raw stable IDs', () => {
     render(<UseCasePanelHarness />);
     fireEvent.click(screen.getByRole('button', { name: /Use case/ }));
-
-    expect(screen.getByText('Trace kỹ thuật')).toBeVisible();
     expect(screen.getByText('UC-VPET-GPS-01-S01')).not.toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: 'Thêm bước' }));
@@ -406,7 +404,7 @@ describe('UseCasePanel', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Sinh use case' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Sinh use case bằng AI' })).toBeDisabled();
     expect(screen.getByText('Project name là bắt buộc.')).toBeInTheDocument();
     expect(screen.getByText('Feature summary là bắt buộc.')).toBeInTheDocument();
   });
@@ -497,6 +495,47 @@ describe('UseCasePanel', () => {
     );
 
     expect(screen.getByText('Sơ đồ đã lỗi thời')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mở canvas' })).not.toBeInTheDocument();
+  });
+
+  it('shows an opening state instead of the open-canvas action while a saved diagram is loading', () => {
+    render(
+      <UseCasePanel
+        open
+        phase="ready"
+        activeSection="diagrams"
+        projectSpec={baseProjectSpec}
+        featureIntent={baseFeatureIntent}
+        useCases={[{ ...baseUseCases[0], review_status: 'approved' }]}
+        diagramInventory={[
+          {
+            ...baseDiagramInventory[0],
+            operation_state: 'opening',
+          },
+        ]}
+        orphanedDiagrams={[]}
+        artifactChain={[]}
+        requestId="req_usecase_001"
+        errorMessage={null}
+        validationErrors={[]}
+        isOutdated={false}
+        hasDraftChanges={false}
+        onClose={vi.fn()}
+        onGenerate={vi.fn()}
+        onSectionChange={vi.fn()}
+        onProjectSpecChange={vi.fn()}
+        onFeatureIntentChange={vi.fn()}
+        onUseCaseChange={vi.fn()}
+        onReviewStatusChange={vi.fn()}
+        onApproveAll={vi.fn()}
+        onOpenDiagramWorkspace={vi.fn()}
+        onGenerateDiagram={vi.fn()}
+        onOpenDiagramCanvas={vi.fn()}
+        onDiscardOrphanedDiagram={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Đang mở…' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Mở canvas' })).not.toBeInTheDocument();
   });
 

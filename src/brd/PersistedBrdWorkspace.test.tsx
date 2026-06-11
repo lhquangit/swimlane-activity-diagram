@@ -165,7 +165,7 @@ function buildWorkspace(overrides: Partial<WorkspacePersistence> = {}): Workspac
 }
 
 describe('PersistedBrdWorkspace', () => {
-  it('shows a reader-first BRD document with direct inline editors and no markdown toggle', async () => {
+  it('shows a reader-first BRD document with direct inline editors and no debug surface', async () => {
     const workspace = buildWorkspace({
       loadBrd: vi.fn(async () => ({
         id: 'brd-1',
@@ -223,8 +223,9 @@ describe('PersistedBrdWorkspace', () => {
     expect(screen.queryByPlaceholderText('BRD markdown sẽ xuất hiện ở đây.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Chỉnh sửa markdown' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('Structured Spec'));
-    expect(screen.getByText(/"summary": "BRD summary"/)).toBeVisible();
+    expect(screen.queryByText('Structured Spec')).not.toBeInTheDocument();
+    expect(screen.queryByText('Template')).not.toBeInTheDocument();
+    expect(screen.queryByText('BRD Artifact')).not.toBeInTheDocument();
   });
 
   it('saves inline document edits back into markdown content', async () => {
@@ -361,6 +362,74 @@ describe('PersistedBrdWorkspace', () => {
     });
   });
 
+  it('shows a pending state while exporting BRD DOCX', async () => {
+    let resolveExport!: (value: Blob) => void;
+    const exportBrdDocx = vi.fn(
+      () =>
+        new Promise<Blob>((resolve) => {
+          resolveExport = resolve;
+        }),
+    );
+    const createObjectUrl = vi.fn(() => 'blob:docx-pending');
+    const revokeObjectUrl = vi.fn();
+    const anchorClick = vi.fn();
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    const originalAnchorClick = HTMLAnchorElement.prototype.click;
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+    Object.defineProperty(HTMLAnchorElement.prototype, 'click', {
+      configurable: true,
+      value: anchorClick,
+    });
+
+    const workspace = buildWorkspace({
+      exportBrdDocx,
+      loadBrd: vi.fn(async () => ({
+        id: 'brd-1',
+        diagram_id: 'diagram-1',
+        title: 'Camera Re-ID',
+        structured_spec: spec,
+        markdown_content:
+          '# Camera Re-ID\n\n## 1. Mục đích tài liệu\nGenerated summary.\n\n## 2. Phạm vi nghiệp vụ\n| Nhóm nghiệp vụ | Nội dung |\n| :---- | :---- |\n| Xử lý yêu cầu | Camera AI tiếp nhận và xử lý. |',
+        warnings: [],
+        template: 'default' as const,
+        source_diagram_updated_at: '2026-06-09T00:00:00Z',
+        created_at: '2026-06-09T00:00:00Z',
+        updated_at: '2026-06-09T00:00:00Z',
+        is_outdated: false,
+      })),
+    });
+
+    render(
+      <WorkspacePersistenceProvider value={workspace}>
+        <PersistedBrdWorkspace
+          activeUseCaseResource={makeUseCaseResource('usecase-1', 'UC-001', 'Camera Re-ID flow')}
+        />
+      </WorkspacePersistenceProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Export DOCX' }));
+
+    await waitFor(() => expect(exportBrdDocx).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: 'Đang tạo file DOCX…' })).toBeDisabled();
+
+    resolveExport(
+      new Blob(['docx'], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      }),
+    );
+
+    await waitFor(() => expect(anchorClick).toHaveBeenCalled());
+
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: originalCreateObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: originalRevokeObjectURL });
+    Object.defineProperty(HTMLAnchorElement.prototype, 'click', {
+      configurable: true,
+      value: originalAnchorClick,
+    });
+  });
+
   it('generates and saves BRD inline without relying on a side panel', async () => {
     const workspace = buildWorkspace();
 
@@ -425,8 +494,70 @@ describe('PersistedBrdWorkspace', () => {
         template: 'default',
       });
     });
-    expect(await screen.findByText('Structured Spec')).toBeVisible();
+    expect(await screen.findByText('Generated')).toBeVisible();
     expect(screen.queryByPlaceholderText('BRD markdown sẽ xuất hiện ở đây.')).not.toBeInTheDocument();
+  });
+
+  it('hides duplicate navigation, telemetry, and raw warning node ids on the persisted BRD route', async () => {
+    const workspace = buildWorkspace({
+      loadBrd: vi.fn(async () => ({
+        id: 'brd-1',
+        diagram_id: 'diagram-1',
+        title: 'Camera Re-ID',
+        structured_spec: spec,
+        markdown_content: '# Camera Re-ID\n\nGenerated',
+        warnings: [
+          {
+            code: 'DECISION_UNLABELED',
+            severity: 'warning' as const,
+            message: 'Một quyết định chưa có nhãn rõ ràng.',
+            related_node_ids: ['node-1'],
+          },
+        ],
+        template: 'default' as const,
+        source_diagram_updated_at: '2026-06-09T00:00:00Z',
+        created_at: '2026-06-09T00:00:00Z',
+        updated_at: '2026-06-09T00:00:00Z',
+        is_outdated: false,
+      })),
+    });
+
+    render(
+      <WorkspacePersistenceProvider value={workspace}>
+        <PersistedBrdWorkspace
+          activeUseCaseResource={makeUseCaseResource('usecase-1', 'UC-001', 'Camera Re-ID flow')}
+          activeTreeUseCase={{
+            id: 'usecase-1',
+            use_case_key: 'UC-001',
+            title: 'Camera Re-ID flow',
+            review_status: 'approved',
+            updated_at: '2026-06-09T00:00:00Z',
+            diagram: {
+              id: 'diagram-1',
+              title: 'Camera Re-ID Diagram',
+              semantic_edited: false,
+              is_outdated: false,
+              updated_at: '2026-06-09T00:00:00Z',
+              brd: {
+                id: 'brd-1',
+                title: 'Camera Re-ID',
+                template: 'default',
+                is_outdated: false,
+                updated_at: '2026-06-09T00:00:00Z',
+              },
+            },
+          }}
+        />
+      </WorkspacePersistenceProvider>,
+    );
+
+    expect(await screen.findByText('Một quyết định chưa có nhãn rõ ràng.')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Về Diagram' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mở Diagram' })).not.toBeInTheDocument();
+    expect(screen.queryByText('mock-deterministic-v1')).not.toBeInTheDocument();
+    expect(screen.queryByText(/provider_unavailable_config/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Request req-1/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('node-1')).not.toBeInTheDocument();
   });
 
   it('ignores a stale diagram response after switching to another BRD resource', async () => {

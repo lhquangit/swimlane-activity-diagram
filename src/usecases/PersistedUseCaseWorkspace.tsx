@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react';
 
 import type { ResponseMetadata } from '../brd/types';
+import type { WorkspacePersistence } from '../persistence/WorkspaceContext';
 import { useWorkspacePersistence } from '../persistence/WorkspaceContext';
-import type { ArtifactTreeUseCase, UseCaseResource } from '../persistence/types';
+import type {
+  ArtifactTreeUseCase,
+  UseCaseGenerationRuntime,
+  UseCaseResource,
+} from '../persistence/types';
 import { validateUseCaseContract } from './contract';
 import {
   addAlternateFlow,
@@ -52,15 +57,12 @@ export default function PersistedUseCaseWorkspace({
 }: PersistedUseCaseWorkspaceProps) {
   const workspace = useWorkspacePersistence();
   const [useCaseDrafts, setUseCaseDrafts] = useState<UseCaseDraft[]>([]);
-  const [generationPreference, setGenerationPreference] =
-    useState<UseCaseGenerationPreference>('auto');
   const [useCaseError, setUseCaseError] = useState<string | null>(null);
-  const [pendingGenerationRequestId, setPendingGenerationRequestId] = useState<string | null>(
-    workspace?.pendingUseCaseGenerationRequestId ?? null,
-  );
   const [pendingGenerationMetadata, setPendingGenerationMetadata] =
     useState<ResponseMetadata | null>(workspace?.pendingUseCaseGenerationMetadata ?? null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [diagramActionPending, setDiagramActionPending] = useState(false);
+  const [deleteActionPending, setDeleteActionPending] = useState(false);
   const [hasUnsavedGeneratedDrafts, setHasUnsavedGeneratedDrafts] = useState(false);
   const [optimisticDiagramState, setOptimisticDiagramState] =
     useState<UseCaseDiagramArtifactState | null>(null);
@@ -89,13 +91,16 @@ export default function PersistedUseCaseWorkspace({
   useEffect(() => {
     if (!workspace) return;
     setPendingGenerationMetadata(workspace.pendingUseCaseGenerationMetadata ?? null);
-    setPendingGenerationRequestId(workspace.pendingUseCaseGenerationRequestId ?? null);
   }, [
     workspace,
     workspace?.activeFeature.id,
     workspace?.pendingUseCaseGenerationMetadata,
-    workspace?.pendingUseCaseGenerationRequestId,
   ]);
+
+  useEffect(() => {
+    setDiagramActionPending(false);
+    setDeleteActionPending(false);
+  }, [activeUseCaseResource?.id, mode]);
 
   if (!workspace) return null;
 
@@ -103,18 +108,24 @@ export default function PersistedUseCaseWorkspace({
     workspace.projectSpec,
     workspace.featureIntent,
   );
+  const generationRuntime = workspace.activeFeature.usecase_generation_runtime ?? null;
+  const effectiveGenerationPreference: UseCaseGenerationPreference = 'ai';
+  const diagramBlockedBySaveState =
+    workspace.useCaseSaveState === 'dirty' ||
+    workspace.useCaseSaveState === 'saving' ||
+    workspace.useCaseSaveState === 'failed';
   const selectedDraft =
     activeUseCaseResource == null
       ? null
       : useCaseDrafts.find((useCase) => useCase.use_case_id === activeUseCaseResource.use_case_key) ??
         canonicalizeUseCaseDraft(activeUseCaseResource.content);
-  const canGenerate = !isGenerating && validationErrors.length === 0;
+  const canGenerate =
+    !isGenerating && validationErrors.length === 0 && generationRuntime?.can_generate === true;
   const canPersistSelected = Boolean(selectedDraft && activeUseCaseResource);
   const canPersistDraftList =
     useCaseDrafts.length > 0 && workspace.useCaseSaveState !== 'saving' && !isGenerating;
   const generationMetadata =
     pendingGenerationMetadata ?? workspace.activeFeature.latest_usecase_generation ?? null;
-  const generationRequestId = pendingGenerationRequestId;
   const generationPending = pendingGenerationMetadata != null;
 
   const persistDraftList = async (
@@ -128,7 +139,6 @@ export default function PersistedUseCaseWorkspace({
     setHasUnsavedGeneratedDrafts(false);
     setUseCaseError(null);
     setPendingGenerationMetadata(null);
-    setPendingGenerationRequestId(null);
   };
 
   const handleGenerateAndPersist = async () => {
@@ -142,7 +152,7 @@ export default function PersistedUseCaseWorkspace({
     setIsGenerating(true);
     setUseCaseError(null);
     try {
-      const envelope = await workspace.generateUseCases(generationPreference);
+      const envelope = await workspace.generateUseCases(effectiveGenerationPreference);
       const result = envelope.result;
       if (!result) {
         throw new Error('Use case generation trả về kết quả rỗng.');
@@ -150,7 +160,6 @@ export default function PersistedUseCaseWorkspace({
       const generatedDrafts = result.use_cases.map(canonicalizeUseCaseDraft);
       setUseCaseDrafts(generatedDrafts);
       setHasUnsavedGeneratedDrafts(true);
-      setPendingGenerationRequestId(envelope.request_id);
       setPendingGenerationMetadata(envelope.metadata ?? null);
 
       await persistDraftList(generatedDrafts, envelope.metadata ?? null);
@@ -175,14 +184,6 @@ export default function PersistedUseCaseWorkspace({
         error instanceof Error ? error.message : 'Không thể lưu danh sách use case hiện tại.',
       );
     }
-  };
-
-  const handleOpenUseCase = (resourceId: string) => {
-    workspace.navigateToArtifact({
-      kind: 'use-case',
-      featureId: workspace.activeFeature.id,
-      useCaseId: resourceId,
-    });
   };
 
   const handleUseCaseChange = (useCaseId: string, next: UseCaseDraft) => {
@@ -236,41 +237,9 @@ export default function PersistedUseCaseWorkspace({
     }
   };
 
-  const handleDeleteSelected = async () => {
-    if (!selectedDraft) return;
-    const confirmed = window.confirm(
-      `Xóa use case "${selectedDraft.title}"? Diagram và BRD đã lưu bên dưới use case này cũng sẽ bị xóa.`,
-    );
-    if (!confirmed) return;
-    try {
-      await workspace.deleteUseCase(selectedDraft.use_case_id);
-    } catch (error) {
-      setUseCaseError(error instanceof Error ? error.message : 'Không thể xóa Use Case.');
-    }
-  };
-
-  const handleOpenFeatureIntent = () => {
-    workspace.openFeatureIntentEditor();
-  };
-
-  const handleBackToList = () => {
-    workspace.navigateToArtifact({
-      kind: 'use-cases',
-      featureId: workspace.activeFeature.id,
-    });
-  };
-
-  const handleOpenDiagram = () => {
-    if (!activeUseCaseResource) return;
-    workspace.navigateToArtifact({
-      kind: 'diagram',
-      featureId: workspace.activeFeature.id,
-      useCaseId: activeUseCaseResource.id,
-    });
-  };
-
   const handleGenerateDiagram = async () => {
     if (!selectedDraft || !activeUseCaseResource) return;
+    if (diagramActionPending) return;
     const contractIssues = validateUseCaseContract(selectedDraft);
     if (selectedDraft.review_status !== 'approved') {
       setUseCaseError('Cần phê duyệt use case trước khi tạo diagram.');
@@ -297,6 +266,7 @@ export default function PersistedUseCaseWorkspace({
       if (!confirmed) return;
     }
     setUseCaseError(null);
+    setDiagramActionPending(true);
     try {
       const envelope = await workspace.generateDiagram(selectedDraft.use_case_id);
       const draft = envelope.result?.diagram;
@@ -315,6 +285,24 @@ export default function PersistedUseCaseWorkspace({
       await workspace.refreshArtifactTree();
     } catch (error) {
       setUseCaseError(error instanceof Error ? error.message : 'Không thể tạo Diagram.');
+    } finally {
+      setDiagramActionPending(false);
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (!selectedDraft) return;
+    const confirmed = window.confirm(
+      `Xóa use case "${selectedDraft.title}"? Diagram và BRD đã lưu bên dưới use case này cũng sẽ bị xóa.`,
+    );
+    if (!confirmed) return;
+    setUseCaseError(null);
+    setDeleteActionPending(true);
+    try {
+      await workspace.deleteUseCase(selectedDraft.use_case_id);
+    } catch (error) {
+      setUseCaseError(error instanceof Error ? error.message : 'Không thể xóa Use Case.');
+      setDeleteActionPending(false);
     }
   };
 
@@ -324,15 +312,9 @@ export default function PersistedUseCaseWorkspace({
         <div className="workspace-section-heading">
           <div>
             <h2>Use Cases</h2>
-            <p>
-              Sinh danh sách use case từ Feature Intent đã lưu. Kết quả được persist ngay để left
-              tree refresh theo artifact thật.
-            </p>
+            <p>Sinh và rà soát danh sách use case cho feature hiện tại.</p>
           </div>
           <div className="workspace-header__actions">
-            <button className="workspace-button" type="button" onClick={handleOpenFeatureIntent}>
-              Sửa Feature Intent
-            </button>
             {useCaseDrafts.length > 0 ? (
               <button
                 className="workspace-button"
@@ -353,7 +335,9 @@ export default function PersistedUseCaseWorkspace({
               onClick={() => void handleGenerateAndPersist()}
               disabled={!canGenerate}
             >
-              {isGenerating ? 'Đang sinh và lưu…' : 'Sinh use case'}
+              {isGenerating
+                ? 'Đang sinh và lưu…'
+                : generationCtaLabel(generationRuntime)}
             </button>
           </div>
         </div>
@@ -375,30 +359,11 @@ export default function PersistedUseCaseWorkspace({
             />
           </div>
           <div className="usecase-workspace-page__toolbar">
-            <div className="usecase-panel__generation-mode" aria-label="Cách sinh use case">
-              {(
-                [
-                  ['auto', 'Theo hệ thống'],
-                  ['ai', 'Ưu tiên AI'],
-                  ['deterministic', 'Theo rule'],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={generationPreference === value ? 'active' : ''}
-                  aria-pressed={generationPreference === value}
-                  onClick={() => setGenerationPreference(value)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <p className="persisted-usecase__runtime-note">{generationRuntimeNote(generationRuntime)}</p>
             {generationMetadata ? (
               <GenerationMetadataCard
                 metadata={generationMetadata}
                 isPending={generationPending}
-                requestId={generationRequestId}
                 compact
               />
             ) : null}
@@ -413,8 +378,7 @@ export default function PersistedUseCaseWorkspace({
           {useCaseError ? <p className="workspace-error">{useCaseError}</p> : null}
           {hasUnsavedGeneratedDrafts ? (
             <p className="usecase-workspace-page__draft-warning">
-              Danh sách hiện mới tồn tại ở phiên làm việc này. Hãy lưu thành công để left tree và
-              các trang artifact khác dùng đúng dữ liệu persisted.
+              Danh sách vừa sinh chưa được lưu. Hãy lưu trước khi tiếp tục các bước tiếp theo.
             </p>
           ) : null}
         </section>
@@ -450,17 +414,9 @@ export default function PersistedUseCaseWorkspace({
                       >
                         {reviewStatusPillLabel(useCase.review_status)}
                       </span>
-                      {resource ? (
-                        <button
-                          className="toolbar-btn primary"
-                          type="button"
-                          onClick={() => handleOpenUseCase(resource.id)}
-                        >
-                          Sửa Use Case
-                        </button>
-                      ) : (
+                      {!resource ? (
                         <span className="usecase-card__pending-pill">Chưa persist</span>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                   <p className="usecase-card__next-step">{diagramSummary}</p>
@@ -478,34 +434,37 @@ export default function PersistedUseCaseWorkspace({
     const canCreateDiagram =
       selectedDraft != null &&
       selectedDraft.review_status === 'approved' &&
-      issues.length === 0;
+      issues.length === 0 &&
+      !diagramBlockedBySaveState;
+    const createDiagramLabel = diagramBlockedBySaveState
+      ? diagramBlockedBySaveStateLabel(workspace.useCaseSaveState)
+      : 'Tạo diagram';
     return (
       <section className="workspace-empty artifact-state">
         <h2>Diagram chưa tạo</h2>
         <p>
           {selectedDraft
-            ? `Artifact Diagram cho ${selectedDraft.use_case_id} chưa tồn tại trong database.`
+            ? `Use Case ${selectedDraft.use_case_id} chưa có diagram đã lưu.`
             : 'Diagram cho Use Case này chưa tồn tại.'}
         </p>
         {selectedDraft ? (
           <p>
-            {selectedDraft.review_status === 'approved'
+            {diagramBlockedBySaveState
+              ? diagramBlockedBySaveStateHint(workspace.useCaseSaveState)
+              : selectedDraft.review_status === 'approved'
               ? 'Use Case đã sẵn sàng để tạo diagram.'
               : 'Hãy lưu và phê duyệt Use Case trước khi tạo diagram.'}
           </p>
         ) : null}
         {useCaseError ? <p className="workspace-error">{useCaseError}</p> : null}
         <div className="workspace-header__actions">
-          <button className="workspace-button" type="button" onClick={handleBackToList}>
-            Về Use Cases
-          </button>
           <button
             className="workspace-button primary"
             type="button"
             onClick={() => void handleGenerateDiagram()}
-            disabled={!canCreateDiagram}
+            disabled={!canCreateDiagram || diagramActionPending}
           >
-            Tạo diagram
+            {diagramActionPending ? 'Đang tạo diagram…' : createDiagramLabel}
           </button>
         </div>
       </section>
@@ -528,9 +487,6 @@ export default function PersistedUseCaseWorkspace({
       optimisticDiagramState ?? derivePersistedDiagramArtifactState(activeTreeUseCase),
     isActiveOnCanvas: false,
   });
-  const canOpenDiagram =
-    (Boolean(activeTreeUseCase?.diagram) || optimisticDiagramState === 'ready') &&
-    diagramLifecycle.canOpenCanvas;
   const canGenerateDiagram =
     diagramLifecycle.status === 'ready_to_generate' ||
     diagramLifecycle.status === 'outdated' ||
@@ -539,6 +495,9 @@ export default function PersistedUseCaseWorkspace({
     diagramLifecycle.status === 'outdated' || diagramLifecycle.status === 'diverged'
       ? 'Tạo lại diagram'
       : 'Tạo diagram';
+  const diagramCtaLabel = diagramBlockedBySaveState
+    ? diagramBlockedBySaveStateLabel(workspace.useCaseSaveState)
+    : diagramActionLabel;
   const actorOptions = [selectedDraft.primary_actor, ...selectedDraft.supporting_actors].filter(
     Boolean,
   );
@@ -548,25 +507,29 @@ export default function PersistedUseCaseWorkspace({
       <div className="workspace-section-heading">
         <div>
           <h2>Use Case</h2>
-          <p>
-            Chỉnh từng use case như một artifact riêng, rồi tạo diagram tương ứng khi đã sẵn sàng.
-          </p>
+          <p>Rà soát và chỉnh nội dung use case hiện tại.</p>
         </div>
         <div className="workspace-header__actions">
           <span className={`usecase-card__status usecase-card__status--${selectedDraft.review_status}`}>
             {reviewStatusPillLabel(selectedDraft.review_status)}
           </span>
-          <button className="workspace-button" type="button" onClick={handleBackToList}>
-            Về Use Cases
-          </button>
-          <button className="workspace-button danger" type="button" onClick={() => void handleDeleteSelected()}>
-            Xóa
+          <button
+            className="workspace-button danger"
+            type="button"
+            onClick={() => void handleDeleteSelected()}
+            disabled={deleteActionPending}
+          >
+            {deleteActionPending ? 'Đang xóa…' : 'Xóa use case'}
           </button>
           <button
             className="workspace-button primary"
             type="button"
             onClick={() => void handleSaveSelected()}
-            disabled={!canPersistSelected || workspace.useCaseSaveState === 'saving'}
+            disabled={
+              !canPersistSelected ||
+              workspace.useCaseSaveState === 'saving' ||
+              deleteActionPending
+            }
           >
             {workspace.useCaseSaveState === 'saving'
               ? 'Đang lưu…'
@@ -612,20 +575,25 @@ export default function PersistedUseCaseWorkspace({
             </div>
           </div>
           <div className="persisted-usecase__hero-actions">
-            {canOpenDiagram ? (
-              <button className="workspace-button" type="button" onClick={handleOpenDiagram}>
-                Mở diagram
-              </button>
-            ) : null}
             {canGenerateDiagram ? (
               <button
                 className="workspace-button primary"
                 type="button"
                 onClick={() => void handleGenerateDiagram()}
-                disabled={selectedDraft.review_status !== 'approved' || contractIssues.length > 0}
+                disabled={
+                  diagramActionPending ||
+                  diagramBlockedBySaveState ||
+                  selectedDraft.review_status !== 'approved' ||
+                  contractIssues.length > 0
+                }
               >
-                {diagramActionLabel}
+                {diagramActionPending ? 'Đang tạo diagram…' : diagramCtaLabel}
               </button>
+            ) : null}
+            {canGenerateDiagram && diagramBlockedBySaveState ? (
+              <p className="persisted-usecase__hero-helper">
+                {diagramBlockedBySaveStateHint(workspace.useCaseSaveState)}
+              </p>
             ) : null}
           </div>
         </header>
@@ -635,7 +603,6 @@ export default function PersistedUseCaseWorkspace({
           <GenerationMetadataCard
             metadata={generationMetadata}
             isPending={generationPending}
-            requestId={generationRequestId}
           />
         ) : null}
 
@@ -1334,20 +1301,20 @@ function reviewStatusPillLabel(status: UseCaseDraft['review_status']) {
   }
 }
 
-function fallbackSourceCopy(reason?: string | null) {
-  if (reason === 'quality_rejected') {
-    return 'Kết quả AI chưa đạt quality gate. Hãy rà soát chi tiết nghiệp vụ.';
+function diagramBlockedBySaveStateLabel(saveState: WorkspacePersistence['useCaseSaveState']) {
+  if (saveState === 'saving') return 'Đợi lưu Use Case xong';
+  if (saveState === 'failed') return 'Lưu lại Use Case trước';
+  return 'Lưu Use Case trước';
+}
+
+function diagramBlockedBySaveStateHint(saveState: WorkspacePersistence['useCaseSaveState']) {
+  if (saveState === 'saving') {
+    return 'Đợi lưu Use Case hiện tại xong rồi tạo hoặc tạo lại diagram.';
   }
-  if (reason === 'provider_failure' || reason === 'provider_unavailable') {
-    return 'AI tạm thời không khả dụng. Hãy rà soát chi tiết nghiệp vụ.';
+  if (saveState === 'failed') {
+    return 'Cần lưu lại Use Case thành công trước khi tạo hoặc tạo lại diagram.';
   }
-  if (reason === 'shadow_mode') {
-    return 'AI chỉ chạy đánh giá nền; kết quả hiển thị vẫn theo rule.';
-  }
-  if (reason === 'ai_not_enabled') {
-    return 'Rollout hiện không bật AI cho lần sinh này, nên hệ thống dùng deterministic path.';
-  }
-  return 'Kết quả được tạo theo rule và cần được rà soát trước khi phê duyệt.';
+  return 'Lưu Use Case mới nhất trước khi tạo hoặc tạo lại diagram.';
 }
 
 function activeDiagramSummary(useCase: UseCaseDraft, treeUseCase: ArtifactTreeUseCase | null) {
@@ -1396,29 +1363,20 @@ function nextActionCopy(
 function GenerationMetadataCard({
   metadata,
   isPending = false,
-  requestId,
   compact = false,
 }: {
   metadata: ResponseMetadata;
   isPending?: boolean;
-  requestId?: string | null;
   compact?: boolean;
 }) {
   const sourceLabel =
-    metadata.generation_source === 'ai' ? 'Bản nháp AI' : 'Bản nháp theo rule';
-  const providerModel = [metadata.provider, metadata.model].filter(Boolean).join(' · ');
-  const promptLabel =
-    metadata.prompt_id && metadata.prompt_version
-      ? `Prompt ${metadata.prompt_id}@${metadata.prompt_version}`
-      : null;
-  const modeLabel = metadata.generation_mode ? `Mode ${metadata.generation_mode}` : null;
-  const qualityLabel = metadata.quality_status ? `Quality ${metadata.quality_status}` : null;
+    metadata.generation_source === 'ai' ? 'Bản nháp AI' : 'Bản nháp degraded';
   const note =
     isPending
-      ? 'Đây là kết quả sinh mới nhất trong phiên làm việc hiện tại. Nó chỉ trở thành provenance persisted sau khi lưu thành công danh sách Use Case.'
+      ? 'Bản nháp mới nhất chưa được lưu.'
       : metadata.generation_source === 'deterministic_fallback'
-      ? fallbackSourceCopy(metadata.fallback_reason)
-      : 'Đã dùng semantic synthesis theo cấu hình hiện tại của project.';
+        ? fallbackDraftNote(metadata.fallback_reason)
+        : 'Bản nháp hiện tại được tạo bằng AI.';
 
   return (
     <section
@@ -1428,39 +1386,39 @@ function GenerationMetadataCard({
       aria-label="Thông tin lần sinh use case gần nhất"
     >
       <div className="persisted-usecase__generation-header">
-        <div>
-          <p className="persisted-usecase__generation-kicker">Lần sinh gần nhất</p>
-          <div className="persisted-usecase__generation-source">
-            <span
-              className={`usecase-panel__source-badge usecase-panel__source-badge--${metadata.generation_source}`}
-            >
-              {sourceLabel}
-            </span>
-            {isPending ? (
-              <span className="persisted-usecase__generation-status">Chưa lưu vào revision</span>
-            ) : null}
-            {requestId ? (
-              <span className="persisted-usecase__generation-request">Request {requestId}</span>
-            ) : null}
-          </div>
-        </div>
-        {typeof metadata.attempt_count === 'number' ? (
-          <span className="persisted-usecase__generation-attempts">
-            {metadata.attempt_count} attempt{metadata.attempt_count === 1 ? '' : 's'}
+        <div className="persisted-usecase__generation-source">
+          <span
+            className={`usecase-panel__source-badge usecase-panel__source-badge--${metadata.generation_source}`}
+          >
+            {sourceLabel}
           </span>
-        ) : null}
+        </div>
       </div>
       <p className="persisted-usecase__generation-note">{note}</p>
-      <div className="persisted-usecase__generation-details">
-        {providerModel ? <span>{providerModel}</span> : null}
-        {promptLabel ? <span>{promptLabel}</span> : null}
-        {modeLabel ? <span>{modeLabel}</span> : null}
-        {qualityLabel ? <span>{qualityLabel}</span> : null}
-        {typeof metadata.latency_ms === 'number' ? <span>{metadata.latency_ms} ms</span> : null}
-        {typeof metadata.estimated_cost_usd === 'number' ? (
-          <span>~ ${metadata.estimated_cost_usd.toFixed(2)}</span>
-        ) : null}
-      </div>
     </section>
   );
+}
+
+function generationCtaLabel(runtime: UseCaseGenerationRuntime | null) {
+  if (runtime?.can_generate === false) {
+    return 'AI chưa khả dụng';
+  }
+  return 'Sinh use case bằng AI';
+}
+
+function generationRuntimeNote(runtime: UseCaseGenerationRuntime | null) {
+  if (!runtime) {
+    return 'Không xác định được trạng thái AI authoring của môi trường này.';
+  }
+  return runtime.note;
+}
+
+function fallbackDraftNote(reason: string | null | undefined) {
+  if (reason === 'USECASE_AI_PROVIDER_FAILURE') {
+    return 'Bản nháp này đến từ lần sinh AI bị lỗi provider. Không nên dùng để BA review.';
+  }
+  if (reason === 'USECASE_AI_OUTPUT_REJECTED') {
+    return 'Bản nháp này đến từ lần sinh AI không qua quality gate. Không nên dùng làm output cuối.';
+  }
+  return 'Bản nháp này là dữ liệu fallback cũ từ contract trước đây. Không nên dùng để BA review.';
 }

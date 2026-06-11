@@ -48,7 +48,7 @@ export const USECASE_CANONICAL_NORMALIZATION_FIELDS = {
 export function buildUseCaseGenerationRequest(
   projectSpec: ProjectSpec,
   featureIntent: FeatureIntent,
-  generationPreference: UseCaseGenerationPreference = 'auto',
+  generationPreference: UseCaseGenerationPreference = 'ai',
 ): UseCaseGenerationRequest {
   const canonicalInputs = canonicalizeUseCaseInputs(projectSpec, featureIntent);
   return {
@@ -62,7 +62,7 @@ export function buildUseCaseGenerationRequest(
 export function buildUseCaseRequestFingerprint(
   projectSpec: ProjectSpec,
   featureIntent: FeatureIntent,
-  generationPreference: UseCaseGenerationPreference = 'auto',
+  generationPreference: UseCaseGenerationPreference = 'ai',
 ) {
   return JSON.stringify(
     buildUseCaseGenerationRequest(projectSpec, featureIntent, generationPreference),

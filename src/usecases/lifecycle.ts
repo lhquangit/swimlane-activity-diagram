@@ -22,7 +22,7 @@ type BuildDiagramInventoryOptions = {
   focusedUseCaseId: string | null;
   activeCanvasUseCaseId: string | null;
   artifactStates?: Partial<Record<string, UseCaseDiagramArtifactState>>;
-  operationStates?: Partial<Record<string, 'generating' | 'failed' | undefined>>;
+  operationStates?: Partial<Record<string, 'generating' | 'opening' | 'failed' | undefined>>;
 };
 
 const DIAGRAM_LIFECYCLE_COPY: Record<

@@ -13,6 +13,7 @@ export default function ProjectDashboard() {
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -45,12 +46,17 @@ export default function ProjectDashboard() {
   };
 
   const deleteProject = async (project: ProjectResource) => {
+    if (deletingProjectId === project.id) return;
     if (!window.confirm(`Xóa project "${project.name}" và toàn bộ artifact bên trong?`)) return;
+    setDeletingProjectId(project.id);
+    setError(null);
     try {
       await api.deleteProject(project.id);
       setProjects((current) => current.filter((item) => item.id !== project.id));
     } catch (reason) {
       setError(errorMessage(reason));
+    } finally {
+      setDeletingProjectId((current) => (current === project.id ? null : current));
     }
   };
 
@@ -60,7 +66,7 @@ export default function ProjectDashboard() {
         <div>
           <span className="workspace-eyebrow">Smart Diagram</span>
           <h1>Projects</h1>
-          <p>Tạo project, hoàn thiện Spec, rồi đi lần lượt qua từng artifact.</p>
+          <p>Quản lý các project nghiệp vụ đang triển khai.</p>
         </div>
         <UserButton />
       </header>
@@ -91,21 +97,27 @@ export default function ProjectDashboard() {
             <p>Tạo project đầu tiên để bắt đầu nhập bối cảnh nghiệp vụ.</p>
           </div>
         ) : null}
-        {projects.map((project) => (
+        {projects.map((project) => {
+          const deleting = deletingProjectId === project.id;
+          return (
           <article className="project-card" key={project.id}>
             <button
               className="project-card__main"
+              disabled={deleting}
               onClick={() => navigate(`/projects/${project.id}`)}
             >
               <strong>{project.name}</strong>
-              <span>{project.description || 'Chưa có mô tả'}</span>
-              <small>Cập nhật {new Date(project.updated_at).toLocaleString('vi-VN')}</small>
+              {project.description ? <span>{project.description}</span> : null}
             </button>
-            <button className="workspace-button danger" onClick={() => void deleteProject(project)}>
-              Xóa
+            <button
+              className="workspace-button danger"
+              onClick={() => void deleteProject(project)}
+              disabled={deleting}
+            >
+              {deleting ? 'Đang xóa…' : 'Xóa'}
             </button>
           </article>
-        ))}
+        )})}
       </section>
     </main>
   );

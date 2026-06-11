@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   getProjectArtifactTree: vi.fn(),
   listFeatures: vi.fn(),
   listUseCases: vi.fn(),
+  createFeature: vi.fn(),
   getDiagram: vi.fn(),
   deleteFeature: vi.fn(),
   deleteUseCase: vi.fn(),
@@ -285,6 +286,7 @@ describe('ProjectWorkspace artifact-tree transitions', () => {
     api.listUseCases.mockImplementation((featureId: string) =>
       Promise.resolve(featureId === 'feature-2' ? useCasesB : useCases),
     );
+    api.createFeature.mockResolvedValue(features[0]);
     api.deleteFeature.mockResolvedValue(undefined);
     api.deleteUseCase.mockResolvedValue(undefined);
   });
@@ -318,6 +320,16 @@ describe('ProjectWorkspace artifact-tree transitions', () => {
     expect(await screen.findByTestId('brd-workspace-probe')).toBeVisible();
     expect(screen.getByTestId('active-artifact')).toHaveTextContent('brd');
     expect(screen.queryByTestId('workspace-probe')).not.toBeInTheDocument();
+  });
+
+  it('removes redundant workspace navigation chrome from persisted headers and feature actions', async () => {
+    renderWorkspace('/projects/project-1/features/feature-1');
+
+    expect(await screen.findByRole('heading', { name: 'Feature Intent' })).toBeVisible();
+    expect(
+      screen.queryByText('Project Spec → Feature Intent → Use Case → Diagram → BRD'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use Cases' })).not.toBeInTheDocument();
   });
 
   it('shows loading instead of the missing-editor error while feature resources are still hydrating for a deep-link use-case route', async () => {
@@ -363,12 +375,81 @@ describe('ProjectWorkspace artifact-tree transitions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Xóa Use case A' }));
 
     await waitFor(() => expect(api.deleteUseCase).toHaveBeenCalledWith('usecase-1'));
-    expect(await screen.findByTestId('active-artifact')).toHaveTextContent('use-cases');
+    await waitFor(() =>
+      expect(screen.getByTestId('active-artifact')).toHaveTextContent('use-cases'),
+    );
     await waitFor(() =>
       expect(
         screen.queryByRole('treeitem', { name: /^Use case A\b.*UC-001/ }),
       ).not.toBeInTheDocument(),
     );
+  });
+
+  it('deletes a use case from the left tree even while the user is on Project Spec', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    api.getProjectArtifactTree.mockResolvedValueOnce(tree).mockResolvedValueOnce(treeAfterDeleteUseCaseA);
+
+    renderWorkspace('/projects/project-1/spec');
+    expect(await screen.findByRole('heading', { name: 'Project Spec' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Xóa Use case A' }));
+
+    await waitFor(() => expect(api.deleteUseCase).toHaveBeenCalledWith('usecase-1'));
+    await waitFor(() =>
+      expect(screen.getByTestId('active-artifact')).toHaveTextContent('use-cases'),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('treeitem', { name: /^Use case A\b.*UC-001/ }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it('shows a pending state while deleting the active feature', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    let resolveDeleteFeature!: () => void;
+    api.deleteFeature.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDeleteFeature = resolve;
+        }),
+    );
+
+    renderWorkspace('/projects/project-1/features/feature-1');
+    expect(await screen.findByRole('heading', { name: 'Feature Intent' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Xóa' }));
+
+    await waitFor(() => expect(api.deleteFeature).toHaveBeenCalledWith('feature-1'));
+    expect(screen.getByRole('button', { name: 'Đang xóa…' })).toBeDisabled();
+
+    resolveDeleteFeature();
+
+    expect(await screen.findByRole('heading', { name: 'Project Spec' })).toBeVisible();
+  });
+
+  it('shows a pending state in the left tree while deleting a use case', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    let resolveDeleteUseCase!: () => void;
+    api.deleteUseCase.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDeleteUseCase = resolve;
+        }),
+    );
+
+    renderWorkspace('/projects/project-1/features/feature-1/use-cases/usecase-1');
+    expect(await screen.findByTestId('active-artifact')).toHaveTextContent('use-case');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Xóa Use case A' }));
+
+    await waitFor(() => expect(api.deleteUseCase).toHaveBeenCalledWith('usecase-1'));
+    expect(screen.getByRole('button', { name: 'Đang xóa Use case A' })).toBeDisabled();
+    expect(screen.getByRole('treeitem', { name: /^Use case A\b.*UC-001/ })).toBeDisabled();
+
+    resolveDeleteUseCase();
+
+    expect(await screen.findByTestId('active-artifact')).toHaveTextContent('use-cases');
   });
 
   it('keeps the current diagram save scope when the next persisted diagram fails to load', async () => {
@@ -414,5 +495,51 @@ describe('ProjectWorkspace artifact-tree transitions', () => {
 
     expect(await screen.findByRole('button', { name: 'Mở thanh điều hướng artifact' })).toBeVisible();
     expect(screen.queryByRole('tree', { name: 'Cấu trúc project' })).not.toBeInTheDocument();
+  });
+
+  it('requires name, summary, and actors before allowing Feature mới to be saved', async () => {
+    renderWorkspace('/projects/project-1/spec');
+    expect(await screen.findByRole('heading', { name: 'Project Spec' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo Feature' }));
+
+    expect(await screen.findByRole('heading', { name: 'Feature mới' })).toBeVisible();
+    expect(screen.getAllByText('Trường bắt buộc.')).toHaveLength(2);
+    expect(screen.getByText('Nhập ít nhất một actor.')).toBeVisible();
+
+    const featureName = screen.getByLabelText('Tên feature');
+    const featureSummary = screen.getByLabelText('Mô tả feature');
+    const actors = screen.getByLabelText('Actors');
+    expect(featureName).toHaveAttribute('aria-invalid', 'true');
+    expect(featureSummary).toHaveAttribute('aria-invalid', 'true');
+    expect(actors).toHaveAttribute('aria-invalid', 'true');
+
+    const saveButton = screen.getByRole('button', { name: 'Lưu' });
+    expect(saveButton).toBeDisabled();
+
+    fireEvent.change(featureName, {
+      target: { value: 'Đăng ký GPS' },
+    });
+    expect(saveButton).toBeDisabled();
+    expect(featureName).toHaveAttribute('aria-invalid', 'false');
+
+    fireEvent.change(featureSummary, {
+      target: { value: 'Tạo mới yêu cầu đăng ký GPS.' },
+    });
+    expect(saveButton).toBeDisabled();
+    expect(featureSummary).toHaveAttribute('aria-invalid', 'false');
+
+    fireEvent.change(actors, {
+      target: { value: 'Ban quản lý\nPortal' },
+    });
+    expect(saveButton).toBeEnabled();
+    expect(actors).toHaveAttribute('aria-invalid', 'false');
+
+    fireEvent.change(actors, {
+      target: { value: '' },
+    });
+    expect(saveButton).toBeDisabled();
+    expect(actors).toHaveAttribute('aria-invalid', 'true');
+    expect(api.createFeature).not.toHaveBeenCalled();
   });
 });

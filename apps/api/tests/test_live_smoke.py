@@ -179,7 +179,7 @@ def test_generate_usecase_live_has_bounded_cost(
 
     assert response.status_code == 200
     metadata = response.json()["metadata"]
-    assert metadata["generation_source"] in {"ai", "deterministic_fallback"}
+    assert metadata["generation_source"] == "ai"
     estimated_cost = metadata.get("estimated_cost_usd")
     if estimated_cost is not None:
         assert estimated_cost <= MAX_LIVE_COST_USD

@@ -212,7 +212,20 @@ def generate_feature_use_cases(
 ) -> object:
     feature = require_feature(db, current_user, feature_id)
     envelope = generate_feature_use_case_envelope(feature, generation_preference)
-    return json_response_from_envelope(envelope, 200)
+    if envelope.status == "completed":
+        status_code = 200
+    elif envelope.error and envelope.error.code in {
+        "USECASE_AI_ONLY_AUTHORING",
+        "USECASE_AI_OUTPUT_REJECTED",
+    }:
+        status_code = 422
+    elif envelope.error and envelope.error.code == "USECASE_AI_UNAVAILABLE":
+        status_code = 503
+    elif envelope.error and envelope.error.code == "USECASE_AI_PROVIDER_FAILURE":
+        status_code = 502
+    else:
+        status_code = 500
+    return json_response_from_envelope(envelope, status_code)
 
 
 @router.get(

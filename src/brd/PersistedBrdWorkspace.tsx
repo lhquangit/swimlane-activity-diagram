@@ -17,6 +17,7 @@ export default function PersistedBrdWorkspace({
   const workspace = useWorkspacePersistence();
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diagramId, setDiagramId] = useState<string | null>(null);
   const [resource, setResource] = useState<BrdResource | null>(null);
@@ -26,7 +27,6 @@ export default function PersistedBrdWorkspace({
   const [warnings, setWarnings] = useState<WarningItem[]>([]);
   const [template, setTemplate] = useState<'default' | 'full'>('default');
   const [metadata, setMetadata] = useState<ResponseMetadata | null>(null);
-  const [requestId, setRequestId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const loadDiagram = workspace?.loadDiagram;
   const loadBrd = workspace?.loadBrd;
@@ -64,6 +64,10 @@ export default function PersistedBrdWorkspace({
     };
   }, [activeUseCaseResource?.id, activeUseCaseResource?.use_case_key, loadBrd, loadDiagram]);
 
+  useEffect(() => {
+    setExporting(false);
+  }, [activeUseCaseResource?.id]);
+
   if (!workspace || !activeUseCaseResource) return null;
 
   const diagramArtifact = activeTreeUseCase?.diagram ?? null;
@@ -86,7 +90,6 @@ export default function PersistedBrdWorkspace({
     setError(null);
     try {
       const payload = await workspace.generateBrd(diagramId, makeIdempotencyKey(), template);
-      setRequestId(payload.request_id);
       setMetadata(payload.metadata ?? null);
       setWarnings(payload.warnings ?? []);
       if (payload.error) {
@@ -109,7 +112,6 @@ export default function PersistedBrdWorkspace({
         });
         applyBrdResource(saved);
         setMetadata(payload.metadata ?? null);
-        setRequestId(payload.request_id);
       } catch (reason) {
         workspace.markBrdDirty(diagramId);
         setIsDirty(true);
@@ -149,17 +151,10 @@ export default function PersistedBrdWorkspace({
     if (diagramId) workspace.markBrdDirty(diagramId);
   };
 
-  const handleOpenDiagram = () => {
-    workspace.navigateToArtifact({
-      kind: 'diagram',
-      featureId: workspace.activeFeature.id,
-      useCaseId: activeUseCaseResource.id,
-    });
-  };
-
   const handleExportDocx = async () => {
-    if (!diagramId || !draft.trim()) return;
+    if (!diagramId || !draft.trim() || exporting) return;
     setError(null);
+    setExporting(true);
     try {
       const blob = await workspace.exportBrdDocx(diagramId, {
         title: title.trim() || spec?.metadata.diagram_name || 'Business Requirements Document',
@@ -168,6 +163,8 @@ export default function PersistedBrdWorkspace({
       downloadBlob(blob, `${sanitizeFilename(title.trim() || 'BRD')}.docx`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Không thể export BRD DOCX.');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -176,23 +173,14 @@ export default function PersistedBrdWorkspace({
       <section className="workspace-form-card persisted-brd__surface">
         <div className="persisted-brd__hero">
           <div className="persisted-brd__identity">
-            <p className="persisted-brd__eyebrow">BRD Artifact</p>
             <h2>{title || activeUseCaseResource.title || activeUseCaseResource.use_case_key}</h2>
-            <p className="persisted-brd__lead">
-              BRD được lưu như một artifact riêng dưới Diagram. Sinh mới sẽ cập nhật node BRD trong
-              left bar, không mở side panel.
-            </p>
             <div className="persisted-brd__meta">
               <span>{activeUseCaseResource.use_case_key}</span>
-              <span>{diagramArtifact ? diagramArtifact.title : 'Diagram chưa tải'}</span>
-              <span>{brdArtifact ? `Cập nhật ${formatDate(brdArtifact.updated_at)}` : 'Chưa có BRD'}</span>
+              {diagramArtifact ? <span>{diagramArtifact.title}</span> : null}
               {brdArtifact?.is_outdated ? <span className="warning">BRD đang cũ</span> : null}
             </div>
           </div>
           <div className="persisted-brd__actions">
-            <button className="workspace-button" onClick={handleOpenDiagram}>
-              Về Diagram
-            </button>
             <button
               className="workspace-button primary"
               onClick={() => void handleGenerate()}
@@ -216,23 +204,12 @@ export default function PersistedBrdWorkspace({
             <button
               className="workspace-button primary"
               onClick={() => void handleExportDocx()}
-              disabled={!diagramId || !draft.trim()}
+              disabled={exporting || !diagramId || !draft.trim()}
             >
-              Export DOCX
+              {exporting ? 'Đang tạo file DOCX…' : 'Export DOCX'}
             </button>
           </div>
         </div>
-
-        {metadata ? (
-          <div className="persisted-brd__provenance">
-            <span>{sourceLabel}</span>
-            {metadata.provider ? <span>{metadata.provider}</span> : null}
-            {metadata.model ? <span>{metadata.model}</span> : null}
-            {metadata.generation_mode ? <span>Mode {metadata.generation_mode}</span> : null}
-            {metadata.fallback_reason ? <span>{metadata.fallback_reason}</span> : null}
-            {requestId ? <span>Request {requestId}</span> : null}
-          </div>
-        ) : null}
 
         {error ? <p className="workspace-error">{error}</p> : null}
 
@@ -246,17 +223,14 @@ export default function PersistedBrdWorkspace({
         {!loading && !diagramId ? (
           <div className="workspace-empty">
             <h3>Chưa có Diagram</h3>
-            <p>Use Case này cần một Diagram đã lưu trước khi sinh BRD.</p>
-            <button className="workspace-button primary" onClick={handleOpenDiagram}>
-              Mở Diagram
-            </button>
+            <p>Use Case này cần một diagram đã lưu trước khi sinh BRD.</p>
           </div>
         ) : null}
 
         {!loading && diagramId && !spec ? (
           <div className="workspace-empty">
             <h3>Chưa có BRD</h3>
-            <p>BRD sẽ được sinh từ Diagram đã lưu và xuất hiện như một artifact con trong left bar.</p>
+            <p>Sinh BRD từ diagram hiện tại để bắt đầu rà soát tài liệu.</p>
             <button
               className="workspace-button primary"
               onClick={() => void handleGenerate()}
@@ -298,18 +272,10 @@ export default function PersistedBrdWorkspace({
                 <div className="workspace-section-heading">
                   <div>
                     <h3>Thông tin tài liệu</h3>
-                    <p>Tiêu đề, template và context của artifact BRD.</p>
+                    <p>Chỉnh tiêu đề và theo dõi trạng thái lưu của BRD.</p>
                   </div>
                 </div>
                 <div className="persisted-brd__facts">
-                  <div>
-                    <span>Use Case</span>
-                    <strong>{activeUseCaseResource.use_case_key}</strong>
-                  </div>
-                  <div>
-                    <span>Diagram</span>
-                    <strong>{diagramArtifact?.title ?? 'Diagram đã lưu'}</strong>
-                  </div>
                   <div>
                     <span>Trạng thái</span>
                     <strong>{saveStateLabel}</strong>
@@ -326,27 +292,13 @@ export default function PersistedBrdWorkspace({
                     }}
                   />
                 </label>
-                <label className="workspace-field">
-                  <span>Template</span>
-                  <select
-                    value={template}
-                    onChange={(event) => {
-                      setTemplate(event.target.value as 'default' | 'full');
-                      setIsDirty(true);
-                      if (diagramId) workspace.markBrdDirty(diagramId);
-                    }}
-                  >
-                    <option value="default">Default</option>
-                    <option value="full">Full</option>
-                  </select>
-                </label>
               </section>
 
               <section className="persisted-brd__section persisted-brd__section--sidebar">
                 <div className="workspace-section-heading">
                   <div>
-                    <h3>Warnings</h3>
-                    <p>Giữ lại để review trước khi downstream dùng tài liệu này.</p>
+                    <h3>Lưu ý</h3>
+                    <p>Các điểm cần rà soát trước khi dùng BRD này tiếp tục.</p>
                   </div>
                 </div>
                 {warnings.length > 0 ? (
@@ -358,11 +310,6 @@ export default function PersistedBrdWorkspace({
                       >
                         <div className="warning-item__code">{warning.code}</div>
                         <div className="warning-item__message">{warning.message}</div>
-                        {warning.related_node_ids.length > 0 ? (
-                          <div className="warning-item__nodes">
-                            {warning.related_node_ids.join(', ')}
-                          </div>
-                        ) : null}
                       </div>
                     ))}
                   </div>
@@ -370,12 +317,6 @@ export default function PersistedBrdWorkspace({
                   <p className="persisted-brd__empty">Không có warning nổi bật.</p>
                 )}
               </section>
-
-              <details className="persisted-brd__details">
-                <summary className="persisted-brd__details-summary">Structured Spec</summary>
-                <p className="persisted-brd__details-copy">Payload gốc để trace và review.</p>
-                <pre className="persisted-brd__spec">{JSON.stringify(spec, null, 2)}</pre>
-              </details>
             </aside>
           </div>
         ) : null}
@@ -391,7 +332,6 @@ export default function PersistedBrdWorkspace({
       setSpec(null);
       setWarnings([]);
       setMetadata(null);
-      setRequestId(null);
       setIsDirty(false);
       return;
     }

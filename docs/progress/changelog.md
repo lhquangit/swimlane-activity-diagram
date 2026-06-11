@@ -5,6 +5,98 @@
 ## [Unreleased]
 
 ### Added
+- **AI-only Use Case authoring with fail-closed generation outcomes**: BA-facing Use Case creation
+  no longer exposes scaffold/rule authoring as a normal option. The persisted and legacy Use Case
+  screens now request AI-only generation, runtime truth is simplified to
+  `available / degraded / unavailable`, and provider/config/auth failures or quality rejection now
+  return failed envelopes instead of scaffold fallback portfolios. The production authoring path no
+  longer imports deterministic builder output; shared artifact-chain metadata moved into a separate
+  module while schema/grounding/quality/hydration guardrails stay in place. Core docs now describe
+  AI-only authoring plus failure states rather than teaching scaffold as a normal workflow. Xem
+  `apps/api/app/usecases/{generation_service.py,runtime.py,artifact_chain.py}`,
+  `apps/api/app/{routes/usecase_generate.py,routes/persistence.py,services/persistence_generation.py,services/persistence_serializers.py,schemas/persistence.py,schemas/usecase.py,services/usecase_builder.py}`,
+  `apps/api/tests/{test_usecase_generation_service.py,test_usecase_routes.py,test_persistence_auth_matrix.py,test_persistence_chain.py,test_live_smoke.py}`,
+  `src/{usecases/PersistedUseCaseWorkspace.tsx,usecases/UseCasePanel.tsx,usecases/types.ts,usecases/prevalidate.ts,persistence/types.ts,App.tsx}`,
+  `docs/{use-cases/UC-07-sinh-usecase-tu-spec.md,product/usecase-synthesis-model-policy.md,review-task-list.md,progress/known-issues.md}`.
+- **Use-case synthesis quality hardening for real complaint domains**: promoted the default
+  BA-facing Use Case policy to prompt `usecase_synthesis@1.2.0` plus
+  `USECASE_MODEL_PRIMARY=openai/gpt-5.5`, added a dedicated model-policy document, and expanded the
+  quality golden suite with accepted/rejected complaint domains for pet points, guest vehicle
+  entry, and maintenance tickets. The new prompt now includes explicit business-segmentation
+  heuristics, negative/positive counterexamples, and a pre-emission self-checklist so AI output is
+  less likely to collapse into one broad scaffold-like flow. Xem
+  `apps/api/app/ai/prompts/{registry.py,assets/usecase_synthesis/1.2.0/system.md}`,
+  `apps/api/app/config.py`, `apps/api/.env.example`,
+  `apps/api/tests/{test_prompt_registry.py,test_usecase_policy_artifacts.py,test_usecase_generation_service.py,test_usecase_synthesis.py,fixtures/usecase_synthesis_quality/*}`,
+  `docs/{product/usecase-synthesis-model-policy.md,use-cases/UC-07-sinh-usecase-tu-spec.md}`.
+
+### Fixed
+- **Left-bar Use Case delete now works from `Project Spec` too**: the sidebar delete handler used to
+  depend on the current `activeFeature`, so deleting a use case while the route was on `Project
+  Spec` failed with “Feature hiện tại không còn khả dụng.” The tree action now deletes by the row’s
+  own `featureId/useCaseId` context instead of the current screen context, with regression coverage
+  for `Project Spec -> left bar -> Xóa Use case`. Xem
+  `src/application/{ProjectWorkspace.tsx,ProjectWorkspace.test.tsx}`.
+- **Persisted Use Case editor can delete saved use cases again**: the AI-only UI cleanup accidentally
+  dropped the editor-surface delete action even though the workspace and left-bar delete flow still
+  existed. The persisted `Use Case` route now exposes `Xóa use case` again with confirm + pending
+  state, and regression coverage locks the route-level action back in. Xem
+  `src/usecases/{PersistedUseCaseWorkspace.tsx,PersistedUseCaseWorkspace.test.tsx}`.
+- **Fail-closed runtime contract + per-use-case trace coverage**: persisted feature responses now
+  require `usecase_generation_runtime`, and the persisted `Use Case` screen now falls back to a
+  conservative deterministic-only state when that runtime cannot be determined instead of
+  re-exposing fake AI choices. The use-case quality gate also moved required
+  input/output/constraint trace checks from portfolio-level aggregation to per-use-case evaluation,
+  with issue messages naming the offending use case and a mixed-portfolio rejected fixture to lock
+  the behavior. Xem
+  `apps/api/app/{schemas/persistence.py,usecases/quality.py}`,
+  `src/usecases/PersistedUseCaseWorkspace.tsx`,
+  `apps/api/tests/{test_persistence_auth_matrix.py,test_usecase_synthesis.py,fixtures/usecase_synthesis_quality/mixed-portfolio-missing-trace-rejected.json}`,
+  `src/usecases/PersistedUseCaseWorkspace.test.tsx`.
+- **Truthful use-case generation runtime + deeper usability gate**: persisted Feature/Use Case
+  resources now carry the effective server-side generation runtime so deterministic-only or
+  AI-unavailable environments stop advertising fake AI paths before the user clicks. Deterministic
+  output is now explicitly labeled as `scaffold theo rule`, fallback copy was tightened across the
+  backend/UI, the use-case quality gate now rejects generic boundaries and missing
+  input/output/constraint trace coverage, and fixture-backed acceptance goldens lock representative
+  GPS-device and camera/re-id domains plus a scaffold-like rejected regression. Xem
+  `apps/api/app/usecases/{runtime.py,generation_service.py,quality.py}`,
+  `apps/api/app/{schemas/persistence.py,services/persistence_serializers.py}`,
+  `src/usecases/{PersistedUseCaseWorkspace.tsx,UseCasePanel.tsx}`,
+  `src/persistence/types.ts`,
+  `apps/api/tests/{test_usecase_generation_service.py,test_usecase_synthesis.py}`,
+  `src/usecases/{PersistedUseCaseWorkspace.test.tsx,UseCasePanel.test.tsx}`.
+- **Feature mới now enforces required business inputs before save**: the Feature editor no longer
+  allows saving when `Tên feature`, `Mô tả feature`, or `Actors` is empty. The save guard now lives
+  in both the UI button state and the submit handler, with regression coverage on the new-feature
+  flow in `ProjectWorkspace`. The same screen now visibly marks those three inputs as required,
+  keeps them in an invalid state while blank, and shows inline helper text so users can see what
+  is missing before they try to save. Xem
+  `src/application/{ProjectWorkspace.tsx,ProjectWorkspace.test.tsx}`.
+- **Persisted Use Case diagram CTA now reflects the save-first rule before click**: when the latest
+  Use Case is `dirty`, `saving`, or `failed`, the persisted `Use Case` screen and missing-diagram
+  route no longer advertise an executable `Tạo diagram` action. The CTA now switches to explicit
+  save-first copy, stays disabled, and shows helper guidance before the user clicks into an error.
+  Xem `src/usecases/{PersistedUseCaseWorkspace.tsx,PersistedUseCaseWorkspace.test.tsx}`.
+- **Action-level loading UX for destructive, diagram, and export waits**: dashboard project delete,
+  persisted Feature delete, left-tree Use Case delete, persisted Diagram generation, legacy saved
+  Diagram open, and persisted BRD DOCX export now all expose explicit pending labels/disabled
+  states instead of leaving the UI idle during API waits. Added focused regressions for each flow.
+  Xem
+  `src/application/{ProjectDashboard.tsx,ArtifactTree.tsx,ProjectWorkspace.tsx,ProjectDashboard.test.tsx,ProjectWorkspace.test.tsx}`,
+  `src/usecases/{PersistedUseCaseWorkspace.tsx,UseCasePanel.tsx,PersistedUseCaseWorkspace.test.tsx,UseCasePanel.test.tsx,types.ts,lifecycle.ts}`,
+  `src/brd/{PersistedBrdWorkspace.tsx,PersistedBrdWorkspace.test.tsx}`,
+  `src/App.tsx`.
+- **End-user UI surface simplification across persisted workspace routes**: the left artifact tree
+  is now the canonical navigator for persisted Feature/Use Case/Diagram/BRD traversal, while route
+  bodies keep only current-artifact actions such as save/generate/export. End-user screens no
+  longer expose request IDs, provider/model, prompt/version, latency/cost, raw `Structured Spec`,
+  warning node IDs, or the visible BRD template control by default. Dashboard/workspace headers and
+  project cards were also tightened to remove repeated workflow-plumbing copy and low-value
+  timestamp/placeholder chrome. Xem
+  `src/application/{ProjectDashboard.tsx,ProjectWorkspace.tsx,ProjectDashboard.test.tsx,ProjectWorkspace.test.tsx}`,
+  `src/usecases/{PersistedUseCaseWorkspace.tsx,UseCasePanel.tsx,PersistedUseCaseWorkspace.test.tsx,UseCasePanel.test.tsx}`,
+  `src/brd/{PersistedBrdWorkspace.tsx,BrdPanel.tsx,PersistedBrdWorkspace.test.tsx,BrdPanel.test.tsx}`.
 - **Artifact-tree use-case row actions and disclosure**: persisted left-bar Use Case rows now
   expose a direct delete action and independent collapse/expand controls for their `Diagram` and
   `BRD` children. Sidebar delete reuses the existing workspace delete orchestration so active-route
