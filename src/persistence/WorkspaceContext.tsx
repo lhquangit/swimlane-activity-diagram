@@ -11,6 +11,7 @@ import type {
   UseCaseGenerationPreference,
 } from '../usecases/types';
 import type {
+  BrdDocxExportPayload,
   BrdResource,
   DiagramResource,
   FeatureIntentResource,
@@ -88,6 +89,7 @@ export type WorkspacePersistence = {
       template: 'default' | 'full';
     },
   ) => Promise<BrdResource>;
+  exportBrdDocx: (diagramId: string, payload: BrdDocxExportPayload) => Promise<Blob>;
 };
 
 const WorkspaceContext = createContext<WorkspacePersistence | null>(null);

@@ -2,6 +2,7 @@ import { useAuth } from '@clerk/react';
 import { useMemo } from 'react';
 
 import type {
+  BrdDocxExportPayload,
   BrdResource,
   BrdSavePayload,
   DiagramResource,
@@ -55,6 +56,30 @@ export class PersistenceApi {
       );
     }
     return payload as T;
+  }
+
+  private async requestBlob(path: string, init: RequestInit = {}): Promise<Blob> {
+    const token = await this.getToken();
+    if (!token) throw new ApiError('Bạn cần đăng nhập để tiếp tục.', 401);
+    const headers = new Headers(init.headers);
+    headers.set('Authorization', `Bearer ${token}`);
+    headers.set('X-Schema-Version', '2026-05-31');
+    if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+    if (!response.ok) {
+      let message = `Backend request failed (${response.status})`;
+      try {
+        const payload = (await response.json()) as {
+          detail?: string;
+          error?: { message?: string };
+        };
+        message = payload.error?.message || payload.detail || message;
+      } catch {
+        // Keep the generic message when the response is a binary payload or plain text.
+      }
+      throw new ApiError(message, response.status);
+    }
+    return response.blob();
   }
 
   listProjects() {
@@ -193,6 +218,13 @@ export class PersistenceApi {
   saveBrd(diagramId: string, payload: BrdSavePayload) {
     return this.request<BrdResource>(`/api/diagrams/${diagramId}/brd`, {
       method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  exportBrdDocx(diagramId: string, payload: BrdDocxExportPayload) {
+    return this.requestBlob(`/api/diagrams/${diagramId}/brd/export.docx`, {
+      method: 'POST',
       body: JSON.stringify(payload),
     });
   }

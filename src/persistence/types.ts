@@ -122,6 +122,11 @@ export type BrdSavePayload = {
   template: 'default' | 'full';
 };
 
+export type BrdDocxExportPayload = {
+  title: string;
+  markdown_content: string;
+};
+
 export type BrdResource = BrdSavePayload & {
   id: string;
   diagram_id: string;

@@ -70,6 +70,7 @@ describe('ArtifactTree', () => {
         active={{ kind: 'spec' }}
         onSelect={onSelect}
         onCreateFeature={vi.fn()}
+        onDeleteUseCase={vi.fn()}
       />,
     );
 
@@ -88,6 +89,7 @@ describe('ArtifactTree', () => {
         active={{ kind: 'spec' }}
         onSelect={vi.fn()}
         onCreateFeature={vi.fn()}
+        onDeleteUseCase={vi.fn()}
       />,
     );
 
@@ -107,6 +109,7 @@ describe('ArtifactTree', () => {
         active={{ kind: 'spec' }}
         onSelect={vi.fn()}
         onCreateFeature={vi.fn()}
+        onDeleteUseCase={vi.fn()}
         sidebarCollapsed
         onToggleSidebar={onToggleSidebar}
       />,
@@ -117,5 +120,55 @@ describe('ArtifactTree', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Mở thanh điều hướng artifact' }));
     expect(onToggleSidebar).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets users collapse and expand one use-case branch without navigating', () => {
+    const onSelect = vi.fn();
+    render(
+      <ArtifactTree
+        tree={tree}
+        active={{ kind: 'spec' }}
+        onSelect={onSelect}
+        onCreateFeature={vi.fn()}
+        onDeleteUseCase={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Diagram chưa tạo')).toBeVisible();
+    expect(screen.getByText('BRD cần Diagram')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Thu gọn Gửi yêu cầu định danh' }));
+
+    expect(screen.queryByText('Diagram chưa tạo')).not.toBeInTheDocument();
+    expect(screen.queryByText('BRD cần Diagram')).not.toBeInTheDocument();
+    expect(onSelect).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mở Gửi yêu cầu định danh' }));
+    expect(screen.getByText('Diagram chưa tạo')).toBeVisible();
+    expect(screen.getByText('BRD cần Diagram')).toBeVisible();
+  });
+
+  it('emits a delete action for a use-case row without selecting it', () => {
+    const onSelect = vi.fn();
+    const onDeleteUseCase = vi.fn();
+    render(
+      <ArtifactTree
+        tree={tree}
+        active={{ kind: 'spec' }}
+        onSelect={onSelect}
+        onCreateFeature={vi.fn()}
+        onDeleteUseCase={onDeleteUseCase}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Xóa Gửi yêu cầu định danh' }));
+
+    expect(onDeleteUseCase).toHaveBeenCalledWith({
+      featureId: 'feature-1',
+      useCaseId: 'usecase-1',
+      businessKey: 'UC-001',
+      title: 'Gửi yêu cầu định danh',
+    });
+    expect(onSelect).not.toHaveBeenCalled();
   });
 });

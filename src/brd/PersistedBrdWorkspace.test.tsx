@@ -159,12 +159,13 @@ function buildWorkspace(overrides: Partial<WorkspacePersistence> = {}): Workspac
       updated_at: '2026-06-09T00:00:00Z',
       is_outdated: false,
     })),
+    exportBrdDocx: vi.fn(async () => new Blob(['docx'], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })),
     ...overrides,
   } as WorkspacePersistence;
 }
 
 describe('PersistedBrdWorkspace', () => {
-  it('shows a reader-first BRD document and keeps debug/editor panels collapsed by default', async () => {
+  it('shows a reader-first BRD document with direct inline editors and no markdown toggle', async () => {
     const workspace = buildWorkspace({
       loadBrd: vi.fn(async () => ({
         id: 'brd-1',
@@ -211,22 +212,153 @@ describe('PersistedBrdWorkspace', () => {
       </WorkspacePersistenceProvider>,
     );
 
-    expect(await screen.findByRole('heading', { name: '1. Mục đích tài liệu' })).toBeVisible();
-    expect(screen.getByText('Generated summary.')).toBeVisible();
+    expect(await screen.findByDisplayValue('1. Mục đích tài liệu')).toBeVisible();
     const tables = screen.getAllByRole('table');
     expect(tables).toHaveLength(2);
     expect(tables[0]).toBeVisible();
     expect(tables[1]).toBeVisible();
-    expect(screen.getByText('Hình 1: Luồng chính xử lý camera re-id.')).toBeVisible();
+    expect(screen.getByDisplayValue('Generated summary.')).toBeVisible();
+    expect(screen.getByDisplayValue('Hình 1: Luồng chính xử lý camera re-id.')).toBeVisible();
+    expect(screen.getByDisplayValue('Tiếp nhận yêu cầu')).toBeVisible();
     expect(screen.queryByPlaceholderText('BRD markdown sẽ xuất hiện ở đây.')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Chỉnh sửa markdown' }));
-    expect(screen.getByPlaceholderText('BRD markdown sẽ xuất hiện ở đây.')).toHaveValue(
-      '# Camera Re-ID\n\n## 1. Mục đích tài liệu\nGenerated summary.\n\n## 2. Phạm vi nghiệp vụ\n| Nhóm nghiệp vụ | Nội dung |\n| :---- | :---- |\n| Xử lý yêu cầu | Camera AI tiếp nhận và xử lý. |\n\n## 6. UC-001: Camera Re-ID flow\n![Hình 1](placeholder://uc-001-main-flow)\nHình 1: Luồng chính xử lý camera re-id.\n\n| Bước | Actor | Hành động | Kết quả / trạng thái |\n| :---- | :---- | :---- | :---- |\n| 1 | Camera AI | Tiếp nhận yêu cầu | Yêu cầu sẵn sàng xử lý |',
-    );
+    expect(screen.queryByRole('button', { name: 'Chỉnh sửa markdown' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Structured Spec'));
     expect(screen.getByText(/"summary": "BRD summary"/)).toBeVisible();
+  });
+
+  it('saves inline document edits back into markdown content', async () => {
+    const saveBrd = vi.fn(async () => ({
+      id: 'brd-1',
+      diagram_id: 'diagram-1',
+      title: 'Camera Re-ID',
+      structured_spec: spec,
+      markdown_content: '# Camera Re-ID\n\n## 1. Mục đích tài liệu\nUpdated summary.\n\n## 2. Phạm vi nghiệp vụ\n| Nhóm nghiệp vụ | Nội dung |\n| :---- | :---- |\n| Xử lý yêu cầu | Camera AI tiếp nhận và xử lý. |\n\n## 6. UC-001: Camera Re-ID flow\n![Hình 1](placeholder://uc-001-main-flow)\nHình 1: Updated caption.\n\n| Bước | Actor | Hành động | Kết quả / trạng thái |\n| :---- | :---- | :---- | :---- |\n| 1 | Camera AI | Chỉnh bước inline | Yêu cầu sẵn sàng xử lý |',
+      warnings: [],
+      template: 'default' as const,
+      source_diagram_updated_at: '2026-06-09T00:00:00Z',
+      created_at: '2026-06-09T00:00:00Z',
+      updated_at: '2026-06-09T00:00:00Z',
+      is_outdated: false,
+    }));
+    const workspace = buildWorkspace({
+      saveBrd,
+      loadBrd: vi.fn(async () => ({
+        id: 'brd-1',
+        diagram_id: 'diagram-1',
+        title: 'Camera Re-ID',
+        structured_spec: spec,
+        markdown_content:
+          '# Camera Re-ID\n\n## 1. Mục đích tài liệu\nGenerated summary.\n\n## 2. Phạm vi nghiệp vụ\n| Nhóm nghiệp vụ | Nội dung |\n| :---- | :---- |\n| Xử lý yêu cầu | Camera AI tiếp nhận và xử lý. |\n\n## 6. UC-001: Camera Re-ID flow\n![Hình 1](placeholder://uc-001-main-flow)\nHình 1: Luồng chính xử lý camera re-id.\n\n| Bước | Actor | Hành động | Kết quả / trạng thái |\n| :---- | :---- | :---- | :---- |\n| 1 | Camera AI | Tiếp nhận yêu cầu | Yêu cầu sẵn sàng xử lý |',
+        warnings: [],
+        template: 'default' as const,
+        source_diagram_updated_at: '2026-06-09T00:00:00Z',
+        created_at: '2026-06-09T00:00:00Z',
+        updated_at: '2026-06-09T00:00:00Z',
+        is_outdated: false,
+      })),
+    });
+
+    render(
+      <WorkspacePersistenceProvider value={workspace}>
+        <PersistedBrdWorkspace
+          activeUseCaseResource={makeUseCaseResource('usecase-1', 'UC-001', 'Camera Re-ID flow')}
+        />
+      </WorkspacePersistenceProvider>,
+    );
+
+    fireEvent.change(await screen.findByDisplayValue('Generated summary.'), {
+      target: { value: 'Updated summary.' },
+    });
+    fireEvent.change(screen.getByDisplayValue('Tiếp nhận yêu cầu'), {
+      target: { value: 'Chỉnh bước inline' },
+    });
+    fireEvent.change(screen.getByDisplayValue('Hình 1: Luồng chính xử lý camera re-id.'), {
+      target: { value: 'Hình 1: Updated caption.' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu BRD' }));
+
+    await waitFor(() => {
+      expect(saveBrd).toHaveBeenCalledWith('diagram-1', expect.objectContaining({
+        markdown_content: expect.stringContaining('Updated summary.'),
+      }));
+    });
+    expect(saveBrd).toHaveBeenCalledWith(
+      'diagram-1',
+      expect.objectContaining({
+        markdown_content: expect.stringContaining('| 1 | Camera AI | Chỉnh bước inline | Yêu cầu sẵn sàng xử lý |'),
+      }),
+    );
+    expect(saveBrd).toHaveBeenCalledWith(
+      'diagram-1',
+      expect.objectContaining({
+        markdown_content: expect.stringContaining('Hình 1: Updated caption.'),
+      }),
+    );
+  });
+
+  it('exports a docx from the current inline draft content', async () => {
+    const exportBrdDocx = vi.fn(async () => new Blob(['docx'], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }));
+    const createObjectUrl = vi.fn(() => 'blob:docx');
+    const revokeObjectUrl = vi.fn();
+    const anchorClick = vi.fn();
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    const originalAnchorClick = HTMLAnchorElement.prototype.click;
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+    Object.defineProperty(HTMLAnchorElement.prototype, 'click', {
+      configurable: true,
+      value: anchorClick,
+    });
+
+    const workspace = buildWorkspace({
+      exportBrdDocx,
+      loadBrd: vi.fn(async () => ({
+        id: 'brd-1',
+        diagram_id: 'diagram-1',
+        title: 'Camera Re-ID',
+        structured_spec: spec,
+        markdown_content:
+          '# Camera Re-ID\n\n## 1. Mục đích tài liệu\nGenerated summary.\n\n## 2. Phạm vi nghiệp vụ\n| Nhóm nghiệp vụ | Nội dung |\n| :---- | :---- |\n| Xử lý yêu cầu | Camera AI tiếp nhận và xử lý. |',
+        warnings: [],
+        template: 'default' as const,
+        source_diagram_updated_at: '2026-06-09T00:00:00Z',
+        created_at: '2026-06-09T00:00:00Z',
+        updated_at: '2026-06-09T00:00:00Z',
+        is_outdated: false,
+      })),
+    });
+
+    render(
+      <WorkspacePersistenceProvider value={workspace}>
+        <PersistedBrdWorkspace
+          activeUseCaseResource={makeUseCaseResource('usecase-1', 'UC-001', 'Camera Re-ID flow')}
+        />
+      </WorkspacePersistenceProvider>,
+    );
+
+    fireEvent.change(await screen.findByDisplayValue('Generated summary.'), {
+      target: { value: 'Exported inline summary.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Export DOCX' }));
+
+    await waitFor(() => {
+      expect(exportBrdDocx).toHaveBeenCalledWith('diagram-1', {
+        title: 'Camera Re-ID',
+        markdown_content: expect.stringContaining('Exported inline summary.'),
+      });
+    });
+    expect(createObjectUrl).toHaveBeenCalled();
+    expect(anchorClick).toHaveBeenCalled();
+
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: originalCreateObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: originalRevokeObjectURL });
+    Object.defineProperty(HTMLAnchorElement.prototype, 'click', {
+      configurable: true,
+      value: originalAnchorClick,
+    });
   });
 
   it('generates and saves BRD inline without relying on a side panel', async () => {

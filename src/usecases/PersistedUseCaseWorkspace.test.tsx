@@ -123,6 +123,7 @@ function buildWorkspace(overrides: Partial<WorkspacePersistence> = {}): Workspac
     loadBrd: vi.fn(),
     generateBrd: vi.fn(),
     saveBrd: vi.fn(),
+    exportBrdDocx: vi.fn(),
     ...overrides,
   };
 }

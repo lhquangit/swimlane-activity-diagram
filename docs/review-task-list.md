@@ -4873,6 +4873,97 @@ Review snapshot:
   - Frontend verification passed: focused BRD renderer tests, full UI suite `96/96`, and
     production build.
 
+#### TASK-203 - Replace persisted BRD markdown toggle with direct inline document editing
+- Priority: P1
+- Status: Done (2026-06-11)
+- Module: brd-inline-editor
+- Problem: Persisted BRD artifacts are still edited through a separate markdown toggle and sidebar
+  textarea. The main BRD document surface is read-only, so users cannot edit the document where
+  they are actually reviewing it.
+- Why it matters: This keeps the workflow in a source-editing mental model instead of a document
+  review model, and it makes table-heavy/sample-style BRDs harder to refine safely. Removing the
+  button without redesigning the edit model would push the app toward brittle `contentEditable`
+  hacks.
+- Implementation steps:
+  1. Make the persisted BRD route the canonical edit surface and remove the `Chỉnh sửa markdown`
+     toggle/button from its primary actions.
+  2. Introduce a block-aware BRD editor model for the persisted route so headings, paragraphs,
+     lists, tables, and figure captions can be edited directly in place while preserving a stable
+     `markdown_content` serialization.
+  3. Refactor `src/brd/markdown.tsx` into a shared parse/render layer that can power both display
+     and inline editing instead of one-way rendering to read-only React nodes.
+  4. Keep `structured_spec` read-only; only the rendered BRD document is editable in Phase 1.
+  5. Ensure dirty-state, save-state labels, and persisted save behavior continue to operate off the
+     edited canonical markdown string.
+  6. Decide and document whether standalone `BrdPanel` remains textarea-based for now or reuses the
+     same inline editor; if deferred, make that boundary explicit in product docs and task notes.
+  7. Update product/use-case docs so Phase 1 no longer describes persisted BRD editing as a hidden
+     textarea toggle.
+- Acceptance criteria:
+  - Persisted BRD route has no `Chỉnh sửa markdown` action.
+  - Users can edit visible BRD content directly from the document surface, including at least
+    paragraph text, table cells, and figure captions.
+  - Saving persists the edited markdown and reloading the route shows the same content.
+  - `structured_spec` remains read-only and is not silently mutated by inline BRD edits.
+  - Existing generate/regenerate/load flows still behave correctly.
+- Dependencies: TASK-200, TASK-202
+- Verification: Focused `PersistedBrdWorkspace` tests for inline edit/save/reload, regression tests
+  for table/caption editing, full `npm run test:ui-mock`, and one browser or Playwright scenario
+  editing a persisted BRD document in place.
+- Implementation notes:
+  - Removed the persisted-route `Chỉnh sửa markdown` toggle and made the rendered document the
+    canonical edit surface for headings, paragraphs, table cells, list items, and figure captions.
+  - Refactored `src/brd/markdown.tsx` into a shared parse/serialize layer so inline edits preserve
+    stable `markdown_content` instead of mutating DOM with `contentEditable`.
+  - Kept `structured_spec` read-only and preserved existing dirty/save-state behavior off the
+    serialized markdown string.
+  - Explicitly left standalone `BrdPanel` on the textarea path for Phase 1; only persisted BRD
+    artifacts use the inline document editor in this slice.
+
+#### TASK-204 - Add true DOCX export for edited BRD artifacts
+- Priority: P1
+- Status: Done (2026-06-11)
+- Module: brd-docx-export
+- Problem: The BRD workflow currently persists only markdown and offers only markdown export
+  semantics in docs/UI. There is no API contract, runtime dependency, or verification path for
+  producing a real `.docx` file from the edited BRD artifact.
+- Why it matters: A business-facing BRD often needs to leave the app as a Word document, not a raw
+  markdown file. Without a real DOCX pipeline, the feature will either be fake export or produce
+  unreviewable formatting drift.
+- Implementation steps:
+  1. Add a canonical DOCX export contract for persisted BRDs, preferably as a backend endpoint that
+     accepts or derives the current canonical markdown and returns a real `.docx` binary.
+  2. Choose and integrate one document-generation path explicitly for the backend/runtime, such as a
+     Python DOCX library or a deterministic markdown-to-docx builder, rather than fabricating a file
+     from plain text blobs.
+  3. Map current BRD primitives to DOCX structure: title, numbered headings, paragraphs, tables,
+     figure captions/placeholders, and metadata fields that should appear in the document.
+  4. Make persisted BRD export use the latest user-edited content, including unsaved in-page edits
+     if the UX chooses export-before-save, or block export until the latest edits are saved if that
+     policy is chosen. Document the chosen policy explicitly.
+  5. Add a visible `Export DOCX` action on the canonical persisted BRD route and preserve markdown
+     export only if the product still wants both outputs.
+  6. Update `UC-06` and product docs so the export contract no longer claims only `.md` output.
+  7. Add regression and render verification for the generated DOCX, including at least one
+     sample-like BRD with tables and captions.
+- Acceptance criteria:
+  - User can download a valid `.docx` file from a persisted BRD artifact.
+  - The exported DOCX contains the same edited business content currently considered canonical by
+    the UI.
+  - Numbered headings, tables, and captions survive export in readable Word-document form.
+  - Export behavior for dirty/unsaved edits is explicit and covered by tests.
+  - Product/use-case docs match the implemented export contract.
+- Dependencies: TASK-203
+- Verification: backend export tests, focused UI action tests, full `npm run test:api-mock`,
+  `npm run test:ui-mock`, and rendered DOCX verification from a sample-like BRD fixture.
+- Implementation notes:
+  - Added a persisted BRD export contract `POST /api/diagrams/{diagram_id}/brd/export.docx` and a
+    real backend DOCX builder using `python-docx`.
+  - The persisted BRD route now exposes `Export DOCX` and exports the latest in-page draft,
+    including unsaved inline edits, instead of requiring a save round-trip first.
+  - DOCX generation maps markdown headings, paragraphs, lists, tables, figure placeholders, and
+    captions into readable Word structure and is covered by binary-content regression tests.
+
 #### TASK-198 - Add persisted BRD flow regressions for “no popup” and left-tree visibility
 - Priority: P2
 - Status: Todo
@@ -4890,3 +4981,74 @@ Review snapshot:
   - Artifact-tree BRD visibility is covered in at least one browser-level regression.
 - Dependencies: TASK-196, TASK-197
 - Verification: `npm run test:ui-mock`, `npm run test:e2e-mock`.
+
+#### TASK-205 - Add delete action for persisted Use Case rows in the left artifact tree
+- Priority: P1
+- Status: Done (2026-06-11)
+- Module: artifact-tree-usecase-actions
+- Problem: Users can delete a saved Use Case from the persisted Use Case route, but not directly
+  from the left artifact tree where they already manage Feature -> Use Case structure.
+- Why it matters: The tree implies artifact management, not just navigation. Forcing users to open
+  a second screen to delete one item makes cleanup slow and inconsistent, especially when curating a
+  large feature portfolio.
+- Implementation steps:
+  1. Refactor the use-case row in `ArtifactTree` so selection, disclosure, and row actions can
+     coexist without click bubbling or broken focus order.
+  2. Add a delete affordance on each saved use-case row in the left bar with VN-first copy and a
+     clear destructive confirmation that mentions cascading Diagram/BRD deletion.
+  3. Reuse the existing `workspace.deleteUseCase()` command instead of adding a second delete path;
+     keep tree refresh, dirty-scope cleanup, and route fallback in `ProjectWorkspace`.
+  4. Ensure deleting the currently active use case routes back to the feature’s `Use Cases` page
+     without leaving stale diagram/BRD state mounted.
+  5. Add focused regressions for left-bar delete on inactive and active use cases, including cancel
+     and confirm branches.
+- Acceptance criteria:
+  - Each persisted use-case row in the left bar exposes a delete action.
+  - Canceling the confirmation does not navigate or mutate the tree.
+  - Confirming delete removes the use case from the tree and clears descendant Diagram/BRD state.
+  - Deleting the active use case routes to the feature `Use Cases` artifact without stale content.
+  - Existing route-level delete still works and shares the same command semantics.
+- Dependencies: None
+- Verification: `ArtifactTree` tests, `ProjectWorkspace` integration tests for active-route delete
+  cleanup, and one browser/E2E scenario deleting a use case from the left bar.
+- Implementation notes:
+  - Added a dedicated delete action on persisted use-case rows in the left artifact tree.
+  - Reused the existing `workspace.deleteUseCase()` orchestration path so sidebar delete keeps the
+    same tree refresh, route fallback, and descendant cleanup semantics as route-level delete.
+  - Added regressions for row-action isolation and active-route delete from the left bar.
+
+#### TASK-206 - Add per-use-case collapse/expand and tree disclosure UX for the left artifact bar
+- Priority: P2
+- Status: Done (2026-06-11)
+- Module: artifact-tree-disclosure
+- Problem: Once a feature is expanded, every use case always shows its `Diagram` and `BRD` child
+  rows. The tree becomes noisy quickly and gives users no way to collapse siblings they are not
+  working on.
+- Why it matters: The artifact tree is becoming the main persisted workspace navigator. Without
+  per-use-case disclosure, scanning large portfolios gets harder and the left bar wastes vertical
+  space.
+- Implementation steps:
+  1. Introduce explicit collapse state for each use-case branch in `ArtifactTree`, not just
+     project/features.
+  2. Auto-expand the active use-case path when the current route targets that use case, its diagram,
+     or its BRD, while keeping inactive siblings collapsible.
+  3. Improve row affordances so toggle state is visible and consistent across project, feature, and
+     use-case levels.
+  4. Keep keyboard navigation and ARIA semantics coherent after adding nested disclosure controls
+     and row actions.
+  5. Add tests for collapsing/expanding use cases, preserving active-path visibility, and keyboard
+     focus behavior.
+- Acceptance criteria:
+  - Users can collapse and re-expand each use case independently in the left bar.
+  - The active use case path remains visible when deep-linking to `use-case`, `diagram`, or `brd`.
+  - Tree disclosure controls remain keyboard accessible and do not trigger unintended navigation.
+  - The left bar reads more compactly when many use cases exist under one feature.
+- Dependencies: TASK-205 is recommended first so row structure changes happen once.
+- Verification: `ArtifactTree` tests, `ProjectWorkspace` route/deep-link tests, and one browser/E2E
+  scenario covering collapse/expand across multiple use cases.
+- Implementation notes:
+  - Added per-use-case disclosure controls so each use case can hide/show its `Diagram` and `BRD`
+    children independently.
+  - Active deep-link paths now auto-expand their parent feature/use-case branches so the selected
+    artifact stays visible in the tree.
+  - The use-case row layout was hardened to separate disclosure, selection, and actions cleanly.

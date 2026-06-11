@@ -439,6 +439,67 @@ export default function ProjectWorkspace({
 
   const loadBrd = useCallback((diagramId: string) => api.getBrd(diagramId), [api]);
 
+  const deleteUseCaseResource = useCallback(
+    async (businessKey: string) => {
+      if (!activeFeature) throw new Error('Feature hiện tại không còn khả dụng.');
+      const resource = useCaseResources.find((item) => item.use_case_key === businessKey);
+      if (!resource) throw new Error('Không tìm thấy Use Case đã lưu để xóa.');
+      await api.deleteUseCase(resource.id);
+      setUseCaseResources((current) => current.filter((item) => item.id !== resource.id));
+      setSaveStateRegistry((current) =>
+        clearScopesByPredicate(
+          current,
+          (scope) =>
+            scope.resourceId === businessKey ||
+            scope.key.includes(`:diagram:${businessKey}`) ||
+            (activeDiagram?.use_case_id === resource.id && scope.resourceId === activeDiagram.id),
+        ),
+      );
+      if (activeDiagram?.use_case_id === resource.id) {
+        setActiveDiagram(null);
+        setActiveDiagramBusinessKey(null);
+      }
+      await refreshArtifactTree();
+      navigateToArtifact({ kind: 'use-cases', featureId: activeFeature.id });
+    },
+    [
+      activeDiagram?.id,
+      activeDiagram?.use_case_id,
+      activeFeature,
+      api,
+      navigateToArtifact,
+      refreshArtifactTree,
+      useCaseResources,
+    ],
+  );
+
+  const handleDeleteUseCaseFromTree = useCallback(
+    async ({
+      businessKey,
+      title,
+    }: {
+      featureId: string;
+      useCaseId: string;
+      businessKey: string;
+      title: string;
+    }) => {
+      if (!confirmDiscardActiveChanges('Bỏ các thay đổi chưa lưu trước khi xóa Use Case?')) return;
+      if (
+        !window.confirm(
+          `Xóa use case "${title}"? Diagram và BRD đã lưu bên dưới use case này cũng sẽ bị xóa.`,
+        )
+      ) {
+        return;
+      }
+      try {
+        await deleteUseCaseResource(businessKey);
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'Không thể xóa Use Case.');
+      }
+    },
+    [deleteUseCaseResource],
+  );
+
   const contextValue = useMemo<WorkspacePersistence | null>(() => {
     if (!tree || !activeFeature) return null;
     const pendingUseCaseGeneration = pendingUseCaseGenerationByFeature[activeFeature.id] ?? null;
@@ -656,28 +717,7 @@ export default function ProjectWorkspace({
         user?.id && activeDiagram
           ? { userId: user.id, projectId: tree.project.id, diagramId: activeDiagram.id }
           : null,
-      deleteUseCase: async (businessKey) => {
-        const resource = useCaseResources.find((item) => item.use_case_key === businessKey);
-        if (!resource) throw new Error('Không tìm thấy Use Case đã lưu để xóa.');
-        await api.deleteUseCase(resource.id);
-        setUseCaseResources((current) => current.filter((item) => item.id !== resource.id));
-        setSaveStateRegistry((current) =>
-          clearScopesByPredicate(
-            current,
-            (scope) =>
-              scope.resourceId === businessKey ||
-              scope.key.includes(`:diagram:${businessKey}`) ||
-              (activeDiagram?.use_case_id === resource.id &&
-                scope.resourceId === activeDiagram.id),
-          ),
-        );
-        if (activeDiagram?.use_case_id === resource.id) {
-          setActiveDiagram(null);
-          setActiveDiagramBusinessKey(null);
-        }
-        await refreshArtifactTree();
-        navigateToArtifact({ kind: 'use-cases', featureId: activeFeature.id });
-      },
+      deleteUseCase: deleteUseCaseResource,
       loadBrd,
       generateBrd: (diagramId, idempotencyKey, template) =>
         api.generateBrd(diagramId, idempotencyKey, template),
@@ -724,6 +764,7 @@ export default function ProjectWorkspace({
           throw reason;
         }
       },
+      exportBrdDocx: (diagramId, payload) => api.exportBrdDocx(diagramId, payload),
     };
   }, [
     activeArtifact,
@@ -734,6 +775,7 @@ export default function ProjectWorkspace({
     api,
     brdSaveState,
     brdScope,
+    deleteUseCaseResource,
     diagramSaveState,
     loadBrd,
     loadDiagram,
@@ -796,6 +838,7 @@ export default function ProjectWorkspace({
           active={activeArtifact}
           onSelect={navigateToArtifact}
           onCreateFeature={startNewFeature}
+          onDeleteUseCase={(payload) => void handleDeleteUseCaseFromTree(payload)}
           sidebarCollapsed={artifactSidebarCollapsed}
           onToggleSidebar={() => setArtifactSidebarCollapsed((current) => !current)}
         />

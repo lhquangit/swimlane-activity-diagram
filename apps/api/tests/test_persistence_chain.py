@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from uuid import UUID
+from io import BytesIO
+import zipfile
 
 from fastapi.testclient import TestClient
 from sqlalchemy import delete
@@ -219,4 +221,68 @@ def test_saved_brd_generation_falls_back_when_provider_request_fails(
     assert generated_brd.status_code == 200
     assert generated_brd.json()["metadata"]["generation_source"] == "deterministic_fallback"
     assert generated_brd.json()["metadata"]["fallback_reason"] == "provider_request_failed"
+    clear_persistence_tables()
+
+
+def test_persisted_brd_docx_export_returns_a_real_docx_from_edited_markdown(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    clear_persistence_tables()
+    monkeypatch.setattr(
+        brd_generate,
+        "settings",
+        SimpleNamespace(
+            provider="openrouter",
+            model_primary="openai/gpt-5.5",
+            openrouter_api_key="",
+        ),
+    )
+    _project_id, _feature_id, _use_case_id, diagram_id = create_persisted_chain(client)
+
+    generated_brd = client.post(
+        f"/api/diagrams/{diagram_id}/brd/generate",
+        headers={"Idempotency-Key": "persisted-docx-export-test"},
+    )
+    assert generated_brd.status_code == 200
+    brd_result = generated_brd.json()["result"]
+
+    saved_brd = client.put(
+        f"/api/diagrams/{diagram_id}/brd",
+        json={
+            "title": "V-PetSafe BRD",
+            "structured_spec": brd_result["spec"],
+            "markdown_content": brd_result["brd_markdown"],
+            "warnings": generated_brd.json()["warnings"],
+            "template": "default",
+        },
+    )
+    assert saved_brd.status_code == 200
+
+    exported = client.post(
+        f"/api/diagrams/{diagram_id}/brd/export.docx",
+        json={
+            "title": "V-PetSafe BRD đã chỉnh sửa",
+            "markdown_content": "# V-PetSafe BRD Edited\n\n## 1. Mục đích tài liệu\nInline edited summary.\n\n| Cột A | Cột B |\n| :---- | :---- |\n| Giá trị 1 | Giá trị 2 |\n\n![Hình 1](placeholder://demo)\nHình 1: Edited caption.",
+        },
+    )
+
+    assert exported.status_code == 200
+    assert (
+        exported.headers["content-type"]
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert 'filename="V-PetSafe BRD a chinh sua.docx"' in exported.headers["content-disposition"]
+    assert (
+        "filename*=UTF-8''V-PetSafe%20BRD%20%C4%91%C3%A3%20ch%E1%BB%89nh%20s%E1%BB%ADa.docx"
+        in exported.headers["content-disposition"]
+    )
+    assert exported.content[:2] == b"PK"
+
+    with zipfile.ZipFile(BytesIO(exported.content)) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+
+    assert "Inline edited summary." in document_xml
+    assert "Giá trị 1" in document_xml
+    assert "Hình 1: Edited caption." in document_xml
     clear_persistence_tables()

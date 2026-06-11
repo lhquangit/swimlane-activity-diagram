@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   listUseCases: vi.fn(),
   getDiagram: vi.fn(),
   deleteFeature: vi.fn(),
+  deleteUseCase: vi.fn(),
 }));
 
 vi.mock('@clerk/react', () => ({
@@ -220,6 +221,18 @@ const tree = {
   ],
 };
 
+const treeAfterDeleteUseCaseA = {
+  ...tree,
+  features: tree.features.map((feature) =>
+    feature.id === 'feature-1'
+      ? {
+          ...feature,
+          use_cases: feature.use_cases.filter((item) => item.id !== 'usecase-1'),
+        }
+      : feature,
+  ),
+};
+
 function RouteControls() {
   const navigate = useNavigate();
   return (
@@ -273,6 +286,7 @@ describe('ProjectWorkspace artifact-tree transitions', () => {
       Promise.resolve(featureId === 'feature-2' ? useCasesB : useCases),
     );
     api.deleteFeature.mockResolvedValue(undefined);
+    api.deleteUseCase.mockResolvedValue(undefined);
   });
 
   it('clears the previous editor context when a valid route becomes invalid', async () => {
@@ -337,6 +351,24 @@ describe('ProjectWorkspace artifact-tree transitions', () => {
 
     expect(await screen.findByTestId('active-feature')).toHaveTextContent('feature-2');
     expect(screen.getByTestId('dirty-count')).toHaveTextContent('0');
+  });
+
+  it('deletes the active use case from the left tree and routes back to the use-case list', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    api.getProjectArtifactTree.mockResolvedValueOnce(tree).mockResolvedValueOnce(treeAfterDeleteUseCaseA);
+
+    renderWorkspace('/projects/project-1/features/feature-1/use-cases/usecase-1');
+    expect(await screen.findByTestId('active-artifact')).toHaveTextContent('use-case');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Xóa Use case A' }));
+
+    await waitFor(() => expect(api.deleteUseCase).toHaveBeenCalledWith('usecase-1'));
+    expect(await screen.findByTestId('active-artifact')).toHaveTextContent('use-cases');
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('treeitem', { name: /^Use case A\b.*UC-001/ }),
+      ).not.toBeInTheDocument(),
+    );
   });
 
   it('keeps the current diagram save scope when the next persisted diagram fails to load', async () => {

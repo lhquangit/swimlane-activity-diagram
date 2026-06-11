@@ -14,6 +14,7 @@ from app.routes.brd_validate import validate_brd_request
 from app.runtime_contract import json_response_from_envelope
 from app.schemas.persistence import (
     AppUserResource,
+    BrdDocxExportRequest,
     BrdResource,
     BrdSave,
     DiagramResource,
@@ -30,6 +31,7 @@ from app.schemas.persistence import (
     UseCaseBulkSave,
     UseCaseResource,
 )
+from app.services.brd_docx import build_brd_docx, build_docx_content_disposition, sanitize_docx_filename
 from app.services.persistence_generation import (
     generate_feature_use_case_envelope,
     generate_use_case_diagram_envelope,
@@ -338,6 +340,23 @@ def save_brd(
     db: Session = Depends(get_db),
 ) -> BrdResource:
     return save_owned_brd(db, current_user, diagram_id, payload)
+
+
+@router.post("/diagrams/{diagram_id}/brd/export.docx")
+def export_brd_docx(
+    diagram_id: UUID,
+    payload: BrdDocxExportRequest,
+    current_user: CurrentUser = Depends(require_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    require_diagram(db, current_user, diagram_id)
+    docx_bytes = build_brd_docx(payload.title, payload.markdown_content)
+    filename = f"{sanitize_docx_filename(payload.title)}.docx"
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": build_docx_content_disposition(filename)},
+    )
 
 
 @router.delete("/diagrams/{diagram_id}/brd", status_code=204)

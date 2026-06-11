@@ -5,6 +5,23 @@
 ## [Unreleased]
 
 ### Added
+- **Artifact-tree use-case row actions and disclosure**: persisted left-bar Use Case rows now
+  expose a direct delete action and independent collapse/expand controls for their `Diagram` and
+  `BRD` children. Sidebar delete reuses the existing workspace delete orchestration so active-route
+  cleanup, tree refresh, and descendant teardown stay consistent. Xem
+  `src/application/{ArtifactTree.tsx,ProjectWorkspace.tsx,ArtifactTree.test.tsx,ProjectWorkspace.test.tsx}`,
+  `src/styles.css`, `docs/use-cases/UC-08-dieu-huong-artifact-tree.md`.
+- **Persisted BRD inline editing + DOCX export**: persisted BRD artifacts no longer require the
+  `Chỉnh sửa markdown` toggle to edit content. The rendered BRD document is now the canonical edit
+  surface for headings, paragraphs, tables, lists, and figure captions, and the same route exposes
+  a real `Export DOCX` action backed by a FastAPI `python-docx` export endpoint that uses the
+  latest in-page draft, including unsaved edits. Xem
+  `src/brd/{PersistedBrdWorkspace.tsx,markdown.tsx,PersistedBrdWorkspace.test.tsx}`,
+  `src/persistence/{types.ts,api.ts,WorkspaceContext.tsx}`,
+  `src/application/ProjectWorkspace.tsx`, `src/styles.css`,
+  `apps/api/app/{routes/persistence.py,schemas/persistence.py,services/brd_docx.py}`,
+  `apps/api/tests/test_persistence_chain.py`, `apps/api/pyproject.toml`,
+  `docs/{use-cases/UC-06-sinh-brd-tu-diagram.md,product/ai-brd-description-feature.md}`.
 - **Persisted BRD artifact page + no-popup workspace flow**: persisted `brd` routes now open a
   dedicated `PersistedBrdWorkspace` page instead of the legacy canvas sidecar, and `Generate BRD`
   from the persisted diagram toolbar now saves directly into the left artifact tree without opening
@@ -102,6 +119,12 @@
   `src/application/AppRouter.tsx`, `playwright.config.ts`.
 
 ### Fixed
+- **Persisted BRD DOCX export Unicode filename header**: `POST /api/diagrams/{id}/brd/export.docx`
+  no longer crashes with `UnicodeEncodeError` when the BRD title contains Vietnamese characters.
+  The response now emits an ASCII `filename=` fallback plus RFC 5987 `filename*=` UTF-8 encoding in
+  `Content-Disposition`, with regression coverage for accented titles. Xem
+  `apps/api/app/{routes/persistence.py,services/brd_docx.py}`,
+  `apps/api/tests/test_persistence_chain.py`.
 - **AI BRD sample-style document contract and reader rendering**: generated BRDs no longer stay on
   the old generic process-brief outline. The backend now emits a formal sample-inspired document
   shape with business scope tables, actor catalog, use-case catalog, state catalogs, numbered

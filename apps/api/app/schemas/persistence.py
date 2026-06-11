@@ -338,6 +338,13 @@ class BrdSave(StrictBaseModel):
     _title = field_validator("title", mode="before")(normalize_text)
 
 
+class BrdDocxExportRequest(StrictBaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    markdown_content: str = Field(min_length=1, max_length=2_000_000)
+
+    _title = field_validator("title", mode="before")(normalize_text)
+
+
 class BrdResource(BrdSave):
     id: UUID
     diagram_id: UUID

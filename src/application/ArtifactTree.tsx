@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { ProjectArtifactTree } from '../persistence/types';
 import type { ActiveArtifact } from './artifact-routing';
@@ -9,6 +9,12 @@ type ArtifactTreeProps = {
   active: ActiveArtifact;
   onSelect: (artifact: ActiveArtifact) => void;
   onCreateFeature: () => void;
+  onDeleteUseCase?: (payload: {
+    featureId: string;
+    useCaseId: string;
+    businessKey: string;
+    title: string;
+  }) => void;
   sidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
 };
@@ -18,6 +24,7 @@ export default function ArtifactTree({
   active,
   onSelect,
   onCreateFeature,
+  onDeleteUseCase,
   sidebarCollapsed = false,
   onToggleSidebar,
 }: ArtifactTreeProps) {
@@ -43,6 +50,21 @@ export default function ArtifactTree({
     event.preventDefault();
     items[nextIndex]?.focus();
   };
+
+  useEffect(() => {
+    setCollapsed((current) => {
+      const next = { ...current };
+      if (active.kind === 'feature' || active.kind === 'use-cases' || active.kind === 'use-case' || active.kind === 'diagram' || active.kind === 'brd') {
+        next.project = false;
+        next.features = false;
+        next[`feature:${active.featureId}`] = false;
+      }
+      if (active.kind === 'use-case' || active.kind === 'diagram' || active.kind === 'brd') {
+        next[`usecase:${active.useCaseId}`] = false;
+      }
+      return next;
+    });
+  }, [active]);
 
   if (sidebarCollapsed) {
     return (
@@ -181,79 +203,128 @@ export default function ArtifactTree({
                           {feature.use_cases.length === 0 ? (
                             <p className="artifact-tree__empty">Chưa có Use Case.</p>
                           ) : null}
-                          {feature.use_cases.map((useCase) => (
-                            <div className="artifact-tree__branch" key={useCase.id}>
-                              <TreeItem
-                                label={useCase.title}
-                                meta={`${useCase.use_case_key} · ${useCase.review_status}`}
-                                active={sameArtifact(active, {
-                                  kind: 'use-case',
-                                  featureId: feature.id,
-                                  useCaseId: useCase.id,
-                                })}
-                                onClick={() =>
-                                  onSelect({
-                                    kind: 'use-case',
-                                    featureId: feature.id,
-                                    useCaseId: useCase.id,
-                                  })
-                                }
-                              />
-                              <div role="group" className="artifact-tree__children">
-                                <TreeItem
-                                  label={
-                                    useCase.diagram?.title ?? 'Diagram chưa tạo'
-                                  }
-                                  meta={
-                                    useCase.diagram
-                                      ? useCase.diagram.is_outdated
-                                        ? 'Diagram outdated'
-                                        : 'Diagram'
-                                      : 'Tạo từ Use Case đã duyệt'
-                                  }
-                                  muted={!useCase.diagram}
-                                  active={sameArtifact(active, {
-                                    kind: 'diagram',
-                                    featureId: feature.id,
-                                    useCaseId: useCase.id,
-                                  })}
-                                  onClick={() =>
-                                    onSelect({
-                                      kind: 'diagram',
-                                      featureId: feature.id,
-                                      useCaseId: useCase.id,
-                                    })
-                                  }
-                                />
-                                <TreeItem
-                                  label={
-                                    useCase.diagram?.brd?.title ??
-                                    (useCase.diagram ? 'BRD chưa tạo' : 'BRD cần Diagram')
-                                  }
-                                  meta={
-                                    useCase.diagram?.brd
-                                      ? useCase.diagram.brd.is_outdated
-                                        ? 'BRD outdated'
-                                        : 'BRD'
-                                      : 'Chưa có dữ liệu'
-                                  }
-                                  muted={!useCase.diagram?.brd}
-                                  active={sameArtifact(active, {
-                                    kind: 'brd',
-                                    featureId: feature.id,
-                                    useCaseId: useCase.id,
-                                  })}
-                                  onClick={() =>
-                                    onSelect({
-                                      kind: 'brd',
-                                      featureId: feature.id,
-                                      useCaseId: useCase.id,
-                                    })
-                                  }
-                                />
+                          {feature.use_cases.map((useCase) => {
+                            const useCaseKey = `usecase:${useCase.id}`;
+                            const useCaseActive =
+                              sameArtifact(active, {
+                                kind: 'use-case',
+                                featureId: feature.id,
+                                useCaseId: useCase.id,
+                              }) ||
+                              sameArtifact(active, {
+                                kind: 'diagram',
+                                featureId: feature.id,
+                                useCaseId: useCase.id,
+                              }) ||
+                              sameArtifact(active, {
+                                kind: 'brd',
+                                featureId: feature.id,
+                                useCaseId: useCase.id,
+                              });
+                            return (
+                              <div className="artifact-tree__branch" key={useCase.id}>
+                                <div className="artifact-tree__row-with-toggle artifact-tree__row-with-actions">
+                                  <button
+                                    type="button"
+                                    className="artifact-tree__toggle"
+                                    onClick={() => toggle(useCaseKey)}
+                                    aria-label={
+                                      collapsed[useCaseKey]
+                                        ? `Mở ${useCase.title}`
+                                        : `Thu gọn ${useCase.title}`
+                                    }
+                                    aria-expanded={!collapsed[useCaseKey]}
+                                  >
+                                    {collapsed[useCaseKey] ? '›' : '⌄'}
+                                  </button>
+                                  <TreeItem
+                                    label={useCase.title}
+                                    meta={`${useCase.use_case_key} · ${useCase.review_status}`}
+                                    active={useCaseActive}
+                                    onClick={() =>
+                                      onSelect({
+                                        kind: 'use-case',
+                                        featureId: feature.id,
+                                        useCaseId: useCase.id,
+                                      })
+                                    }
+                                  />
+                                  {onDeleteUseCase ? (
+                                    <button
+                                      type="button"
+                                      className="artifact-tree__row-action artifact-tree__row-action--danger"
+                                      aria-label={`Xóa ${useCase.title}`}
+                                      title={`Xóa ${useCase.title}`}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        onDeleteUseCase({
+                                          featureId: feature.id,
+                                          useCaseId: useCase.id,
+                                          businessKey: useCase.use_case_key,
+                                          title: useCase.title,
+                                        });
+                                      }}
+                                    >
+                                      ×
+                                    </button>
+                                  ) : null}
+                                </div>
+                                {!collapsed[useCaseKey] ? (
+                                  <div role="group" className="artifact-tree__children">
+                                    <TreeItem
+                                      label={useCase.diagram?.title ?? 'Diagram chưa tạo'}
+                                      meta={
+                                        useCase.diagram
+                                          ? useCase.diagram.is_outdated
+                                            ? 'Diagram outdated'
+                                            : 'Diagram'
+                                          : 'Tạo từ Use Case đã duyệt'
+                                      }
+                                      muted={!useCase.diagram}
+                                      active={sameArtifact(active, {
+                                        kind: 'diagram',
+                                        featureId: feature.id,
+                                        useCaseId: useCase.id,
+                                      })}
+                                      onClick={() =>
+                                        onSelect({
+                                          kind: 'diagram',
+                                          featureId: feature.id,
+                                          useCaseId: useCase.id,
+                                        })
+                                      }
+                                    />
+                                    <TreeItem
+                                      label={
+                                        useCase.diagram?.brd?.title ??
+                                        (useCase.diagram ? 'BRD chưa tạo' : 'BRD cần Diagram')
+                                      }
+                                      meta={
+                                        useCase.diagram?.brd
+                                          ? useCase.diagram.brd.is_outdated
+                                            ? 'BRD outdated'
+                                            : 'BRD'
+                                          : 'Chưa có dữ liệu'
+                                      }
+                                      muted={!useCase.diagram?.brd}
+                                      active={sameArtifact(active, {
+                                        kind: 'brd',
+                                        featureId: feature.id,
+                                        useCaseId: useCase.id,
+                                      })}
+                                      onClick={() =>
+                                        onSelect({
+                                          kind: 'brd',
+                                          featureId: feature.id,
+                                          useCaseId: useCase.id,
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                ) : null}
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : null}
                     </div>

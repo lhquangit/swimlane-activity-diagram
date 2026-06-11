@@ -2,6 +2,106 @@
 
 ## Task Summary
 
+- Task: Implement `TASK-205` and `TASK-206`
+- Requested by: User
+- Date: 2026-06-11
+- Affected modules: artifact tree UI, project workspace command orchestration, persisted artifact
+  navigation docs/tests
+
+## Goal Reconstruction
+
+- Requested change: let users delete individual persisted Use Cases directly from the left artifact
+  bar and improve the left bar so each Use Case branch can be collapsed or expanded independently.
+- Intended outcome: the artifact tree becomes a lightweight management surface, not only a
+  navigator, while active deep links remain visible and destructive actions reuse existing cleanup
+  semantics.
+- Hidden assumption: the current workspace delete command is already the source of truth for use
+  case deletion and should be reused instead of reimplemented inside the tree component.
+
+## Risk Assessment
+
+- Decision: IMPLEMENT_WITH_GUARDRAILS
+- Risk level: Medium
+- Main concerns: click bubbling from row actions into navigation, divergence between sidebar delete
+  and route-level delete behavior, and disclosure changes that break keyboard focus or hide the
+  active artifact path.
+- Guardrails: keep delete orchestration in `ProjectWorkspace`, split disclosure/select/action
+  targets in the row UI, auto-expand the active deep-link path, and add focused regressions before
+  broader verification.
+
+## Execution And Verification
+
+- Added left-bar delete actions for persisted use-case rows and routed them through the existing
+  workspace delete command.
+- Added per-use-case disclosure state and active-path auto-expand behavior in `ArtifactTree`.
+- Added regressions for row-action isolation, collapse/expand behavior, and active-route delete
+  cleanup from the sidebar.
+- Verification:
+  - Focused `ArtifactTree` and `ProjectWorkspace` tests passed `15/15`.
+  - Full verification recorded after suite/build reruns in the implementation summary.
+
+## Final Recommendation
+
+- `TASK-205` and `TASK-206` belong together because both require a cleaner use-case row model in
+  the tree.
+- Keep future artifact-row actions on the same split model: disclosure, selection, and destructive
+  actions should remain separate targets.
+
+---
+
+## Task Summary
+
+- Task: Implement `TASK-203` and `TASK-204`
+- Requested by: User
+- Date: 2026-06-11
+- Affected modules: persisted BRD editor UX, markdown parse/serialize layer, persistence API,
+  backend DOCX export, BRD product/use-case docs
+
+## Goal Reconstruction
+
+- Requested change: remove the persisted BRD markdown-toggle workflow, let users edit directly on
+  the visible BRD document, and support exporting a real `.docx` file from the edited content.
+- Intended outcome: the persisted `/diagram/brd` route becomes the canonical business-document
+  surface for review, editing, saving, and export; DOCX output reflects the latest draft content.
+- Hidden assumption: standalone `BrdPanel` can remain textarea-based for Phase 1 as long as the
+  persisted artifact route is documented as the canonical inline-edit surface.
+
+## Risk Assessment
+
+- Decision: IMPLEMENT_WITH_GUARDRAILS
+- Risk level: Medium
+- Main concerns: fragile `contentEditable` editing, markdown/data drift after inline edits,
+  fake-DOCX export that only renames plain text blobs, and product docs falling out of sync with
+  the new persisted workflow.
+- Guardrails: keep `structured_spec` read-only, serialize every inline edit back into canonical
+  markdown, use a real backend DOCX library, and document that export uses the latest in-page draft
+  including unsaved edits.
+
+## Execution And Verification
+
+- Reworked the persisted BRD route into a direct inline document editor with shared
+  parse/serialize logic for headings, paragraphs, lists, tables, and figure captions.
+- Removed the persisted `Chỉnh sửa markdown` toggle and kept standalone `BrdPanel` on the
+  textarea/editor path for now.
+- Added `POST /api/diagrams/{diagram_id}/brd/export.docx`, a real `python-docx` builder, and
+  frontend blob download wiring from the persisted BRD page.
+- Updated use-case/product/task docs so persisted BRD editing/export behavior matches the code.
+- Verification:
+  - Focused UI regression: `src/brd/PersistedBrdWorkspace.test.tsx` passed `5/5`.
+  - Focused API regression: DOCX export + fallback persistence tests passed `2/2`.
+  - Full verification recorded after broader suite/build reruns in the final implementation entry.
+
+## Final Recommendation
+
+- `TASK-203` and `TASK-204` are the right boundary for Phase 1 persisted BRD UX.
+- Keep the inline editor limited to the persisted route until there is a reason to unify the
+  standalone BRD panel, and keep DOCX generation on the backend where it can stay deterministic and
+  testable.
+
+---
+
+## Task Summary
+
 - Task: Implement `TASK-199`
 - Requested by: User
 - Date: 2026-06-10

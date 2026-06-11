@@ -114,7 +114,9 @@ Không gọi output là BRD chính thức ở Phase 1.
    - tab `Warnings`
    - tab `Structured spec`
    - tab `BRD Draft`
-8. User review, chỉnh sửa BRD draft, rồi export markdown hoặc copy nội dung.
+8. User review, chỉnh sửa BRD draft, rồi export theo surface phù hợp:
+   - standalone editor: export markdown hoặc copy nội dung.
+   - persisted workspace: chỉnh trực tiếp trên tài liệu hiển thị và export DOCX thật.
 9. Nếu user đóng panel, app vẫn giữ last BRD snapshot trong frontend cache để có thể mở lại mà không generate mới.
 
 ### Alternate flows
@@ -132,8 +134,9 @@ Không gọi output là BRD chính thức ở Phase 1.
 
 ### Kết quả hiển thị
 
-- Dùng **right-side panel** thay vì modal
-- Panel có 3 tab:
+- Standalone editor tiếp tục dùng **right-side panel** thay vì modal
+- Persisted workspace dùng **reader-first artifact page** thay cho popup/panel
+- Standalone panel có 3 tab:
   1. `Warnings`
   2. `Structured Spec`
   3. `BRD Draft`
@@ -142,9 +145,11 @@ Không gọi output là BRD chính thức ở Phase 1.
 
 Phase 1 cho phép:
 
-- user chỉnh sửa **BRD Draft** trực tiếp trong editor text area / markdown editor
+- standalone editor: user chỉnh sửa **BRD Draft** trong text area / markdown editor
+- persisted workspace: user chỉnh sửa trực tiếp trên rendered document surface bằng block-aware
+  inline editor; canonical value vẫn là `markdown_content`
 - user **không chỉnh sửa trực tiếp canonical structured spec** ở Phase 1
-- app lưu **một last BRD snapshot** ở frontend cache (`localStorage`) cho workspace hiện tại
+- app lưu **một last BRD snapshot** ở frontend cache (`localStorage`) cho standalone workspace hiện tại
 - user có thể dùng `Open last BRD draft` để mở lại snapshot đã cache hoặc `Discard cached BRD` để xoá thủ công
 
 Lý do:
@@ -184,8 +189,8 @@ Frontend chịu trách nhiệm:
 - normalize sơ bộ từ editor schema sang request schema
 - gọi FastAPI backend
 - render warnings / spec / BRD
-- cho user chỉnh sửa BRD draft trong panel
-- cho user export markdown
+- cho user chỉnh sửa BRD draft trong panel hoặc inline document surface tùy mode
+- cho user export markdown hoặc DOCX theo route hiện tại
 
 ### 7.2. FastAPI responsibilities
 

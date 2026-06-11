@@ -43,17 +43,22 @@
 10. Frontend hiển thị kết quả theo mode:
     - standalone editor: mở side panel với 3 tab `Warnings`, `Structured Spec`, `BRD Draft`.
     - persisted workspace: lưu BRD ngay vào artifact tree và route `/diagram/brd` trở thành surface
-      canonical để review/chỉnh sửa.
-11. User review, chỉnh sửa BRD markdown trực tiếp trong tab/persisted page `BRD Draft` nếu cần.
+      canonical để review/chỉnh sửa trực tiếp trên tài liệu đang hiển thị.
+11. User review và chỉnh sửa nội dung BRD theo mode:
+    - standalone editor: chỉnh trong tab `BRD Draft` dạng textarea/markdown editor.
+    - persisted workspace: chỉnh trực tiếp trên document surface; `Structured Spec` chỉ để đọc.
 12. Frontend persist last BRD snapshot vào `localStorage` cho standalone flow; persisted flow ưu
     tiên artifact BRD đã lưu trên server.
 13. Nếu user đóng panel ở standalone flow, user có thể bấm `Open last BRD draft` trên toolbar để mở lại snapshot đã cache mà không generate mới.
-14. User bấm `Export markdown` để tải file `.md` reader-facing mặc định, hoặc `Copy` để copy vào clipboard.
+14. User export theo mode:
+    - standalone editor: `Export markdown` để tải file `.md`, hoặc `Copy` để copy nội dung.
+    - persisted workspace: `Export DOCX` để tải file `.docx` thật từ nội dung BRD hiện tại; export
+      dùng cả các chỉnh sửa inline chưa lưu nếu đang có dirty draft.
  
 ## Kết quả mong đợi
  
 - Standalone flow hiển thị BRD draft trong side panel; persisted flow hiển thị BRD như một artifact
-  riêng dưới Diagram trong left tree.
+  riêng dưới Diagram trong left tree và là surface chỉnh sửa canonical.
 - `Main workflow` được render theo format mở rộng cho từng bước, không chỉ là danh sách một dòng.
 - `Actors` có thể kèm responsibilities nếu hệ thống suy diễn đủ rõ từ diagram.
 - `Scope` mô tả trigger, điểm bắt đầu xử lý, điểm kết thúc chính, và phạm vi bao phủ.
@@ -101,9 +106,13 @@
 - Nếu user đổi diagram rồi vẫn reuse key cũ, backend trả `409` với `status = conflict`; frontend phải generate key mới và gửi lại.
  
 ### UC-06e — User chỉnh sửa BRD draft rồi export
- 
-- User chỉnh sửa markdown trong tab `BRD Draft` (Phase 1 không sync ngược vào structured spec).
-- Khi export, file `.md` chứa nội dung user đã chỉnh sửa, **không phải** nội dung gốc model trả về.
+
+- User chỉnh sửa BRD draft theo surface hiện tại:
+  - standalone editor: tab `BRD Draft` dạng markdown editor.
+  - persisted workspace: document inline editor ngay trên route artifact.
+- Khi export, file output chứa nội dung user đã chỉnh sửa, **không phải** nội dung gốc model trả về.
+- Với persisted workspace, `Export DOCX` lấy canonical draft hiện tại kể cả khi user chưa bấm
+  `Lưu BRD`.
 - Phase 2 sẽ bổ sung warning "BRD draft khác với structured spec" nếu user chỉnh sửa quá nhiều.
  
 ### UC-06f — Diagram đã đổi sau khi generate

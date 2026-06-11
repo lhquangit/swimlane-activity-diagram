@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { useWorkspacePersistence } from '../persistence/WorkspaceContext';
 import type { ArtifactTreeUseCase, BrdResource, UseCaseResource } from '../persistence/types';
-import { renderMarkdownDocument } from './markdown';
+import { EditableMarkdownDocument } from './markdown';
 import type { BrdSpec, ResponseMetadata, WarningItem } from './types';
 
 type PersistedBrdWorkspaceProps = {
@@ -28,7 +28,6 @@ export default function PersistedBrdWorkspace({
   const [metadata, setMetadata] = useState<ResponseMetadata | null>(null);
   const [requestId, setRequestId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
-  const [isEditingMarkdown, setIsEditingMarkdown] = useState(false);
   const loadDiagram = workspace?.loadDiagram;
   const loadBrd = workspace?.loadBrd;
 
@@ -158,6 +157,20 @@ export default function PersistedBrdWorkspace({
     });
   };
 
+  const handleExportDocx = async () => {
+    if (!diagramId || !draft.trim()) return;
+    setError(null);
+    try {
+      const blob = await workspace.exportBrdDocx(diagramId, {
+        title: title.trim() || spec?.metadata.diagram_name || 'Business Requirements Document',
+        markdown_content: draft,
+      });
+      downloadBlob(blob, `${sanitizeFilename(title.trim() || 'BRD')}.docx`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Không thể export BRD DOCX.');
+    }
+  };
+
   return (
     <div className="persisted-brd">
       <section className="workspace-form-card persisted-brd__surface">
@@ -180,14 +193,6 @@ export default function PersistedBrdWorkspace({
             <button className="workspace-button" onClick={handleOpenDiagram}>
               Về Diagram
             </button>
-            {spec ? (
-              <button
-                className="workspace-button"
-                onClick={() => setIsEditingMarkdown((current) => !current)}
-              >
-                {isEditingMarkdown ? 'Ẩn editor markdown' : 'Chỉnh sửa markdown'}
-              </button>
-            ) : null}
             <button
               className="workspace-button primary"
               onClick={() => void handleGenerate()}
@@ -207,6 +212,13 @@ export default function PersistedBrdWorkspace({
                   : workspace.brdSaveState === 'failed'
                     ? 'Lưu lại'
                     : 'Lưu BRD'}
+            </button>
+            <button
+              className="workspace-button primary"
+              onClick={() => void handleExportDocx()}
+              disabled={!diagramId || !draft.trim()}
+            >
+              Export DOCX
             </button>
           </div>
         </div>
@@ -276,7 +288,9 @@ export default function PersistedBrdWorkspace({
                 </div>
               </header>
 
-              <div className="persisted-brd__document-body">{renderMarkdownDocument(draft)}</div>
+              <div className="persisted-brd__document-body">
+                <EditableMarkdownDocument markdown={draft} onChange={handleDraftChange} />
+              </div>
             </article>
 
             <aside className="persisted-brd__sidebar">
@@ -357,23 +371,6 @@ export default function PersistedBrdWorkspace({
                 )}
               </section>
 
-              {isEditingMarkdown ? (
-                <section className="persisted-brd__section persisted-brd__section--sidebar">
-                  <div className="workspace-section-heading">
-                    <div>
-                      <h3>BRD Markdown</h3>
-                      <p>Chỉnh trực tiếp nội dung artifact sẽ được lưu.</p>
-                    </div>
-                  </div>
-                  <textarea
-                    className="persisted-brd__draft"
-                    value={draft}
-                    onChange={(event) => handleDraftChange(event.target.value)}
-                    placeholder="BRD markdown sẽ xuất hiện ở đây."
-                  />
-                </section>
-              ) : null}
-
               <details className="persisted-brd__details">
                 <summary className="persisted-brd__details-summary">Structured Spec</summary>
                 <p className="persisted-brd__details-copy">Payload gốc để trace và review.</p>
@@ -396,7 +393,6 @@ export default function PersistedBrdWorkspace({
       setMetadata(null);
       setRequestId(null);
       setIsDirty(false);
-      setIsEditingMarkdown(false);
       return;
     }
     setTitle(savedBrd.title);
@@ -405,7 +401,6 @@ export default function PersistedBrdWorkspace({
     setWarnings(savedBrd.warnings);
     setTemplate(savedBrd.template);
     setIsDirty(false);
-    setIsEditingMarkdown(false);
     workspace?.markBrdLoaded(savedBrd.diagram_id);
   }
 }
@@ -425,6 +420,24 @@ function makeIdempotencyKey() {
     return `brd-${crypto.randomUUID()}`;
   }
   return `brd-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const revokeObjectUrl = URL.revokeObjectURL;
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  if (typeof revokeObjectUrl === 'function') {
+    setTimeout(() => revokeObjectUrl(url), 100);
+  }
+}
+
+function sanitizeFilename(value: string) {
+  return value.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'BRD';
 }
 
 function getSaveStateLabel(
