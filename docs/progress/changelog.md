@@ -102,6 +102,14 @@
   `src/application/AppRouter.tsx`, `playwright.config.ts`.
 
 ### Fixed
+- **AI BRD sample-style document contract and reader rendering**: generated BRDs no longer stay on
+  the old generic process-brief outline. The backend now emits a formal sample-inspired document
+  shape with business scope tables, actor catalog, use-case catalog, state catalogs, numbered
+  per-use-case sections, and figure placeholders; the persisted BRD reader now renders those
+  tables and captions as real document elements with controlled overflow. Xem
+  `apps/api/app/{schemas/request.py,schemas/spec.py,services/persistence_generation.py,services/render.py,services/spec_builder.py}`,
+  `apps/api/tests/test_pipeline.py`, `src/brd/{types.ts,markdown.tsx,PersistedBrdWorkspace.test.tsx}`,
+  `src/styles.css`.
 - **Persisted BRD reader-first presentation**: saved BRD artifacts no longer open into a debug-first
   view with raw JSON and textarea dominating the first viewport. The route now renders a styled
   BRD document surface, keeps markdown editing behind an explicit toggle, collapses

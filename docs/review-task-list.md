@@ -4798,6 +4798,81 @@ Review snapshot:
 
 ### Next
 
+#### TASK-201 - Redesign BRD document contract and backend renderer to match the sample template
+- Priority: P1
+- Status: Done (2026-06-10)
+- Module: brd-format-contract
+- Problem: The current BRD pipeline renders a fixed generic 10-section process brief. It does not
+  match the formal sample document at `examples/BRD.docx.md`, which expects business-scope tables,
+  use-case catalog sections, state catalogs, and per-use-case subsections.
+- Why it matters: As long as the schema and renderer target the wrong document shape, no prompt
+  tuning will make generated BRDs reliably follow the team’s sample format.
+- Implementation steps:
+  1. Turn `examples/BRD.docx.md` into a canonical target outline and map each section to a
+     domain-neutral BRD document contract.
+  2. Extend or split the current `DiagramBRDSpec` contract so it can represent at least:
+     business scope groups, actor catalog, merged use-case catalog, business state catalogs, per-UC
+     objectives, preconditions, main-flow rows, exception rows, and state/result summaries.
+  3. Update the BRD prompt/output path so AI or deterministic builders populate the new contract
+     without inventing unsupported sections.
+  4. Rewrite `render_brd_markdown()` to emit sample-aligned section numbering, subsection hierarchy,
+     and markdown tables instead of the current generic `Process overview` outline.
+  5. Add fixture/golden tests that compare the rendered document structure against the sample-style
+     outline and protect both `default` and `full` template modes.
+- Acceptance criteria:
+  - Generated BRD markdown uses the sample-like chapter hierarchy instead of the generic 10-section
+    outline.
+  - At least one golden fixture renders business-scope table, actor table, state table, and one
+    per-use-case section with subsection hierarchy.
+  - Prompt/schema/tests all describe the same document contract.
+- Dependencies: None
+- Verification: Focused backend pipeline/render tests, prompt registry tests, and one saved sample
+  artifact diff against expected markdown structure.
+- Implementation notes:
+  - Extended `DiagramBRDSpec` with formal document sections for scope groups, state catalogs,
+    use-case catalog, and per-use-case formal subsections.
+  - Persisted BRD generation now forwards project/feature/use-case context into the deterministic
+    builder so rendered markdown can label the document more like the sample.
+  - `render_brd_markdown()` now emits a sample-style formal outline with numbered chapters,
+    business tables, per-use-case subsections, figure placeholders, and a debug appendix only in
+    `template=full`.
+  - Backend verification passed: focused sample-structure regressions and full API mock suite
+    `91/91`.
+
+#### TASK-202 - Support sample-style tables and figures in the persisted BRD reader
+- Priority: P1
+- Status: Done (2026-06-10)
+- Module: brd-document-renderer
+- Problem: The persisted BRD page now reads like a document, but its local markdown renderer only
+  supports headings, paragraphs, lists, and rules. Sample-aligned BRDs rely heavily on tables and
+  figure/caption callouts.
+- Why it matters: Even if backend generation matches the sample template, the artifact page will
+  still degrade the document in the browser and fail the “looks like the sample” expectation.
+- Implementation steps:
+  1. Extend `src/brd/markdown.tsx` to parse and render markdown tables used by the BRD sample.
+  2. Add rendering support for figure/image placeholder blocks and captions sufficient for persisted
+     BRD review, even when no binary image is attached.
+  3. Tune persisted BRD CSS for table spacing, overflow handling, and subsection hierarchy so long
+     formal sections remain readable on desktop and narrow screens.
+  4. Add UI regressions with sample-like markdown covering table rendering, figure captions, and
+     overflow behavior.
+- Acceptance criteria:
+  - Persisted BRD page renders markdown tables as actual tables, not collapsed paragraphs.
+  - Sample-like figure/caption placeholders are visible and readable.
+  - Wide tables do not break the page layout horizontally.
+- Dependencies: TASK-201
+- Verification: `PersistedBrdWorkspace` tests, browser screenshot/regression of a sample-like BRD,
+  full `npm run test:ui-mock`, and `npm run build`.
+- Implementation notes:
+  - Rebuilt the local persisted BRD markdown renderer so it can parse/render markdown tables,
+    figure placeholders, captions, headings, lists, and rules from the new formal BRD output.
+  - Added document styles for wide tables, captioned figures, and dense formal sections without
+    breaking the persisted BRD layout.
+  - UI regressions now assert sample-like tables and figure blocks render in the reader-first BRD
+    page.
+  - Frontend verification passed: focused BRD renderer tests, full UI suite `96/96`, and
+    production build.
+
 #### TASK-198 - Add persisted BRD flow regressions for “no popup” and left-tree visibility
 - Priority: P2
 - Status: Todo

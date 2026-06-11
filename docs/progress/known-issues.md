@@ -21,6 +21,33 @@ Severity:
 
 ---
 
+## [FIXED] AI-generated BRD chưa bám format tài liệu mẫu `examples/BRD.docx.md` (severity: P1) {#open-brd-format-vs-sample-template}
+
+- **ID**: KI-44
+- **Phát hiện**: 2026-06-10 by Codex (targeted review)
+- **Severity**: P1 — BRD có thể đọc được, nhưng chưa đạt format formal mà team đang dùng làm mẫu,
+  nên chưa thể thay thế tài liệu chuẩn kỳ vọng.
+- **Reproduction**:
+  1. Mở file mẫu `examples/BRD.docx.md`.
+  2. So outline mẫu với output do `render_brd_markdown()` hiện tại sinh.
+  3. Quan sát output hiện tại dùng fixed generic sections `Process overview`, `Business objective`,
+     `Scope`, `Actors`, `Main workflow`, thay vì chapter/table/subsection theo mẫu.
+- **Root cause**: Mismatch nằm ở cả ba lớp:
+  1. Renderer backend khóa output thành generic 10-section BRD.
+  2. `DiagramBRDSpec` không có contract cho các section như use-case catalog, business states,
+     preconditions table, state-flow table per UC.
+  3. Frontend markdown renderer mới chỉ support heading/paragraph/list/rule, chưa support bảng/hình
+     mà file mẫu dùng nhiều.
+- **Fix**: Hoàn thành qua `TASK-201` và `TASK-202`: backend BRD contract/renderer giờ phát ra
+  sample-style formal document sections với scope table, actor table, use-case catalog, state
+  catalogs, per-use-case subsections và figure placeholders; frontend persisted BRD reader giờ
+  render markdown tables/captions/placeholders như tài liệu thay vì làm phẳng thành paragraph.
+- **Verified**: 2026-06-10 by Codex — focused backend sample-structure regressions pass, full API
+  mock suite pass `91/91`, persisted BRD/UI regressions pass `96/96`, `npm run build`, and
+  `git diff --check`. Review snapshot: `docs/reviews/2026-06-10-brd-format-vs-sample-review.md`.
+
+---
+
 ## [FIXED] Persisted BRD page ưu tiên JSON debug và không hiển thị như tài liệu đọc được (severity: P1) {#fixed-persisted-brd-presentation-debug-first}
 
 - **ID**: KI-43

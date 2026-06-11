@@ -60,6 +60,10 @@ def build_deterministic_spec(
     return {
         "metadata": {
             "diagram_name": payload["diagram_name"],
+            "project_name": payload.get("project_name"),
+            "feature_name": payload.get("feature_name"),
+            "source_use_case_key": payload.get("source_use_case_key"),
+            "source_use_case_title": payload.get("source_use_case_title"),
             "source_language": "vi",
             "generated_language": "vi",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -78,6 +82,22 @@ def build_deterministic_spec(
         "assumptions": interpreted["assumptions"],
         "open_questions": interpreted["open_questions"],
         "warnings": warnings,
+        "scope_groups": build_scope_groups(
+            main_flow_steps=main_flow_steps,
+            branches=interpreted["branches"],
+            handoffs=interpreted["handoffs"],
+            warnings=warnings,
+            loops=interpreted["loops"],
+        ),
+        "state_catalogs": build_state_catalogs(main_flow_steps, interpreted["branches"], warnings),
+        "use_case_catalog": build_use_case_catalog(payload, summary),
+        "formal_use_cases": build_formal_use_case_sections(
+            payload=payload,
+            main_flow_steps=main_flow_steps,
+            branches=interpreted["branches"],
+            warnings=warnings,
+            loops=interpreted["loops"],
+        ),
     }
 
 
@@ -99,10 +119,23 @@ def harmonize_generated_spec(
         "context_notes",
         "assumptions",
         "open_questions",
+        "scope_groups",
+        "state_catalogs",
+        "use_case_catalog",
+        "formal_use_cases",
     ):
         merged[field_name] = deterministic[field_name]
     merged["warnings"] = deterministic["warnings"]
     merged["summary"] = deterministic["summary"]
+    merged_metadata = merged.get("metadata", {})
+    deterministic_metadata = deterministic["metadata"]
+    merged["metadata"] = {
+        **merged_metadata,
+        "project_name": deterministic_metadata.get("project_name"),
+        "feature_name": deterministic_metadata.get("feature_name"),
+        "source_use_case_key": deterministic_metadata.get("source_use_case_key"),
+        "source_use_case_title": deterministic_metadata.get("source_use_case_title"),
+    }
     return DiagramBRDSpec.model_validate(merged)
 
 
@@ -485,3 +518,223 @@ def dedupe_preserve_order(items: list[str]) -> list[str]:
 
 def contains_any_keyword(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword in text for keyword in keywords)
+
+
+def build_scope_groups(
+    main_flow_steps: list[dict[str, Any]],
+    branches: list[dict[str, Any]],
+    handoffs: list[dict[str, Any]],
+    warnings: list[dict[str, Any]],
+    loops: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    groups: list[dict[str, str]] = []
+    if main_flow_steps:
+        first_step = main_flow_steps[0]
+        last_step = main_flow_steps[-1]
+        groups.append(
+            {
+                "group_name": "Luồng xử lý chính",
+                "detail": (
+                    f'Quy trình bao phủ từ bước "{first_step.get("step_title") or first_step.get("description")}" '
+                    f'đến bước "{last_step.get("step_title") or last_step.get("description")}".'
+                ),
+            }
+        )
+    if branches:
+        groups.append(
+            {
+                "group_name": "Điều hướng quyết định",
+                "detail": f"Quy trình có {len(branches)} điểm quyết định điều hướng nhánh xử lý.",
+            }
+        )
+    if handoffs:
+        groups.append(
+            {
+                "group_name": "Bàn giao giữa actor",
+                "detail": f"Có {len(handoffs)} điểm bàn giao công việc hoặc thông tin giữa các actor.",
+            }
+        )
+    if loops or warnings:
+        groups.append(
+            {
+                "group_name": "Ngoại lệ và cảnh báo",
+                "detail": "Tài liệu giữ lại các loop/cảnh báo để reviewer kiểm tra trước khi downstream sử dụng.",
+            }
+        )
+    if not groups:
+        groups.append(
+            {
+                "group_name": "Phạm vi nghiệp vụ",
+                "detail": "Tài liệu mô tả quy trình xử lý theo diagram hiện tại.",
+            }
+        )
+    return groups
+
+
+def build_state_catalogs(
+    main_flow_steps: list[dict[str, Any]],
+    branches: list[dict[str, Any]],
+    warnings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    lifecycle_entries: list[dict[str, str]] = []
+    if main_flow_steps:
+        lifecycle_entries.append(
+            {
+                "state": "Khởi phát xử lý",
+                "meaning": normalize_inline_text(
+                    main_flow_steps[0].get("input_or_trigger")
+                    or main_flow_steps[0].get("step_title")
+                    or "Quy trình bắt đầu khi có tín hiệu đầu vào."
+                ),
+            }
+        )
+        lifecycle_entries.append(
+            {
+                "state": "Đang xử lý",
+                "meaning": f"Các actor phối hợp thực hiện {len(main_flow_steps)} bước chính của quy trình.",
+            }
+        )
+        lifecycle_entries.append(
+            {
+                "state": "Hoàn tất",
+                "meaning": normalize_inline_text(
+                    main_flow_steps[-1].get("expected_result")
+                    or main_flow_steps[-1].get("step_title")
+                    or "Quy trình được khép lại theo kết quả cuối."
+                ),
+            }
+        )
+
+    decision_entries = [
+        {
+            "state": normalize_inline_text(branch.get("decision_text") or "Nhánh quyết định"),
+            "meaning": f"Có {len(branch.get('outcomes', []))} hướng xử lý được gắn với điểm quyết định này.",
+        }
+        for branch in branches
+    ]
+    if warnings:
+        decision_entries.append(
+            {
+                "state": "Cảnh báo review",
+                "meaning": f"Có {len(warnings)} warning cần được review cùng tài liệu.",
+            }
+        )
+
+    groups: list[dict[str, Any]] = []
+    if lifecycle_entries:
+        groups.append({"title": "5.1. Trạng thái luồng xử lý", "entries": lifecycle_entries})
+    if decision_entries:
+        groups.append({"title": "5.2. Trạng thái quyết định / review", "entries": decision_entries})
+    return groups
+
+
+def build_use_case_catalog(payload: dict[str, Any], summary: str) -> list[dict[str, str]]:
+    return [
+        {
+            "code": payload.get("source_use_case_key") or "UC-01",
+            "title": payload.get("source_use_case_title") or payload.get("diagram_name") or "Use case hiện tại",
+            "objective": normalize_inline_text(summary) or "Mô tả mục tiêu xử lý chính của quy trình.",
+        }
+    ]
+
+
+def build_formal_use_case_sections(
+    payload: dict[str, Any],
+    main_flow_steps: list[dict[str, Any]],
+    branches: list[dict[str, Any]],
+    warnings: list[dict[str, Any]],
+    loops: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    use_case_code = payload.get("source_use_case_key") or "UC-01"
+    use_case_title = payload.get("source_use_case_title") or payload.get("diagram_name") or "Use case hiện tại"
+
+    preconditions: list[dict[str, str]] = []
+    if main_flow_steps:
+        preconditions.append(
+            {
+                "name": "Đầu vào khả dụng",
+                "detail": normalize_inline_text(
+                    main_flow_steps[0].get("input_or_trigger")
+                    or "Quy trình đã có tín hiệu hoặc yêu cầu đầu vào để xử lý."
+                ),
+            }
+        )
+    preconditions.append(
+        {
+            "name": "Actor và dữ liệu liên quan sẵn sàng",
+            "detail": "Các actor trong diagram có đủ thông tin và quyền thao tác để tiếp tục xử lý.",
+        }
+    )
+
+    main_flow_rows = [
+        {
+            "step": str(index),
+            "actor": step.get("actor_name") or "Hệ thống",
+            "action": normalize_inline_text(
+                step.get("business_action") or step.get("step_title") or step.get("description")
+            ),
+            "outcome": normalize_inline_text(
+                step.get("expected_result") or step.get("step_purpose") or "Bước xử lý được hoàn tất."
+            ),
+        }
+        for index, step in enumerate(main_flow_steps, start=1)
+    ]
+
+    state_flow: list[str] = []
+    if main_flow_steps:
+        state_flow.append(
+            f'Luồng chính đi từ "{main_flow_steps[0].get("step_title") or main_flow_steps[0].get("description")}" '
+            f'đến "{main_flow_steps[-1].get("step_title") or main_flow_steps[-1].get("description")}".'
+        )
+    if branches:
+        state_flow.append(f"Có {len(branches)} điểm quyết định làm thay đổi hướng xử lý.")
+
+    exception_rows = [
+        {
+            "name": normalize_inline_text(branch.get("decision_text") or "Điểm quyết định"),
+            "detail": f"Có {len(branch.get('outcomes', []))} outcome cần được review trong nhánh này.",
+        }
+        for branch in branches
+    ]
+    exception_rows.extend(
+        {"name": "Cảnh báo", "detail": normalize_inline_text(warning.get("message") or "Warning phát sinh.")}
+        for warning in warnings
+    )
+    exception_rows.extend(
+        {"name": "Loop", "detail": normalize_inline_text(loop.get("note") or "Loop phát sinh trong diagram.")}
+        for loop in loops
+    )
+
+    outcome_rows: list[dict[str, str]] = []
+    if main_flow_steps:
+        outcome_rows.append(
+            {
+                "name": "Kết quả kỳ vọng",
+                "detail": normalize_inline_text(
+                    main_flow_steps[-1].get("expected_result")
+                    or main_flow_steps[-1].get("step_title")
+                    or "Quy trình khép lại theo kết quả cuối."
+                ),
+            }
+        )
+    if branches:
+        outcome_rows.append(
+            {
+                "name": "Kết quả theo nhánh",
+                "detail": "Các outcome của decision logic xác định hướng xử lý kế tiếp hoặc nhập lại luồng chính.",
+            }
+        )
+
+    return [
+        {
+            "code": use_case_code,
+            "title": use_case_title,
+            "objective": "Mô tả đầy đủ mục tiêu, điều kiện, luồng chính và ngoại lệ của use case theo diagram hiện tại.",
+            "preconditions": preconditions,
+            "main_flow_rows": main_flow_rows,
+            "state_flow": state_flow,
+            "exception_rows": exception_rows,
+            "outcome_rows": outcome_rows,
+            "figure_caption": f"Luồng chính xử lý cho {use_case_title}.",
+        }
+    ]

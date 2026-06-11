@@ -10,6 +10,10 @@ from .common import StrictBaseModel, WarningItem
 
 class SpecMetadata(StrictBaseModel):
     diagram_name: str
+    project_name: str | None = None
+    feature_name: str | None = None
+    source_use_case_key: str | None = None
+    source_use_case_title: str | None = None
     source_language: Literal["vi"] = "vi"
     generated_language: Literal["vi"] = "vi"
     generated_at: datetime
@@ -80,6 +84,51 @@ class LoopItem(StrictBaseModel):
     note: str
 
 
+class DocumentScopeItem(StrictBaseModel):
+    group_name: str
+    detail: str
+
+
+class DocumentStateItem(StrictBaseModel):
+    state: str
+    meaning: str
+
+
+class DocumentStateGroup(StrictBaseModel):
+    title: str
+    entries: list[DocumentStateItem] = Field(default_factory=list)
+
+
+class UseCaseCatalogItem(StrictBaseModel):
+    code: str
+    title: str
+    objective: str
+
+
+class NameDetailItem(StrictBaseModel):
+    name: str
+    detail: str
+
+
+class FlowTableRow(StrictBaseModel):
+    step: str
+    actor: str
+    action: str
+    outcome: str
+
+
+class FormalUseCaseSection(StrictBaseModel):
+    code: str
+    title: str
+    objective: str
+    preconditions: list[NameDetailItem] = Field(default_factory=list)
+    main_flow_rows: list[FlowTableRow] = Field(default_factory=list)
+    state_flow: list[str] = Field(default_factory=list)
+    exception_rows: list[NameDetailItem] = Field(default_factory=list)
+    outcome_rows: list[NameDetailItem] = Field(default_factory=list)
+    figure_caption: str | None = None
+
+
 class DiagramBRDSpec(StrictBaseModel):
     metadata: SpecMetadata
     summary: str
@@ -94,3 +143,7 @@ class DiagramBRDSpec(StrictBaseModel):
     assumptions: list[str] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
     warnings: list[WarningItem] = Field(default_factory=list)
+    scope_groups: list[DocumentScopeItem] = Field(default_factory=list)
+    state_catalogs: list[DocumentStateGroup] = Field(default_factory=list)
+    use_case_catalog: list[UseCaseCatalogItem] = Field(default_factory=list)
+    formal_use_cases: list[FormalUseCaseSection] = Field(default_factory=list)

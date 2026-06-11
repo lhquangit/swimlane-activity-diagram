@@ -48,14 +48,14 @@ def test_reader_facing_markdown_keeps_raw_ids_in_appendix_only(valid_generate_pa
     markdown_with_appendix = render_brd_markdown(spec, template="full")
     appendix = markdown_with_appendix.split("## Appendix A. Traceability (debug)")[1]
 
-    assert "## 2. Business objective" in reader_facing_markdown
+    assert "## 1. Mục đích tài liệu" in reader_facing_markdown
     assert "Mục tiêu nghiệp vụ được suy ra từ flow hiện tại" not in reader_facing_markdown
     assert "Bảo đảm sự kiện hoặc yêu cầu đầu vào được tiếp nhận đầy đủ" in reader_facing_markdown
-    assert "## 9. Exceptions / warnings" in reader_facing_markdown
-    assert "Loop: Phát hiện retry/escalation loop trong diagram." in reader_facing_markdown
-    assert "## 10. Context / assumptions / open questions" in reader_facing_markdown
+    assert "### 6.5. Luồng ngoại lệ" in reader_facing_markdown
+    assert "| Loop | Phát hiện retry/escalation loop trong diagram. |" in reader_facing_markdown
+    assert "Context / assumptions / open questions" in reader_facing_markdown
     assert 'Annotation: Note cho bước "Xử lý yêu cầu": Cần xác nhận BA' in reader_facing_markdown
-    assert "- VOC" in reader_facing_markdown
+    assert "| Actor | Vai trò |" in reader_facing_markdown
     assert "Có: Tiếp tục: [Nhân sự xử lý] Xử lý yêu cầu." in reader_facing_markdown
     assert "Quy trình bắt đầu khi có tín hiệu hoặc yêu cầu đầu vào; sau đó VOC tiếp nhận và điều phối xử lý ban đầu." in reader_facing_markdown
     assert "n-a1" not in reader_facing_markdown
@@ -297,7 +297,7 @@ def test_render_section_10_does_not_emit_empty_state_when_context_exists() -> No
 
     section_10 = render_brd_markdown(spec)
 
-    assert "## 10. Context / assumptions / open questions" in section_10
+    assert "Context / assumptions / open questions" in section_10
     assert "- Context: 1 trong 4 nhóm phát hiện dấu hiệu cháy." in section_10
     assert "  - Hệ thống tự động: Sensor báo khói, nhiệt" in section_10
     assert "  - Khán giả: Nút báo cháy" in section_10
@@ -521,7 +521,8 @@ def test_reader_facing_markdown_normalizes_multiline_canvas_text() -> None:
     assert "Xác minh sự cố là cháy thật?" in reader_facing_markdown
     assert "Báo cáo qua bộ đàm về kết quả xác minh cho các actor trong VOC" in reader_facing_markdown
     assert "Điều phối nhân viên hiện trường gần nhất qua bộ đàm đến điểm nghi vấn" in reader_facing_markdown
-    assert "- Không có hoạt động song song đáng kể." in reader_facing_markdown
+    assert "#### Hoạt động song song" not in reader_facing_markdown
+    assert "#### Handoffs" in reader_facing_markdown
     assert "Xác minh sự cố\nlà cháy thật?" not in reader_facing_markdown
     assert "kết quả xác minh\ncho các actor" not in reader_facing_markdown
     assert "gần nhất\nqua bộ đàm" not in reader_facing_markdown
@@ -544,12 +545,9 @@ def test_render_main_workflow_uses_brd_rich_step_format(valid_generate_payload: 
 
     markdown = render_brd_markdown(spec)
 
-    assert "## 5. Main workflow" in markdown
-    assert "1. [VOC] Tiếp nhận yêu cầu" in markdown
-    assert "   - Đầu vào / kích hoạt:" in markdown
-    assert "   - Mục đích:" in markdown
-    assert "   - Thực hiện:" in markdown
-    assert "   - Kết quả mong đợi:" in markdown
+    assert "### 6.3. Luồng chính" in markdown
+    assert "| Bước | Actor | Hành động | Kết quả / trạng thái |" in markdown
+    assert "| 1 | VOC | VOC tiếp nhận tín hiệu hoặc tin báo ban đầu từ nguồn khởi phát liên quan. |" in markdown
 
 
 def test_render_scope_actors_and_template_modes_support_reader_facing_brd(valid_generate_payload: dict) -> None:
@@ -570,16 +568,111 @@ def test_render_scope_actors_and_template_modes_support_reader_facing_brd(valid_
     default_markdown = render_brd_markdown(spec)
     full_markdown = render_brd_markdown(spec, template="full")
 
-    assert "## 3. Scope" in default_markdown
-    assert "- Điểm bắt đầu xử lý: [VOC] Tiếp nhận yêu cầu." in default_markdown
-    assert "- Điểm kết thúc chính: [Nhân sự xử lý] Kết thúc quy trình." in default_markdown
-    assert "- Phạm vi bao phủ:" in default_markdown
-    assert "## 4. Actors" in default_markdown
-    assert "  - Tiếp nhận, ghi nhận, và lưu vết thông tin ban đầu của quy trình." in default_markdown
-    assert "  - Kiểm tra, xác minh, và xác định hướng xử lý tiếp theo theo tình huống thực tế." in default_markdown
-    assert "  - Thực hiện hoặc theo dõi biện pháp xử lý phù hợp với tình huống đã được xác minh." in default_markdown
+    assert "## 2. Phạm vi nghiệp vụ" in default_markdown
+    assert "| Nhóm nghiệp vụ | Nội dung |" in default_markdown
+    assert "## 3. Actor" in default_markdown
+    assert "| Actor | Vai trò |" in default_markdown
+    assert "Tiếp nhận, ghi nhận, và lưu vết thông tin ban đầu của quy trình." in default_markdown
+    assert "Kiểm tra, xác minh, và xác định hướng xử lý tiếp theo theo tình huống thực tế." in default_markdown
+    assert "Thực hiện hoặc theo dõi biện pháp xử lý phù hợp với tình huống đã được xác minh." in default_markdown
     assert "## Appendix A. Traceability (debug)" not in default_markdown
     assert "## Appendix A. Traceability (debug)" in full_markdown
+
+
+def test_render_matches_sample_inspired_document_outline_and_tables() -> None:
+    spec = DiagramBRDSpec.model_validate(
+        {
+            "metadata": {
+                "diagram_name": "BQL xử lý camera re-id",
+                "source_language": "vi",
+                "generated_language": "vi",
+                "generated_at": "2026-06-10T09:00:00Z",
+                "generator_model": "openai/gpt-5.5",
+                "generator_version": "mock-deterministic-v1",
+            },
+            "summary": "Tài liệu mô tả quy trình BQL tiếp nhận, xác minh và xử lý yêu cầu camera re-id.",
+            "actors": [
+                {
+                    "lane_id": "lane-1",
+                    "actor_name": "Ban quản lý",
+                    "responsibilities": [
+                        "Tiếp nhận yêu cầu và xác minh thông tin ban đầu.",
+                        "Điều phối xử lý và xác nhận kết quả cuối cùng.",
+                    ],
+                },
+                {
+                    "lane_id": "lane-2",
+                    "actor_name": "Portal",
+                    "responsibilities": [
+                        "Lưu trạng thái xử lý, gửi thông báo và cập nhật dữ liệu hệ thống."
+                    ],
+                },
+            ],
+            "main_flow_steps": [
+                {
+                    "step_id": "S01",
+                    "node_id": "n-a1",
+                    "actor_lane_id": "lane-1",
+                    "actor_name": "Ban quản lý",
+                    "step_title": "Tiếp nhận yêu cầu",
+                    "step_purpose": "Ghi nhận thông tin đầu vào.",
+                    "business_action": "Mở chi tiết yêu cầu và kiểm tra dữ liệu.",
+                    "expected_result": "Yêu cầu sẵn sàng để xử lý tiếp.",
+                    "input_or_trigger": "Yêu cầu camera re-id mới.",
+                    "description": "Tiếp nhận yêu cầu",
+                },
+                {
+                    "step_id": "S02",
+                    "node_id": "n-a2",
+                    "actor_lane_id": "lane-2",
+                    "actor_name": "Portal",
+                    "step_title": "Cập nhật kết quả",
+                    "step_purpose": "Lưu kết quả xử lý.",
+                    "business_action": "Cập nhật trạng thái và gửi thông báo.",
+                    "expected_result": "Cư dân nhận được trạng thái cuối.",
+                    "input_or_trigger": "BQL đã xác nhận kết quả.",
+                    "description": "Cập nhật kết quả",
+                },
+            ],
+            "branches": [
+                {
+                    "decision_node_id": "n-dec1",
+                    "decision_text": "Thông tin hợp lệ?",
+                    "decision_actor_name": "Ban quản lý",
+                    "outcomes": [
+                        {
+                            "label": "Có",
+                            "target_node_id": "n-a2",
+                            "status": "labeled",
+                            "path_summary": ["[Portal] Cập nhật kết quả"],
+                            "continues_main_flow": True,
+                        }
+                    ],
+                }
+            ],
+            "parallel_blocks": [],
+            "handoffs": [],
+            "loops": [],
+            "annotations": [],
+            "context_notes": [],
+            "assumptions": [],
+            "open_questions": [],
+            "warnings": [],
+        }
+    )
+
+    markdown = render_brd_markdown(spec)
+
+    assert "## 1. Mục đích tài liệu" in markdown
+    assert "## 2. Phạm vi nghiệp vụ" in markdown
+    assert "| Nhóm nghiệp vụ | Nội dung |" in markdown
+    assert "## 3. Actor" in markdown
+    assert "| Actor | Vai trò |" in markdown
+    assert "## 4. Danh sách user case trong tài liệu" in markdown
+    assert "| Mã UC | Tên user case | Mục tiêu |" in markdown
+    assert "## 6. UC-01:" in markdown
+    assert "| Bước | Actor | Hành động | Kết quả / trạng thái |" in markdown
+    assert "![Hình 1]" in markdown
 
 
 def test_non_branching_sync_bar_does_not_create_parallel_block() -> None:

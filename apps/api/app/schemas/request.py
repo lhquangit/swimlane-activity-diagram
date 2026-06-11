@@ -42,6 +42,10 @@ class DiagramSemanticRequest(StrictBaseModel):
 class GenerateRequest(StrictBaseModel):
     diagram_id: str | None = None
     diagram_name: str
+    project_name: str | None = None
+    feature_name: str | None = None
+    source_use_case_key: str | None = None
+    source_use_case_title: str | None = None
     language: Literal["vi"] = "vi"
     lanes: list[LaneInput]
     nodes: list[NodeInput]

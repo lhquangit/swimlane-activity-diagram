@@ -48,6 +48,10 @@ export type ValidationResult = {
 export type BrdSpec = {
   metadata: {
     diagram_name: string;
+    project_name?: string | null;
+    feature_name?: string | null;
+    source_use_case_key?: string | null;
+    source_use_case_title?: string | null;
     source_language: 'vi';
     generated_language: 'vi';
     generated_at: string;
@@ -115,6 +119,47 @@ export type BrdSpec = {
   assumptions: string[];
   open_questions: string[];
   warnings: WarningItem[];
+  scope_groups?: Array<{
+    group_name: string;
+    detail: string;
+  }>;
+  state_catalogs?: Array<{
+    title: string;
+    entries: Array<{
+      state: string;
+      meaning: string;
+    }>;
+  }>;
+  use_case_catalog?: Array<{
+    code: string;
+    title: string;
+    objective: string;
+  }>;
+  formal_use_cases?: Array<{
+    code: string;
+    title: string;
+    objective: string;
+    preconditions: Array<{
+      name: string;
+      detail: string;
+    }>;
+    main_flow_rows: Array<{
+      step: string;
+      actor: string;
+      action: string;
+      outcome: string;
+    }>;
+    state_flow: string[];
+    exception_rows: Array<{
+      name: string;
+      detail: string;
+    }>;
+    outcome_rows: Array<{
+      name: string;
+      detail: string;
+    }>;
+    figure_caption?: string | null;
+  }>;
 };
 
 export type GenerateResult = {

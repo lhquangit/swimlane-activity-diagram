@@ -138,9 +138,17 @@ def stored_generate_request(diagram: Diagram, template: str = "default") -> Gene
         }
         for edge in diagram.graph_data.get("edges", [])
     ]
+    use_case = diagram.use_case
+    feature = use_case.feature_intent
+    spec = feature.spec
+    project = spec.project
     return GenerateRequest(
         diagram_id=str(diagram.id),
         diagram_name=diagram.title,
+        project_name=project.name,
+        feature_name=feature.name,
+        source_use_case_key=use_case.use_case_key,
+        source_use_case_title=use_case.title,
         language="vi",
         lanes=lanes,
         nodes=nodes,

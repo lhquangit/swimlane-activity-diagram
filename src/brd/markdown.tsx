@@ -5,11 +5,24 @@ type MarkdownListItem = {
   children: string[];
 };
 
+type MarkdownTable = {
+  headers: string[];
+  rows: string[][];
+};
+
+type MarkdownFigure = {
+  alt: string;
+  src: string;
+  caption: string | null;
+};
+
 type MarkdownBlock =
   | { type: 'heading'; level: number; text: string }
   | { type: 'paragraph'; text: string }
   | { type: 'unordered-list'; items: MarkdownListItem[] }
   | { type: 'ordered-list'; items: MarkdownListItem[] }
+  | { type: 'table'; table: MarkdownTable }
+  | { type: 'figure'; figure: MarkdownFigure }
   | { type: 'rule' };
 
 export function renderMarkdownDocument(markdown: string): ReactNode {
@@ -33,6 +46,10 @@ export function renderMarkdownDocument(markdown: string): ReactNode {
         return renderList(block.items, 'ul', key);
       case 'ordered-list':
         return renderList(block.items, 'ol', key);
+      case 'table':
+        return renderTable(block.table, key);
+      case 'figure':
+        return renderFigure(block.figure, key);
       case 'rule':
         return <hr key={key} className="persisted-brd__document-rule" />;
     }
@@ -93,6 +110,45 @@ function renderList(items: MarkdownListItem[], kind: 'ul' | 'ol', key: string) {
   );
 }
 
+function renderTable(table: MarkdownTable, key: string) {
+  return (
+    <div key={key} className="persisted-brd__document-table-wrap">
+      <table className="persisted-brd__document-table">
+        <thead>
+          <tr>
+            {table.headers.map((header, index) => (
+              <th key={`${key}-head-${index}`}>{header}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((row, rowIndex) => (
+            <tr key={`${key}-row-${rowIndex}`}>
+              {row.map((cell, cellIndex) => (
+                <td key={`${key}-row-${rowIndex}-cell-${cellIndex}`}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function renderFigure(figure: MarkdownFigure, key: string) {
+  return (
+    <figure key={key} className="persisted-brd__document-figure">
+      <div className="persisted-brd__document-figure-placeholder" aria-label={figure.alt}>
+        <span>{figure.alt}</span>
+        <small>{figure.src}</small>
+      </div>
+      {figure.caption ? (
+        <figcaption className="persisted-brd__document-caption">{figure.caption}</figcaption>
+      ) : null}
+    </figure>
+  );
+}
+
 function parseMarkdown(markdown: string): MarkdownBlock[] {
   const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
   const blocks: MarkdownBlock[] = [];
@@ -125,6 +181,31 @@ function parseMarkdown(markdown: string): MarkdownBlock[] {
       continue;
     }
 
+    const figureMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (figureMatch) {
+      const nextTrimmed = lines[index + 1]?.trim() ?? '';
+      const caption = /^Hình\s+\d+:/i.test(nextTrimmed) || /^Figure\s+\d+:/i.test(nextTrimmed)
+        ? nextTrimmed
+        : null;
+      blocks.push({
+        type: 'figure',
+        figure: {
+          alt: figureMatch[1].trim() || 'Hình minh họa',
+          src: figureMatch[2].trim(),
+          caption,
+        },
+      });
+      index += caption ? 2 : 1;
+      continue;
+    }
+
+    if (isTableHeader(trimmed, lines[index + 1]?.trim() ?? '')) {
+      const { table, nextIndex } = parseTable(lines, index);
+      blocks.push({ type: 'table', table });
+      index = nextIndex;
+      continue;
+    }
+
     if (unorderedListMatch(trimmed)) {
       const { items, nextIndex } = parseList(lines, index, 'unordered-list');
       blocks.push({ type: 'unordered-list', items });
@@ -147,6 +228,8 @@ function parseMarkdown(markdown: string): MarkdownBlock[] {
         !nextTrimmed ||
         nextTrimmed.match(/^(#{1,6})\s+(.+)$/) ||
         /^---+$/.test(nextTrimmed) ||
+        /^!\[([^\]]*)\]\(([^)]+)\)$/.test(nextTrimmed) ||
+        isTableHeader(nextTrimmed, lines[index + 1]?.trim() ?? '') ||
         unorderedListMatch(nextTrimmed) ||
         orderedListMatch(nextTrimmed)
       ) {
@@ -204,6 +287,40 @@ function parseList(
   }
 
   return { items, nextIndex: index };
+}
+
+function parseTable(lines: string[], startIndex: number): { table: MarkdownTable; nextIndex: number } {
+  const headers = parseTableCells(lines[startIndex].trim());
+  const rows: string[][] = [];
+  let index = startIndex + 2;
+
+  while (index < lines.length) {
+    const trimmed = lines[index].trim();
+    if (!trimmed || !trimmed.includes('|')) break;
+    rows.push(parseTableCells(trimmed));
+    index += 1;
+  }
+
+  return { table: { headers, rows }, nextIndex: index };
+}
+
+function parseTableCells(line: string) {
+  return line
+    .split('|')
+    .map((part) => part.trim())
+    .filter((part, index, parts) => !(index === 0 && part === '') && !(index === parts.length - 1 && part === ''));
+}
+
+function isTableHeader(line: string, nextLine: string) {
+  const normalizedLine = line.trim();
+  const normalizedNextLine = nextLine.trim();
+  return (
+    normalizedLine.startsWith('|') &&
+    normalizedLine.endsWith('|') &&
+    normalizedNextLine.startsWith('|') &&
+    normalizedNextLine.endsWith('|') &&
+    normalizedNextLine.includes('---')
+  );
 }
 
 function unorderedListMatch(value: string) {

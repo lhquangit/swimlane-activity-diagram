@@ -172,7 +172,7 @@ describe('PersistedBrdWorkspace', () => {
         title: 'Camera Re-ID',
         structured_spec: spec,
         markdown_content:
-          '# Camera Re-ID\n\n## 1. Process overview\nGenerated summary.\n\n## 4. Actors\n- Camera AI',
+          '# Camera Re-ID\n\n## 1. Mục đích tài liệu\nGenerated summary.\n\n## 2. Phạm vi nghiệp vụ\n| Nhóm nghiệp vụ | Nội dung |\n| :---- | :---- |\n| Xử lý yêu cầu | Camera AI tiếp nhận và xử lý. |\n\n## 6. UC-001: Camera Re-ID flow\n![Hình 1](placeholder://uc-001-main-flow)\nHình 1: Luồng chính xử lý camera re-id.\n\n| Bước | Actor | Hành động | Kết quả / trạng thái |\n| :---- | :---- | :---- | :---- |\n| 1 | Camera AI | Tiếp nhận yêu cầu | Yêu cầu sẵn sàng xử lý |',
         warnings: [],
         template: 'default' as const,
         source_diagram_updated_at: '2026-06-09T00:00:00Z',
@@ -211,13 +211,18 @@ describe('PersistedBrdWorkspace', () => {
       </WorkspacePersistenceProvider>,
     );
 
-    expect(await screen.findByRole('heading', { name: '1. Process overview' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: '1. Mục đích tài liệu' })).toBeVisible();
     expect(screen.getByText('Generated summary.')).toBeVisible();
+    const tables = screen.getAllByRole('table');
+    expect(tables).toHaveLength(2);
+    expect(tables[0]).toBeVisible();
+    expect(tables[1]).toBeVisible();
+    expect(screen.getByText('Hình 1: Luồng chính xử lý camera re-id.')).toBeVisible();
     expect(screen.queryByPlaceholderText('BRD markdown sẽ xuất hiện ở đây.')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Chỉnh sửa markdown' }));
     expect(screen.getByPlaceholderText('BRD markdown sẽ xuất hiện ở đây.')).toHaveValue(
-      '# Camera Re-ID\n\n## 1. Process overview\nGenerated summary.\n\n## 4. Actors\n- Camera AI',
+      '# Camera Re-ID\n\n## 1. Mục đích tài liệu\nGenerated summary.\n\n## 2. Phạm vi nghiệp vụ\n| Nhóm nghiệp vụ | Nội dung |\n| :---- | :---- |\n| Xử lý yêu cầu | Camera AI tiếp nhận và xử lý. |\n\n## 6. UC-001: Camera Re-ID flow\n![Hình 1](placeholder://uc-001-main-flow)\nHình 1: Luồng chính xử lý camera re-id.\n\n| Bước | Actor | Hành động | Kết quả / trạng thái |\n| :---- | :---- | :---- | :---- |\n| 1 | Camera AI | Tiếp nhận yêu cầu | Yêu cầu sẵn sàng xử lý |',
     );
 
     fireEvent.click(screen.getByText('Structured Spec'));
